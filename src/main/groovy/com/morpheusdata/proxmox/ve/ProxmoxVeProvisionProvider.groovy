@@ -608,7 +608,7 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 					actualStorage = server.volumes.find {it.rootVolume }?.datastore?.externalId
 				}
 				log.debug("Using storage '$actualStorage' for Cloud-Init drive")
-				ProxmoxSshUtil.createCloudInitDrive(context, hvNode, workloadRequest, rtnClone.data.vmId, actualStorage)
+				ProxmoxSshUtil.createCloudInitDrive(context, client, authConfig, hvNode, workloadRequest, rtnClone.data.vmId, actualStorage)
 			} else {
 				log.debug("Non Cloud-Init deployment...")
 			}

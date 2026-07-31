@@ -167,13 +167,13 @@ class ProxmoxNetworkProvider implements NetworkProvider, CloudInitializationProv
 	@Override
 	ServiceResponse createSubnet(NetworkSubnet subnet, Network network, Map opts) {
 		log.debug("NVR: CREATE SUBNET")
-		return ServiceResponse.success()	
+		return ServiceResponse.success(subnet)
 	}
 	
 	@Override
 	ServiceResponse updateSubnet(NetworkSubnet subnet, Network network, Map opts) {
 		log.debug("NVR: UPDATE SUBNET")
-		return ServiceResponse.success()	
+		return ServiceResponse.success(subnet)
 	}
 	
 	@Override
@@ -196,7 +196,7 @@ class ProxmoxNetworkProvider implements NetworkProvider, CloudInitializationProv
 	@Override
 	ServiceResponse validateNetwork(Network network, Map opts) {
 		log.debug("NVR: VALIDATE NETWORK")
-		return ServiceResponse.success();
+		return ServiceResponse.success(network)
 	}
 
 	@Override

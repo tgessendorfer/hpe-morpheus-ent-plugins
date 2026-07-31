@@ -24,7 +24,9 @@ class ProxmoxSshUtil {
     static Integer DEFAULT_TEMPLATE_CPUS = 1
     static Long DEFAULT_TEMPLATE_MEMORY = 1024L
 
-    static void createCloudInitDrive(MorpheusContext context, ComputeServer hvNode, WorkloadRequest workloadRequest, String vmId, String datastoreId) {
+    static void createCloudInitDrive(MorpheusContext context, HttpApiClient client, Map authConfig,
+                                     ComputeServer hvNode, WorkloadRequest workloadRequest,
+                                     String vmId, String datastoreId) {
         log.debug("Configuring Cloud-Init")
         log.debug("Ensuring snippets directory on node: $hvNode.externalId")
         runSshCmd(context, hvNode, "mkdir -p /var/lib/vz/snippets")
@@ -32,8 +34,15 @@ class ProxmoxSshUtil {
         ProxmoxMiscUtil.sftpCreateFile(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "/var/lib/vz/snippets/$vmId-cloud-init-user-data.yml", workloadRequest.cloudConfigUser, null)
         log.debug("Creating cloud-init network file on hypervisor node: /var/lib/vz/snippets/$vmId-cloud-init-network.yml")
         ProxmoxMiscUtil.sftpCreateFile(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "/var/lib/vz/snippets/$vmId-cloud-init-network.yml", workloadRequest.cloudConfigNetwork, null)
-        log.debug("Creating cloud-init vm disk: $datastoreId:cloudinit")
-        runSshCmd(context, hvNode, "qm set $vmId --ide2 $datastoreId:cloudinit")
+        String existingCloudInitVolume = ProxmoxApiComputeUtil.findCloudInitVolume(
+                client, authConfig, hvNode.externalId, datastoreId, vmId)
+        if (existingCloudInitVolume) {
+            log.info("Reattaching existing cloud-init volume $existingCloudInitVolume")
+            runSshCmd(context, hvNode, "qm set $vmId --ide2 $existingCloudInitVolume,media=cdrom")
+        } else {
+            log.debug("Creating cloud-init vm disk: $datastoreId:cloudinit")
+            runSshCmd(context, hvNode, "qm set $vmId --ide2 $datastoreId:cloudinit")
+        }
         log.debug("Mounting cloud-init data to disk...")
         String ciMountCommand = "qm set $vmId --cicustom \"user=local:snippets/$vmId-cloud-init-user-data.yml,network=local:snippets/$vmId-cloud-init-network.yml\""
         runSshCmd(context, hvNode, ciMountCommand)
@@ -64,19 +73,27 @@ class ProxmoxSshUtil {
         log.debug("Creating template from image on node $hvNode.name, datastore $targetDS")
 
         ServiceResponse templateResp = ProxmoxApiComputeUtil.createImageTemplate(client, authConfig, virtualImage.name, hvNode.externalId, DEFAULT_TEMPLATE_CPUS, DEFAULT_TEMPLATE_MEMORY)
+        if (!templateResp?.success || !templateResp?.data?.templateId) {
+            throw new Exception("Failed to create template shell for ${virtualImage.name}: ${templateResp?.msg ?: 'no VM ID returned'}")
+        }
         def imageExternalId = templateResp.data.templateId
 
-        TaskResult importResult = context.executeSshCommand(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "qm importdisk $imageExternalId $remoteImagePath $targetDS", "", "", "", false, LogLevel.info, true, null, false).blockingGet()
+        // Canonical syntax in current Proxmox VE, including PVE 9.
+        TaskResult importResult = context.executeSshCommand(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "qm disk import $imageExternalId $remoteImagePath $targetDS", "", "", "", false, LogLevel.info, true, null, false).blockingGet()
         
         if (!importResult.success) {
-            log.error("SSH FAILED on ${hvNode.sshHost}: qm importdisk | Exit Code: ${importResult.exitCode} | Output: ${importResult.output} | Error: ${importResult.error}")
+            log.error("SSH FAILED on ${hvNode.sshHost}: qm disk import | Exit Code: ${importResult.exitCode} | Output: ${importResult.output} | Error: ${importResult.error}")
             throw new Exception("Failed to import disk for template $imageExternalId: ${importResult.error}")
         }
         
-        String diskId = null
-        if (importResult?.data) {
-            //def matcher = importResult.data =~ /unused\d+:(.+?)['"\s]/
-            def matcher = importResult.data =~ /imported disk ['"]([^'"]+)['"]/
+        String diskId = ProxmoxApiComputeUtil.getUnusedVMDisks(client, authConfig, hvNode.externalId, imageExternalId)?.last()?.volumeId
+        if (diskId) {
+            log.info("Detected imported disk identifier from VM configuration: ${diskId}")
+        }
+
+        String importOutput = importResult?.output ?: importResult?.data
+        if (!diskId && importOutput) {
+            def matcher = importOutput =~ /imported disk ['"]([^'"]+)['"]/
             if (matcher.find()) {  
                 diskId = matcher.group(1)
                 log.info("Detected imported disk identifier from output: ${diskId}")

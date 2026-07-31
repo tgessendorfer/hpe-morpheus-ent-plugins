@@ -64,6 +64,52 @@ class ProxmoxApiComputeUtil {
         return nicInterfaces
     }
 
+    /** Return imported disks which have not yet been attached to a VM bus. */
+    static List<Map> getUnusedVMDisks(HttpApiClient client, Map authConfig, String nodeId, String vmId) {
+        ServiceResponse vmConfigInfo = callListApiV2(client, "nodes/$nodeId/qemu/$vmId/config", authConfig)
+        if (!vmConfigInfo?.success || !(vmConfigInfo.data instanceof Map)) {
+            return []
+        }
+
+        return vmConfigInfo.data.findAll { key, value ->
+            key ==~ /unused\d+/ && value instanceof String && value.contains(':')
+        }.collect { key, value ->
+            [label: key, volumeId: value.toString().split(',', 2)[0]]
+        }.sort { left, right -> left.label <=> right.label }
+    }
+
+    static Map parseProxmoxVersion(String version) {
+        def matcher = (version ?: '') =~ /^(\d+)\.(\d+)(?:\.(\d+))?/
+        if (!matcher.find()) return [:]
+        return [major: matcher.group(1).toInteger(), minor: matcher.group(2).toInteger(),
+                patch: matcher.group(3) ? matcher.group(3).toInteger() : 0]
+    }
+
+    static ServiceResponse getProxmoxVersion(HttpApiClient client, Map authConfig) {
+        return callListApiV2(client, 'version', authConfig)
+    }
+
+    static String findCloudInitVolume(HttpApiClient client, Map authConfig, String nodeId,
+                                      String datastoreId, String vmId) {
+        ServiceResponse contentResponse = callListApiV2(
+                client,
+                "nodes/$nodeId/storage/$datastoreId/content?content=images&vmid=$vmId",
+                authConfig
+        )
+        if (!contentResponse?.success || !(contentResponse.data instanceof Collection)) {
+            return null
+        }
+
+        return findCloudInitVolumeId(contentResponse.data, vmId)
+    }
+
+    static String findCloudInitVolumeId(Collection storageContent, String vmId) {
+        String expectedName = "vm-$vmId-cloudinit"
+        return storageContent?.find { item ->
+            item?.volid?.toString()?.contains(expectedName)
+        }?.volid?.toString()
+    }
+
 
     static removeNetworkInterfaces(HttpApiClient client, Map authConfig, List<ComputeServerInterface> deletedNics, String node, String vmId) {
         log.debug("deleteVolumes")
@@ -1352,7 +1398,7 @@ class ProxmoxApiComputeUtil {
     }
     
     
-    private static ServiceResponse callListApiV2(HttpApiClient client, String path, Map authConfig) {
+    static ServiceResponse callListApiV2(HttpApiClient client, String path, Map authConfig) {
         log.debug("callListApiV2: path: ${path}")
 
         def tokenCfg = getApiV2Token(authConfig).data
@@ -1402,7 +1448,7 @@ class ProxmoxApiComputeUtil {
     }
 
 
-    private static ServiceResponse getApiV2Token(Map authConfig) {
+    static ServiceResponse getApiV2Token(Map authConfig) {
         def path = "access/ticket"
         //log.debug("getApiV2Token: path: ${path}")
         HttpApiClient client = new HttpApiClient()

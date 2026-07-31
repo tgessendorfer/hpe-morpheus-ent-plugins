@@ -410,7 +410,16 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 			log.debug("Cloud Validation: Attempting authentication to populate access token and csrf token.")
 			def tokenTest = ProxmoxApiComputeUtil.getApiV2Token([username: username, password: password, apiUrl: baseUrl, v2basePath: ProxmoxVePlugin.V2_BASE_PATH])
 			if (tokenTest.success) {
-				return new ServiceResponse(success: true, msg: 'Cloud connection validated using provided credentials and URL...')
+				Map authConfig = [username: username, password: password, apiUrl: baseUrl, v2basePath: ProxmoxVePlugin.V2_BASE_PATH]
+				ServiceResponse versionResponse = ProxmoxApiComputeUtil.getProxmoxVersion(new HttpApiClient(), authConfig)
+				Map parsedVersion = ProxmoxApiComputeUtil.parseProxmoxVersion(versionResponse?.data?.version?.toString())
+				if (!versionResponse.success || !parsedVersion.major) {
+					return new ServiceResponse(success: false, msg: 'Authenticated, but unable to determine the Proxmox VE version.')
+				}
+				if (parsedVersion.major < 8 || parsedVersion.major > 9) {
+					return new ServiceResponse(success: false, msg: "Unsupported Proxmox VE version ${versionResponse.data.version}. This plugin supports versions 8 and 9.")
+				}
+				return new ServiceResponse(success: true, msg: "Cloud connection validated against Proxmox VE ${versionResponse.data.version}.")
 			} else {
 				return new ServiceResponse(success: false, msg: 'Unable to validate cloud connection using provided credentials and URL')
 			}

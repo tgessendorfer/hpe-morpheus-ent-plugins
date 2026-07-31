@@ -1,4 +1,4 @@
-﻿# Proxmox VE 8 Community Morpheus Cloud Plugin
+﻿# Proxmox VE 8 and 9 Community Morpheus Cloud Plugin
 
 <u>This is a COMMUNITY maintained plugin WITHOUT official Morpheus support.</u>
 
@@ -29,7 +29,7 @@ then exposes VM Instance provisioning functionality.
 * Java 17
 * Gradle (the included `gradlew` wrapper should be used for compiling)
 * Morpheus appliance version 8.0.0 or later
-* Access to a running Proxmox VE environment
+* Access to a running Proxmox VE 8.x or 9.x environment
 * SSH user and password access to each node host, from the Morpheus appliance. (Interim, keys to be added)
 
 
@@ -57,7 +57,7 @@ The shaded jar will be written to `build/libs/` as `proxmox-ve-<version>-all.jar
 This project is licensed under the Apache 2.0 License. See the [LICENSE](LICENSE) file for details.
 
 ## Installing
-Upload the compiled `Proxmox8-x.x.x-all.jar` from the `build/libs/` directory under `Administration > Integrations > Plugins` UI location.
+Upload the compiled `proxmox-ve-x.x.x-all.jar` from the `build/libs/` directory under `Administration > Integrations > Plugins` UI location.
 
 ![Upload](docs/upload_plugin.png)
 
