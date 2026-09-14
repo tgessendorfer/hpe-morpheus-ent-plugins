@@ -28,6 +28,12 @@ import groovy.util.logging.Slf4j
 @Slf4j
 class AnthropicPlugin extends Plugin {
 
+	// plugin_instance.description holds 255 characters. A longer text does not get
+	// truncated - the whole plugin registration fails with "Data too long for column
+	// 'description'", and the appliance keeps running the previous build.
+	static final String DESCRIPTION = 'Anthropic Claude for Morpheus AI agents via the native Messages API - direct, ' +
+		'or through OpenRouter with Claude models only. Other OpenRouter models belong to a separate OpenRouter plugin.'
+
 	@Override
 	String getCode() {
 		return 'morpheus-anthropic-plugin'
@@ -36,6 +42,10 @@ class AnthropicPlugin extends Plugin {
 	@Override
 	void initialize() {
 		this.setName('Anthropic Claude')
+		// Shown in the plugin list; the manifest's Morpheus-Description is not read there.
+		this.setDescription(DESCRIPTION)
+		this.setAuthor('Thomas Gessendorfer')
+		this.setWebsiteUrl('https://github.com/tgessendorfer/morpheus-anthropic-plugin')
 		AnthropicProvider anthropicProvider = new AnthropicProvider(this, morpheus)
 		this.pluginProviders.put(anthropicProvider.code, anthropicProvider)
 	}

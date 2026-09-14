@@ -114,6 +114,41 @@ class AnthropicApiServiceSpec extends Specification {
 		!AnthropicApiService.MODELS_PATH.contains('?')
 	}
 
+	def "ASCII-only JSON keeps emoji and umlauts decodable"() {
+		expect:
+		AnthropicApiService.toAsciiJson([text: 'Läuft 👋']) ==~ /[\x00-\x7E]*/
+		new groovy.json.JsonSlurper().parseText(AnthropicApiService.toAsciiJson([text: 'Läuft 👋'])).text == 'Läuft 👋'
+	}
+
+	def "a request body with non-ASCII text leaves as valid UTF-8"() {
+		given: 'a local endpoint that keeps the raw request bytes'
+		byte[] received = null
+		com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(new InetSocketAddress('127.0.0.1', 0), 0)
+		server.createContext('/v1/messages', { com.sun.net.httpserver.HttpExchange exchange ->
+			received = exchange.requestBody.bytes
+			byte[] body = '{"type":"message","content":[]}'.getBytes('UTF-8')
+			exchange.responseHeaders.add('Content-Type', 'application/json')
+			exchange.sendResponseHeaders(200, body.length)
+			exchange.responseBody.withStream { it.write(body) }
+		} as com.sun.net.httpserver.HttpHandler)
+		server.start()
+
+		when:
+		new AnthropicApiService().createMessage("http://127.0.0.1:${server.address.port}", 'sk-ant-test',
+			[model: 'claude-sonnet-5', max_tokens: 1, messages: [[role: 'user', content: 'Antworte mit dem Wort Läuft für „alle“']]])
+
+		then: 'the bytes are plain ASCII, so no Morpheus version can re-encode them wrongly'
+		received != null
+		received.every { byte b -> b >= 0 }
+
+		and: 'they parse as the JSON that was built, text intact'
+		def json = new groovy.json.JsonSlurper().parseText(new String(received, 'US-ASCII'))
+		json.messages[0].content == 'Antworte mit dem Wort Läuft für „alle“'
+
+		cleanup:
+		server.stop(0)
+	}
+
 	def "a JSON response without a charset is read as UTF-8"() {
 		given: 'a local endpoint answering like OpenRouter and api.anthropic.com do: application/json, no charset'
 		com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(new InetSocketAddress('127.0.0.1', 0), 0)

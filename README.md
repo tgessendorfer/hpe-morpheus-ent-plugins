@@ -182,8 +182,9 @@ Fill in:
 | **Thinking Budget** | only when thinking is on; must be below max output tokens |
 | **Enable 1M Token Context** | off by default; Sonnet 4.5+ only |
 | **Send temperature and top_p** | **leave off.** Morpheus sends a temperature on every chat request and newer Claude models reject it — see [below](#why-sampling-parameters-are-off-by-default) |
-| **Append token usage to answers** | optional. Adds an italic token line to each final answer — the only way to see caching without the appliance log |
+| **Append token usage to answers** | optional. Adds an italic token line to each final answer — the only way to see caching without the appliance log. Through OpenRouter it shows the cost of the whole question instead |
 | **Enable Web Search and Fetch** | optional. Lets the agent answer from the live web — see [Web search](#web-search--answering-from-outside-the-appliance) |
+| **Filter Search Results with Code Execution** | off. Saves tokens on search-heavy research, but slows MCP-backed agents down — see [why](#what-it-costs-and-what-it-does-not-constrain) |
 | **Max Web Searches per Request** | `5`. The only ceiling on what a looping agent can spend on search |
 | **Restrict to Domains** | optional allow list, e.g. `docs.morpheusdata.com, community.hpe.com` |
 
@@ -333,9 +334,10 @@ Only final answers get it. A turn that ends in a tool call is replayed to Anthro
 history on the next request, so a footer there would enter the model's own context and be re-billed
 every turn after. Final answers are replayed too, on the next question, so the provider strips the
 footer from them before sending: a model that can read its earlier footers starts writing its own,
-with invented numbers, above the real one. The line is deliberately plain ASCII: Morpheus' storage path corrupts non-ASCII
-characters on that replay, and an arrow glyph in an early version killed the follow-up request with
-`400 ... str is not valid UTF-8: surrogates not allowed`. Markdown italics are as subtle as it gets
+with invented numbers, above the real one. The line is deliberately plain ASCII: an arrow glyph in an
+early version killed the follow-up request with `400 ... str is not valid UTF-8: surrogates not
+allowed`, back when request bodies still left the appliance as ISO-8859-1 (see
+[Troubleshooting](#troubleshooting)). Markdown italics are as subtle as it gets
 — the chat renderer escapes raw HTML, so `<sub>` for smaller type shows up as literal tags.
 
 **In the appliance log** — always on, one line per response:
@@ -428,6 +430,13 @@ much as the page behind it.
 - **Max Web Searches per Request** caps both tools per request. Simple questions use one to three
   searches. This cap and your [workspace spend limit](#1-get-an-anthropic-api-key) are the only hard
   stops on an agent that decides to research something thoroughly.
+- **Code filtering is off by default, for MCP agents' sake.** With **Filter Search Results with Code
+  Execution** on, Claude 4.6 and newer run the search inside code execution and filter results before
+  they reach the context window. Once code execution is there, though, the model also uses it to
+  process MCP tool results. Measured with Claude Sonnet 5 and the built-in Morpheus MCP server, on a
+  question that never searched the web: most tool rounds took an extra inference round — the cached
+  prefix read twice — and a fresh sandbox container, and a server inventory question took minutes.
+  Leave it off for agents that use MCP tools; turn it on for a research-only integration.
 - **Read-only mode does not apply here.** It hides write tools from the *Morpheus* catalog; it has no
   bearing on what the model reads from the web.
 - **A fetched page is untrusted input.** It reaches the model in the same context as your
@@ -437,11 +446,12 @@ much as the page behind it.
 
 ### Details worth knowing
 
-- **The tool version follows the model.** Claude 4.6 and newer get `web_search_20260318` /
-  `web_fetch_20260318`, which filter results before they reach the context window. Older models —
-  including Haiku 4.5 and Sonnet 4.5, which are *older* than 4.6 despite the family number — get the
-  basic variants, because the filtering runs inside code execution and they cannot drive it. No beta
-  header is involved either way.
+- **The tool version follows the option and the model.** By default every model gets the basic
+  `web_search_20250305` / `web_fetch_20250910`, called directly. With code filtering on, Claude 4.6
+  and newer get `web_search_20260318` / `web_fetch_20260318`; older models — including Haiku 4.5 and
+  Sonnet 4.5, which are *older* than 4.6 despite the family number — keep the basic variants, because
+  the filtering runs inside code execution and they cannot drive it. No beta header is involved
+  either way.
 - **The model is told today's date.** Without it, Claude assumes the present is near its training
   cutoff and misjudges anything dated after it — a release published last month gets described as
   "not out yet", with the retrieval itself perfectly correct. The date is sent as a **second system
@@ -508,6 +518,11 @@ What has been checked against the live OpenRouter endpoint:
   spellings as one model, keeps the stored copy and removes the leftover. A copy an agent still points
   at cannot be removed: it stays disabled, is logged, and that agent needs its model picked again.
 - **No `anthropic-ratelimit-*` headers.** The usage fields on the integration stay empty.
+- **Cost instead of tokens.** OpenRouter reports what each request cost. With **Append token usage
+  to answers** on, a final answer ends with `*Cost: $0.0184 (2 requests)*` rather than the token line —
+  summed over every request of the question, because an agent answer with tool rounds is many billed
+  requests and the last one alone would understate it. Morpheus passes no conversation id, so the
+  requests of one question are recognised by the conversation up to the user's latest message.
 
 Two things to know:
 
@@ -536,8 +551,8 @@ Two things to know:
 | TLS handshake failures | Behind a TLS-inspecting proxy, drop the proxy CA into `/etc/pki/ca-trust/source/anchors/`, run `update-ca-trust`, then `morpheus-ctl restart`. |
 | `cache_read_input_tokens` stays 0 after turn 2 | See [Proving it works](#proving-it-works). |
 | Thinking enabled and requests get rejected | The thinking budget must be **below** max output tokens. The provider raises `max_tokens` automatically, but an explicit per-request `max_tokens` below the budget still fails. |
-| A conversation fails on every turn with `400 ... str is not valid UTF-8: surrogates not allowed` | Morpheus handed back stored history containing unpaired surrogates, typically after answers with non-ASCII characters. The provider repairs them before sending and logs `Repaired N unpaired surrogate characters`; on an older plugin version, start a new conversation. `api.anthropic.com` rejects such a request outright, so switching an agent from a more tolerant gateway to it mid-conversation is where this shows up. |
-| Answers show `�` where umlauts or other accented letters belong | Morpheus replays stored chat history with non-ASCII characters replaced by U+FFFD; the log says `Replayed conversation contains N U+FFFD replacement characters` and names the message. Those characters are gone before the plugin sees them. The provider adds a note telling the model not to copy them, so new answers come out correct. |
+| Questions with umlauts fail with *An error occurred while processing your request*, and the log shows `400 ... str is not valid UTF-8: surrogates not allowed` | Plugin versions before 1.5.0 on Morpheus 9.0.1: its plugin API 1.4.1 sends JSON request bodies as ISO-8859-1, so every non-ASCII character arrives as an invalid byte. 1.5.0 sends ASCII-only JSON. A conversation that already failed keeps failing, because the question stays in it — start a new one. |
+| Answers show `�` where umlauts or other accented letters belong | The same encoding problem, through a gateway that accepts invalid bytes (OpenRouter): it replaced them with U+FFFD, the model repeated it, and Morpheus stored those answers. New requests on 1.5.0 are clean; for old conversations the log says `Replayed conversation contains N U+FFFD replacement characters` and names the message, and the provider tells the model not to copy them. |
 | Every model appears twice in the agent form, and one copy fails with *The AI model is no longer available* | A gateway listed the same model under two spellings on different refreshes (OpenRouter: with and without `[1m]`). Re-save the integration: the sync keeps one copy per model and removes the other. If the log says a copy could not be removed, an agent still uses it — pick that agent's model again. |
 | An answer looks invented, or does not match the appliance | Check whether a tool ran: `grep -E 'Anthropic (tool calls\|prompt cache)' /var/log/morpheus/morpheus-ui/current`. A question with no `tool calls` line was answered from the model or the conversation history, not from MCP. Smaller models such as Haiku tend to reuse an earlier answer, or quote example values from the MCP tool descriptions, instead of calling the tool. The built-in Morpheus MCP server loads tools per category, so a real lookup shows a `use_..._tools` call followed by the tool itself. |
 | The chat's agent picker says **No agents found** for an agent you just created | The chat widget loads its agent list with the page. Reload the page. |

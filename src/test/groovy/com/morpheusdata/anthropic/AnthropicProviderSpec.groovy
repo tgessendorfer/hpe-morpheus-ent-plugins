@@ -26,6 +26,12 @@ class AnthropicProviderSpec extends Specification {
 		return msg
 	}
 
+	def "descriptions fit Morpheus' 255-character columns, or plugin registration fails outright"() {
+		expect:
+		AnthropicPlugin.DESCRIPTION.length() <= 255
+		provider.description.length() <= 255
+	}
+
 	def "system messages are hoisted into the top level system field"() {
 		given:
 		LlmChatRequest request = new LlmChatRequest(
@@ -412,6 +418,61 @@ class AnthropicProviderSpec extends Specification {
 		response.message.content.every { it.toCharacter() < 128 as char }
 	}
 
+	def "OpenRouter cost replaces the token line, summed over every request of the question"() {
+		given: 'a question that took one tool round before the answer'
+		AccountIntegration withFooter = configured([usageFooter: 'on'])
+		Map firstRound = [model: 'anthropic/claude-sonnet-4.6', messages: [[role: 'user', content: 'Which servers run?']]]
+		Map secondRound = [model: 'anthropic/claude-sonnet-4.6', messages: [
+			[role: 'user', content: 'Which servers run?'],
+			[role: 'assistant', content: [[type: 'tool_use', id: 't1', name: 'list_servers', input: [:]]]],
+			[role: 'user', content: [[type: 'tool_result', tool_use_id: 't1', content: '[]']]]
+		]]
+
+		when:
+		LlmChatResponse toolTurn = provider.trackQuestionCost(firstRound, provider.parseMessageResponse([
+			stop_reason: 'tool_use',
+			content    : [[type: 'tool_use', id: 't1', name: 'list_servers', input: [:]]],
+			usage      : [input_tokens: 10, output_tokens: 5, cost: 0.0170345]
+		]))
+		LlmChatResponse answer = provider.trackQuestionCost(secondRound, provider.parseMessageResponse([
+			stop_reason: 'end_turn',
+			content    : [[type: 'text', text: 'None.']],
+			usage      : [input_tokens: 20, output_tokens: 3, cost: 0.0013922]
+		]))
+		provider.appendUsageFooter(answer, withFooter)
+
+		then:
+		toolTurn.metadata.question_requests == 1
+		answer.message.content == 'None.\n\n*Cost: $0.0184 (2 requests)*'
+		AnthropicProvider.stripUsageFooter(answer.message.content) == 'None.'
+	}
+
+	def "a single request that reports no cost keeps the token line"() {
+		given:
+		AccountIntegration withFooter = configured([usageFooter: 'on'])
+		LlmChatResponse answer = provider.trackQuestionCost([messages: [[role: 'user', content: 'Hi']]], provider.parseMessageResponse([
+			stop_reason: 'end_turn', content: [[type: 'text', text: 'Hello.']], usage: [input_tokens: 7, output_tokens: 2]
+		]))
+
+		when:
+		provider.appendUsageFooter(answer, withFooter)
+
+		then:
+		answer.message.content == 'Hello.\n\n*Tokens: 7 input, 2 output*'
+	}
+
+	def "decimal usage such as cost adds up across paused segments"() {
+		when:
+		Map merged = provider.mergeMessageSegments([
+			[content: [], usage: [input_tokens: 1, cost: 0.01]],
+			[content: [], usage: [input_tokens: 2, cost: 0.0025]]
+		])
+
+		then:
+		merged.usage.input_tokens == 3
+		merged.usage.cost == 0.0125
+	}
+
 	def "the usage footer stays off by default"() {
 		given:
 		LlmChatResponse response = provider.parseMessageResponse([
@@ -449,58 +510,10 @@ class AnthropicProviderSpec extends Specification {
 		response.message.content == 'Checking.'
 	}
 
-	def "bytes carried as low surrogates are decoded back into the characters they were"() {
-		given:
-		Map stats = [:]
-
-		expect: 'U+DCC3 U+DCBC are the two UTF-8 bytes of u-umlaut'
-		AnthropicProvider.repairSurrogates('f\uDCC3\uDCBCr', stats) == 'für'
-		stats.count == 2
-		stats.sample == 'U+DCC3 U+DCBC'
-	}
-
-	def "an unpaired surrogate that is no escaped byte is dropped, while a real pair is kept"() {
-		given:
-		Map stats = [:]
-
-		expect:
-		AnthropicProvider.repairSurrogates('a\uD83Db 👋', stats) == 'ab 👋'
-		stats.count == 1
-		stats.sample == 'U+D83D'
-	}
-
 	def "replacement characters are counted across nested message content"() {
 		expect:
 		AnthropicProvider.countReplacementChars([[content: 'L�uft'], [content: [[text: '��']]]]) == 3
 		AnthropicProvider.countReplacementChars([[content: 'Läuft']]) == 0
-	}
-
-	def "clean text passes through untouched"() {
-		given:
-		Map stats = [:]
-
-		expect:
-		AnthropicProvider.repairSurrogates('Grüße 👋', stats) == 'Grüße 👋'
-		!stats.count
-	}
-
-	def "a request carrying mangled history is repaired before it is sent"() {
-		given: 'the conversation that failed with 400 surrogates not allowed after switching agents'
-		LlmChatRequest request = new LlmChatRequest(
-			model: 'claude-sonnet-5',
-			messages: [
-				message('user', 'Wie viele Instanzen?'),
-				message('assistant', 'Bereit f\uDCC3\uDCBCr die erste Instanz \uD800.'),
-				message('user', 'Und laufende?')
-			]
-		)
-
-		when:
-		Map body = provider.buildMessagesRequestBody(request, integration, false)
-
-		then:
-		body.messages[1].content == 'Bereit für die erste Instanz .'
-		body.messages.every { !(it.content as String).toCharArray().any { char c -> Character.isSurrogate(c) } }
 	}
 
 	def "history that lost characters to U+FFFD gets a note telling the model not to copy them"() {
@@ -776,9 +789,15 @@ class AnthropicProviderSpec extends Specification {
 		provider.buildMessagesRequestBody(request, integration, false).system.size() == 1
 	}
 
-	def "the tool version follows the model, because dynamic filtering needs 4.6 or newer"() {
+	def "by default the web tools are called directly, without code execution"() {
+		expect: 'the basic variants even on a model that could filter - code execution slows MCP agents down'
+		provider.buildServerTools(configured([webSearch: 'on']), 'claude-sonnet-5')*.type ==
+			[AnthropicProvider.WEB_SEARCH_TOOL_TYPE_BASIC, AnthropicProvider.WEB_FETCH_TOOL_TYPE_BASIC]
+	}
+
+	def "with code filtering opted in, the tool version follows the model, because filtering needs 4.6 or newer"() {
 		expect:
-		provider.buildServerTools(configured([webSearch: 'on']), model)*.type == types
+		provider.buildServerTools(configured([webSearch: 'on', webSearchCodeFiltering: 'on']), model)*.type == types
 
 		where:
 		model                 || types
@@ -926,6 +945,18 @@ class AnthropicProviderSpec extends Specification {
 
 		then:
 		response.message.content == 'Checking.'
+	}
+
+	def "a web-search turn is described by stop reason, block sequence, cache read and container"() {
+		expect:
+		AnthropicProvider.hasWebSearchTools([tools: [[type: 'web_search_20260318', name: 'web_search'], [name: 'list_servers']]])
+		!AnthropicProvider.hasWebSearchTools([tools: [[name: 'list_servers', input_schema: [:]]]])
+		AnthropicProvider.describeTurn([
+			stop_reason: 'pause_turn',
+			content    : [[type: 'text', text: 'Checking.'], [type: 'server_tool_use', name: 'code_execution'], [type: 'tool_use', name: 'list_servers']],
+			usage      : [cache_read_input_tokens: 33228, output_tokens: 57],
+			container  : [id: 'container_011', expires_at: '2026-09-14T12:00:00Z']
+		]) == 'stop_reason=pause_turn blocks=[text, server_tool_use:code_execution, tool_use:list_servers] read=33228 output=57 container=container_011'
 	}
 
 	def "a paused turn is resumed and the segments are folded into one answer"() {

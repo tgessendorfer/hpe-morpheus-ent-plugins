@@ -22,6 +22,7 @@ import com.morpheusdata.model.NetworkProxy
 import com.morpheusdata.response.ServiceResponse
 import groovy.util.logging.Slf4j
 import org.apache.http.client.methods.CloseableHttpResponse
+import groovy.json.JsonOutput
 import org.apache.http.util.EntityUtils
 
 import java.util.concurrent.ConcurrentHashMap
@@ -364,9 +365,41 @@ class AnthropicApiService {
 			readTimeout      : readTimeout
 		)
 		if (body != null) {
-			options.body = body
+			// Serialised here, to ASCII-only JSON, rather than handed over as a map. The
+			// HttpApiClient in plugin API 1.4.1 - the one Morpheus 9.0.1 ships - wraps the
+			// JSON in a StringEntity without a charset, which Apache HttpCore encodes as
+			// ISO-8859-1. Every umlaut then left as one invalid byte: api.anthropic.com
+			// rejected the request with "str is not valid UTF-8: surrogates not allowed",
+			// and a gateway quietly turned it into U+FFFD. With every non-ASCII character
+			// escaped as \\uXXXX the body is the same bytes in any of those encodings. A
+			// byte array is no way out: callJsonApi serialises it again, as Base64.
+			options.body = toAsciiJson(body)
 		}
 		return options
+	}
+
+	/**
+	 * JSON with every character above U+007E written as a \\uXXXX escape. Groovy's
+	 * JsonOutput already does this, but that is a default of one library version; a
+	 * non-ASCII character can only sit inside a JSON string, so escaping whatever is
+	 * left is always valid, and a surrogate pair becomes two escapes that decode back
+	 * into the one character.
+	 */
+	static String toAsciiJson(Object body) {
+		String json = JsonOutput.toJson(body)
+		StringBuilder ascii = null
+		for (int i = 0; i < json.length(); i++) {
+			char c = json.charAt(i)
+			if ((int) c > 0x7E) {
+				if (ascii == null) {
+					ascii = new StringBuilder(json.length() + 16).append(json, 0, i)
+				}
+				ascii.append(String.format('\\u%04x', (int) c))
+			} else {
+				ascii?.append(c)
+			}
+		}
+		return ascii != null ? ascii.toString() : json
 	}
 
 	protected String buildErrorMessage(ServiceResponse response) {

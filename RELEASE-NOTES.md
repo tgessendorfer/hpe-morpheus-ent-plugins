@@ -41,27 +41,55 @@ included. After two answers the model had picked up the pattern and wrote its ow
 line, with invented numbers, above the real one. Footers are now stripped from replayed answers,
 so the model never sees one. This also stops re-billing them as input on every later turn.
 
-**A conversation with mangled history no longer fails on every turn.** Morpheus can replay a
-stored conversation with unpaired UTF-16 surrogates in it, and `api.anthropic.com` rejects any such
-request with `400 The request body is not valid JSON: str is not valid UTF-8: surrogates not
-allowed` — so once it happened, every later turn of that conversation failed too. Seen after
-switching an agent mid-conversation from OpenRouter, which tolerated the same history, to the
-Anthropic API. The provider now repairs the request before sending it: a run of low surrogates that
-decodes as UTF-8 bytes is restored, any other unpaired surrogate is dropped, and each repair is
-logged as `Repaired N unpaired surrogate characters in the request (first: U+....)`.
+**Umlauts and every other non-ASCII character reach the API intact.** The `HttpApiClient` in plugin
+API 1.4.1 — the version Morpheus 9.0.1 ships — wraps a JSON request body in a `StringEntity` without
+a charset, which Apache HttpCore encodes as ISO-8859-1. Every umlaut left the appliance as a single
+invalid UTF-8 byte, and every character outside Latin-1 as `?`:
 
-**Lost umlauts no longer spread.** Morpheus replays stored chat history with non-ASCII characters
-replaced by U+FFFD — the plugin receives `L�uft` for an answer it returned as `Läuft`. Those
-characters cannot be restored, but a model reading its own earlier `L�uft` writes the next answer
-that way too. When replayed history contains U+FFFD, the provider now logs where
-(`Replayed conversation contains N U+FFFD replacement characters`, with message index, role and an
-excerpt) and adds a short system note, after the cache breakpoint, telling the model not to copy
-them. Verified on a live appliance: with the damaged history still in the conversation, the next
-answer came back with every `ä` intact.
+- `api.anthropic.com` rejected such a request with `400 The request body is not valid JSON: str is
+  not valid UTF-8: surrogates not allowed`, shown in the chat as *An error occurred while processing
+  your request*. The question stays in the conversation, so every later turn failed as well. A
+  question without umlauts went through, which made the failure look random.
+- OpenRouter accepted the same bytes and replaced each one with U+FFFD. The model saw `L�uft`,
+  repeated it in its answer, and Morpheus stored the answer that way.
+
+The provider now serialises the body itself, as JSON with every non-ASCII character escaped as
+`\uXXXX`. Those bytes are the same in any encoding, so the request arrives intact on plugin API
+1.4.1 and later versions alike — reproduced, and verified, in the test suite against both.
+
+Conversations damaged before this fix keep their `�` in the stored history. When replayed history
+contains U+FFFD, the provider logs where (`Replayed conversation contains N U+FFFD replacement
+characters`, with message index, role and an excerpt) and adds a short system note after the cache
+breakpoint telling the model not to copy it. Verified on a live appliance: with the damaged history
+still in the conversation, the next answer came back with every `ä` intact.
 
 **Tool calls are logged.** Morpheus shows no trace of tool use in the chat, so an answer built from
 MCP data and one the model made up look the same. Every response that calls tools now logs
 `Anthropic tool calls: <names>` to the appliance log.
+
+**Cost in the chat, through OpenRouter.** With *Append token usage to answers* on, an integration
+against OpenRouter ends each final answer with `*Cost: $0.0184 (2 requests)*` instead of the token
+line. OpenRouter reports what every request cost, and the plugin adds up all requests of one
+question: an agent answer with tool rounds is many billed requests, and the last one alone would
+understate it several times over. Morpheus passes no conversation id, so requests are grouped by the
+conversation up to the user's latest message. Against `api.anthropic.com`, which reports no cost, the
+token line stays. Costs of a paused and resumed turn now add up as decimals instead of being
+truncated to zero.
+
+**Web search no longer slows MCP agents down.** With web search on, Claude 4.6 and newer used to get
+`web_search_20260318` / `web_fetch_20260318`, which run the search inside code execution to filter
+results. Once code execution was there, the model also used it to process MCP tool results — measured
+with Claude Sonnet 5 and the built-in Morpheus MCP server on a question that never searched the web:
+most tool rounds took an extra inference round, reading the cached prefix twice, plus a fresh sandbox
+container, and a server inventory question took minutes. No `pause_turn` was involved. Web search now
+uses the basic tools, called directly, by default; the new **Filter Search Results with Code
+Execution** option brings dynamic filtering back for research-only integrations. **Behaviour change
+from 1.4.x:** an integration with web search on loses dynamic filtering until the option is ticked.
+
+Every `pause_turn` continuation is now logged when web search is on
+(`Anthropic pause_turn N: resending a turn that paused with ...`, then
+`Anthropic turn finished after N pause_turn continuation(s): ...`), with the stop reason, block
+sequence, cache read and container of the turn.
 
 Checked against the live OpenRouter endpoint:
 
@@ -80,7 +108,13 @@ save therefore proves the appliance reached OpenRouter, not that the key is vali
 is the real test. See
 [Going through OpenRouter](https://github.com/tgessendorfer/morpheus-anthropic-plugin#going-through-openrouter).
 
-Integrations against `api.anthropic.com` behave as before.
+Integrations against `api.anthropic.com` behave as before, apart from the encoding fix above.
+
+The plugin list now shows a description, author and website for the plugin — the column was empty,
+because Morpheus reads them from the plugin class rather than the manifest. That description, the
+integration type's description and the help text under **API Endpoint** now name OpenRouter,
+and say that only its Anthropic Claude models are listed; models from other vendors belong to a
+separate OpenRouter integration.
 
 The README also gains troubleshooting entries for what testing turned up in Morpheus itself: the
 chat widget loads its agent list with the page, so an agent created afterwards shows

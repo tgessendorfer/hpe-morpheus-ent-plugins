@@ -69,7 +69,7 @@ jar {
 			'Morpheus-Name': 'Anthropic Claude',
 			'Morpheus-Organization': 'community',
 			'Morpheus-Code': 'anthropic-llm-plugin',
-			'Morpheus-Description': 'LLM Engine integration plugin for Anthropic Claude (native Messages API)',
+			'Morpheus-Description': 'LLM integration for Anthropic Claude over the native Messages API - direct, or through OpenRouter (Claude models only)',
 			'Morpheus-Logo': 'assets/anthropic-mark.svg',
 			'Morpheus-Logo-Dark': 'assets/anthropic-mark-white.svg',
 			'Morpheus-Color': '#D97757',

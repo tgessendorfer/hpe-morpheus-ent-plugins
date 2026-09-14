@@ -30,13 +30,14 @@ import com.morpheusdata.model.llm.*
 import com.morpheusdata.response.LlmStreamingResponseHandler
 import com.morpheusdata.response.ServiceResponse
 import groovy.json.JsonBuilder
+import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.util.logging.Slf4j
 
-import java.nio.ByteBuffer
-import java.nio.charset.CharacterCodingException
-import java.nio.charset.CodingErrorAction
-import java.nio.charset.StandardCharsets
+import java.math.RoundingMode
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -80,7 +81,11 @@ class AnthropicProvider implements LlmProvider {
 	// server-tool loop from spending the whole conversation on one answer.
 	static final Integer MAX_PAUSE_TURN_CONTINUATIONS = 4
 	// One or more italic usage lines at the very end of an answer.
-	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*Tokens: [^*\\n]*\\*)+\\s*$'
+	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*(?:Tokens|Cost): [^*\\n]*\\*)+\\s*$'
+	// One question is many billed requests once the agent calls tools, and only the
+	// last of them carries the answer the footer goes on - so cost is kept per question.
+	protected static final ConcurrentHashMap<String, Map> QUESTION_COSTS = new ConcurrentHashMap<>()
+	static final long QUESTION_COST_TTL_MS = 60L * 60L * 1000L
 	static final String REPLACEMENT_CHARACTER_NOTE = 'Some earlier turns of this conversation came back from the chat ' +
 		'application with characters replaced by U+FFFD. Treat each such character as unknown and never copy it; ' +
 		'write every character of your answer correctly, including umlauts and other accented letters.'
@@ -113,7 +118,9 @@ class AnthropicProvider implements LlmProvider {
 
 	@Override
 	String getDescription() {
-		return 'Anthropic Claude models via the native Messages API, including tool use for MCP-backed Agents.'
+		// Kept under 255 characters, the size of Morpheus' description columns.
+		return 'Claude through the native Messages API, with MCP tool use, prompt caching, thinking and web search. ' +
+			'Direct or via OpenRouter, which lists only its Claude models; other vendors need a separate OpenRouter integration.'
 	}
 
 	@Override
@@ -144,7 +151,8 @@ class AnthropicProvider implements LlmProvider {
 			inputType: OptionType.InputType.TEXT,
 			displayOrder: 0,
 			required: true,
-			defaultValue: DEFAULT_API_URL
+			defaultValue: DEFAULT_API_URL,
+			helpText: 'https://api.anthropic.com, or an Anthropic-compatible gateway such as https://openrouter.ai/api. Through OpenRouter only the Anthropic Claude models are listed.'
 		)
 
 		optionTypes << new OptionType(
@@ -301,7 +309,7 @@ class AnthropicProvider implements LlmProvider {
 			inputType: OptionType.InputType.CHECKBOX,
 			displayOrder: 12,
 			required: false,
-			helpText: 'Adds an italic line with cached, input and output token counts to the end of each final answer. Morpheus does not display token usage anywhere in the chat, so this is the only way to see the prompt cache working without reading the appliance log. Intermediate tool-call turns are left untouched.'
+			helpText: 'Adds an italic line with cached, input and output token counts to the end of each final answer. Morpheus does not display token usage anywhere in the chat, so this is the only way to see the prompt cache working without reading the appliance log. Intermediate tool-call turns are left untouched. Through OpenRouter, which reports what each request cost, the line shows the cost of the whole question instead, summed over all of its requests.'
 		)
 
 		optionTypes << new OptionType(
@@ -317,13 +325,25 @@ class AnthropicProvider implements LlmProvider {
 		)
 
 		optionTypes << new OptionType(
+			code: "${PROVIDER_CODE}.webSearchCodeFiltering",
+			name: "Web Search Code Filtering",
+			fieldName: "webSearchCodeFiltering",
+			fieldLabel: "Filter Search Results with Code Execution",
+			fieldContext: "config",
+			inputType: OptionType.InputType.CHECKBOX,
+			displayOrder: 14,
+			required: false,
+			helpText: 'Off by default. On Claude 4.6 and newer, lets Claude filter search results by running code before they reach the context window, which saves tokens on search-heavy research. The catch for MCP-backed agents: once code execution is available the model also uses it to process tool results, so a tool round costs an extra inference round and a fresh sandbox container - measured even on questions that never searched the web. Leave it off for agents that use MCP tools.'
+		)
+
+		optionTypes << new OptionType(
 			code: "${PROVIDER_CODE}.webSearchMaxUses",
 			name: "Web Search Max Uses",
 			fieldName: "webSearchMaxUses",
 			fieldLabel: "Max Web Searches per Request",
 			fieldContext: "config",
 			inputType: OptionType.InputType.NUMBER,
-			displayOrder: 14,
+			displayOrder: 15,
 			required: false,
 			defaultValue: DEFAULT_WEB_SEARCH_MAX_USES.toString(),
 			helpText: 'Hard cap on searches and fetches for a single request, applied to both tools. Simple questions use one to three searches. This is the only ceiling on what a looping agent can spend on search.'
@@ -336,7 +356,7 @@ class AnthropicProvider implements LlmProvider {
 			fieldLabel: "Restrict to Domains",
 			fieldContext: "config",
 			inputType: OptionType.InputType.TEXT,
-			displayOrder: 15,
+			displayOrder: 16,
 			required: false,
 			helpText: 'Optional comma-separated allow list, for example: docs.morpheusdata.com, community.hpe.com, support.hpe.com. Bare hostnames with an optional path and no scheme. Leave empty to search the whole web. Narrowing this is the strongest control against a fetched page trying to talk the agent into something.'
 		)
@@ -421,8 +441,8 @@ class AnthropicProvider implements LlmProvider {
 					apiService.createMessage(baseUrl, apiKey, body, apiVersion, resolveBetas(accountIntegration), requestOpts) as Map
 				}
 				if (result.success && result.data) {
-					return ServiceResponse.success(
-						appendUsageFooter(appendSourceList(parseMessageResponse(result.data as Map)), accountIntegration))
+					LlmChatResponse response = trackQuestionCost(requestBody, parseMessageResponse(result.data as Map))
+					return ServiceResponse.success(appendUsageFooter(appendSourceList(response), accountIntegration))
 				}
 				return ServiceResponse.error(result.msg ?: 'Chat completion failed')
 			} catch (Exception e) {
@@ -459,8 +479,8 @@ class AnthropicProvider implements LlmProvider {
 			}
 
 			if (result?.success && result.data) {
-				handler?.onCompleteResponse(
-					appendUsageFooter(appendSourceList(parseMessageResponse(result.data as Map)), accountIntegration))
+				LlmChatResponse response = trackQuestionCost(requestBody, parseMessageResponse(result.data as Map))
+				handler?.onCompleteResponse(appendUsageFooter(appendSourceList(response), accountIntegration))
 			} else {
 				handler?.onError(new RuntimeException(result?.msg ?: 'Streaming chat completion failed'))
 			}
@@ -497,8 +517,14 @@ class AnthropicProvider implements LlmProvider {
 		List<Map> segments = [data]
 		List messages = new ArrayList((requestBody.messages ?: []) as List)
 		int continuations = 0
+		// Server tools are what pause a turn, and web search is the only server tool this
+		// plugin declares - so this is logged only for integrations with web search on.
+		boolean logPauses = hasWebSearchTools(requestBody)
 		while (data.stop_reason == 'pause_turn' && continuations < MAX_PAUSE_TURN_CONTINUATIONS) {
 			continuations++
+			if (logPauses) {
+				log.info("Anthropic pause_turn ${continuations}: resending a turn that paused with ${describeTurn(data)}")
+			}
 			// Resumed by handing the paused assistant turn back unchanged - no
 			// "continue" message. Anthropic sees the trailing server_tool_use block
 			// and picks up where it left off. The blocks must go back verbatim:
@@ -524,6 +550,9 @@ class AnthropicProvider implements LlmProvider {
 			segments << data
 			result = next
 		}
+		if (logPauses) {
+			log.info("Anthropic turn finished after ${continuations} pause_turn continuation(s): ${describeTurn(data)}")
+		}
 		if (data.stop_reason == 'pause_turn') {
 			log.warn("Anthropic turn still paused after ${continuations} continuations; returning what has been generated so far")
 		}
@@ -531,6 +560,25 @@ class AnthropicProvider implements LlmProvider {
 		Map merged = new LinkedHashMap(result)
 		merged.data = mergeMessageSegments(segments)
 		return merged
+	}
+
+	protected static boolean hasWebSearchTools(Map requestBody) {
+		return (requestBody?.tools instanceof List) && (requestBody.tools as List).any { tool ->
+			tool instanceof Map && tool.type?.toString()?.startsWith('web_')
+		}
+	}
+
+	/** How a turn ended: its stop reason, block sequence, cache read and container, for the log. */
+	protected static String describeTurn(Map data) {
+		List blocks = data?.content instanceof List ? data.content as List : []
+		String shape = blocks.collect { block ->
+			Map b = block instanceof Map ? block as Map : [:]
+			b.name ? "${b.type}:${b.name}" : "${b.type}"
+		}.join(', ')
+		Map usage = data?.usage instanceof Map ? data.usage as Map : [:]
+		def container = data?.container instanceof Map ? (data.container as Map).id : data?.container
+		return "stop_reason=${data?.stop_reason} blocks=[${shape}] read=${usage.cache_read_input_tokens ?: 0} " +
+			"output=${usage.output_tokens ?: 0} container=${container ?: 'none'}"
 	}
 
 	/**
@@ -553,8 +601,12 @@ class AnthropicProvider implements LlmProvider {
 			if (segment.usage instanceof Map) {
 				(segment.usage as Map).each { key, value ->
 					// Every segment is a billed request of its own, so the counts add up.
-					if (value instanceof Number) {
+					if (value instanceof Integer || value instanceof Long) {
 						usage[key] = (toInteger(usage[key]) ?: 0) + ((Number) value).intValue()
+					} else if (value instanceof Number) {
+						// A decimal such as OpenRouter's cost; truncated to an int it reads as free.
+						BigDecimal sofar = usage[key] instanceof Number ? new BigDecimal(usage[key].toString()) : BigDecimal.ZERO
+						usage[key] = sofar + new BigDecimal(value.toString())
 					} else if (!usage.containsKey(key)) {
 						usage[key] = value
 					}
@@ -732,21 +784,16 @@ class AnthropicProvider implements LlmProvider {
 		if (stream != null) {
 			requestBody.stream = stream
 		}
-		// Last, so it covers everything Morpheus handed over - history, system prompt
-		// and MCP tool catalog alike.
-		Map stats = [:]
-		Map repaired = repairSurrogatesDeep(requestBody, stats) as Map
-		if (stats.count) {
-			log.warn("Repaired ${stats.count} unpaired surrogate characters in the request (first: ${stats.sample})")
-		}
-		int replaced = countReplacementChars(repaired.messages)
+		int replaced = countReplacementChars(requestBody.messages)
 		if (replaced) {
-			log.warn("Replayed conversation contains ${replaced} U+FFFD replacement characters - that text was lost before it reached the plugin (${describeReplacementContext(repaired.messages as List)})")
-			// The characters cannot be restored here, but a model that reads "L�uft" in
-			// its own earlier answer starts writing it that way too.
-			appendSystemNote(repaired, REPLACEMENT_CHARACTER_NOTE)
+			log.warn("Replayed conversation contains ${replaced} U+FFFD replacement characters (${describeReplacementContext(requestBody.messages as List)})")
+			// Left behind by requests sent before the body went out as UTF-8: a gateway
+			// turned each non-ASCII byte into U+FFFD, the model repeated it, and Morpheus
+			// stored the answer that way. The characters cannot be restored, but a model
+			// reading "L�uft" in its own earlier answer keeps writing it like that.
+			appendSystemNote(requestBody, REPLACEMENT_CHARACTER_NOTE)
 		}
-		return repaired
+		return requestBody
 	}
 
 	/**
@@ -804,7 +851,12 @@ class AnthropicProvider implements LlmProvider {
 		if (!isWebSearchEnabled(accountIntegration)) {
 			return []
 		}
-		boolean filtering = supportsDynamicFiltering(model)
+		// Dynamic filtering runs the search inside code execution, and once that is
+		// provisioned the model also uses it to crunch MCP results. Measured on an agent
+		// whose question never searched at all: an extra inference round and a fresh
+		// container on every tool round, and minutes for an inventory question. So it
+		// is opt-in; by default the basic tools are called directly.
+		boolean filtering = isWebSearchCodeFilteringEnabled(accountIntegration) && supportsDynamicFiltering(model)
 		Integer maxUses = resolveWebSearchMaxUses(accountIntegration)
 		List<String> allowedDomains = resolveWebSearchAllowedDomains(accountIntegration)
 
@@ -1023,6 +1075,10 @@ class AnthropicProvider implements LlmProvider {
 				tokenUsage.totalTokens = (inputTokens ?: 0) + (outputTokens ?: 0) + (cacheRead ?: 0) + (cacheWrite ?: 0)
 			}
 			response.tokenUsage = tokenUsage
+			// OpenRouter reports what the request cost, in USD. Anthropic does not.
+			if (usageMap.cost instanceof Number) {
+				response.metadata.put('cost', new BigDecimal(usageMap.cost.toString()))
+			}
 			if (cacheRead != null || cacheWrite != null) {
 				response.metadata.put('cache_read_input_tokens', cacheRead ?: 0)
 				response.metadata.put('cache_creation_input_tokens', cacheWrite ?: 0)
@@ -1243,6 +1299,10 @@ class AnthropicProvider implements LlmProvider {
 		return toBoolean(accountIntegration?.getConfigProperty('webSearch'), false)
 	}
 
+	protected boolean isWebSearchCodeFilteringEnabled(AccountIntegration accountIntegration) {
+		return toBoolean(accountIntegration?.getConfigProperty('webSearchCodeFiltering'), false)
+	}
+
 	/** Null means no cap, which the API accepts - but the default is a cap. */
 	protected Integer resolveWebSearchMaxUses(AccountIntegration accountIntegration) {
 		def configured = accountIntegration?.getConfigProperty('webSearchMaxUses')
@@ -1282,6 +1342,15 @@ class AnthropicProvider implements LlmProvider {
 		if (response.finishReason == 'tool_calls' || !response.message.content.toString().trim()) {
 			return response
 		}
+		// Where the endpoint reports cost, the line shows what the whole question cost
+		// instead of the last request's tokens.
+		def questionCost = response.metadata?.get('question_cost')
+		if (questionCost instanceof BigDecimal) {
+			int requests = toInteger(response.metadata.get('question_requests')) ?: 1
+			String count = requests > 1 ? " (${requests} requests)" : ''
+			response.message.content = "${response.message.content}\n\n*Cost: ${formatCost(questionCost)}${count}*".toString()
+			return response
+		}
 		LlmTokenUsage usage = response.tokenUsage
 		if (!usage) {
 			return response
@@ -1300,11 +1369,11 @@ class AnthropicProvider implements LlmProvider {
 		if (!parts) {
 			return response
 		}
-		// ASCII only. The footer becomes part of the conversation history that
-		// Morpheus replays to Anthropic on the next turn, and its storage path
-		// mangles non-ASCII on the way through - a U+21B3 arrow and a U+00B7
-		// separator came back as unpaired surrogates and the follow-up request
-		// died with "400 ... str is not valid UTF-8: surrogates not allowed".
+		// ASCII only. The footer becomes part of the conversation history replayed
+		// on the next turn, and before request bodies went out as UTF-8 bytes a
+		// U+21B3 arrow and a U+00B7 separator there killed the follow-up request with
+		// "400 ... str is not valid UTF-8: surrogates not allowed". Plain ASCII
+		// survives whatever encoding a Morpheus version applies.
 		// Italics only. The Morpheus chat renderer escapes raw HTML rather than
 		// stripping it, so a <sub> wrapper for smaller type shows up as literal
 		// tags in the answer. Markdown itself has no notion of type size.
@@ -1318,71 +1387,6 @@ class AnthropicProvider implements LlmProvider {
 	 */
 	protected static String stripUsageFooter(String content) {
 		return content?.replaceFirst(USAGE_FOOTER_PATTERN, '')
-	}
-
-	/**
-	 * Removes unpaired UTF-16 surrogates before a request is serialised.
-	 *
-	 * Morpheus can hand a replayed conversation back with them, and no JSON encoder
-	 * turns one into valid UTF-8: api.anthropic.com then rejects the whole request
-	 * with "str is not valid UTF-8: surrogates not allowed", and every later turn of
-	 * that conversation fails the same way. A common way for raw bytes to travel
-	 * inside a string is one low surrogate per byte (U+DC80..U+DCFF), so a run of
-	 * those is decoded back as UTF-8 when it is valid; any other unpaired surrogate
-	 * is dropped.
-	 */
-	protected static Object repairSurrogatesDeep(Object value, Map stats) {
-		if (value instanceof CharSequence) {
-			return repairSurrogates(value.toString(), stats)
-		}
-		if (value instanceof Map) {
-			Map copy = new LinkedHashMap()
-			(value as Map).each { key, entry -> copy.put(key, repairSurrogatesDeep(entry, stats)) }
-			return copy
-		}
-		if (value instanceof List) {
-			return (value as List).collect { repairSurrogatesDeep(it, stats) }
-		}
-		return value
-	}
-
-	protected static String repairSurrogates(String text, Map stats) {
-		if (!text) {
-			return text
-		}
-		StringBuilder out = null
-		int length = text.length()
-		int i = 0
-		while (i < length) {
-			char c = text.charAt(i)
-			if (Character.isHighSurrogate(c) && i + 1 < length && Character.isLowSurrogate(text.charAt(i + 1))) {
-				out?.append(c)?.append(text.charAt(i + 1))
-				i += 2
-				continue
-			}
-			if (!Character.isSurrogate(c)) {
-				out?.append(c)
-				i++
-				continue
-			}
-			if (out == null) {
-				out = new StringBuilder(length).append(text, 0, i)
-			}
-			int end = i
-			ByteArrayOutputStream bytes = new ByteArrayOutputStream()
-			while (end < length && (int) text.charAt(end) >= 0xDC80 && (int) text.charAt(end) <= 0xDCFF) {
-				bytes.write((int) text.charAt(end) - 0xDC00)
-				end++
-			}
-			int skipTo = Math.max(end, i + 1)
-			recordSurrogates(stats, text, i, skipTo)
-			String decoded = end > i ? decodeStrictUtf8(bytes.toByteArray()) : null
-			if (decoded != null) {
-				out.append(decoded)
-			}
-			i = skipTo
-		}
-		return out != null ? out.toString() : text
 	}
 
 	/** Adds a text block after whatever system prompt the request has, cached or not. */
@@ -1435,24 +1439,53 @@ class AnthropicProvider implements LlmProvider {
 		return 0
 	}
 
-	protected static String decodeStrictUtf8(byte[] bytes) {
-		try {
-			return StandardCharsets.UTF_8.newDecoder()
-				.onMalformedInput(CodingErrorAction.REPORT)
-				.onUnmappableCharacter(CodingErrorAction.REPORT)
-				.decode(ByteBuffer.wrap(bytes)).toString()
-		} catch (CharacterCodingException ignored) {
-			return null
+	/**
+	 * Adds this request's cost to the running total of its question, and hands the
+	 * total to the response. A final answer closes the question.
+	 */
+	protected LlmChatResponse trackQuestionCost(Map requestBody, LlmChatResponse response) {
+		def cost = response?.metadata?.get('cost')
+		if (!(cost instanceof BigDecimal)) {
+			return response
 		}
+		long now = System.currentTimeMillis()
+		QUESTION_COSTS.values().removeIf { Map tally -> now - (tally.updated as long) > QUESTION_COST_TTL_MS }
+		String key = questionKey(requestBody)
+		Map tally = QUESTION_COSTS.compute(key) { String ignored, Map existing ->
+			[total   : ((existing?.total ?: BigDecimal.ZERO) as BigDecimal) + (cost as BigDecimal),
+			 requests: ((existing?.requests ?: 0) as int) + 1,
+			 updated : now]
+		}
+		response.metadata.put('question_cost', tally.total)
+		response.metadata.put('question_requests', tally.requests)
+		if (response.finishReason != 'tool_calls') {
+			QUESTION_COSTS.remove(key)
+		}
+		return response
 	}
 
-	protected static void recordSurrogates(Map stats, String text, int from, int to) {
-		stats.count = ((stats.count ?: 0) as Integer) + (to - from)
-		if (!stats.sample) {
-			stats.sample = (from..<Math.min(to, from + 8)).collect { int index ->
-				String.format('U+%04X', (int) text.charAt(index))
-			}.join(' ')
+	/**
+	 * Identifies the question a request belongs to: the model and the conversation up
+	 * to the user's latest message. Every tool round of one question repeats exactly
+	 * that prefix and only appends to it. Morpheus passes no conversation id.
+	 */
+	protected static String questionKey(Map requestBody) {
+		List messages = (requestBody?.messages ?: []) as List
+		int last = -1
+		messages.eachWithIndex { def message, int index ->
+			if (message instanceof Map && message.role == 'user' && message.content instanceof CharSequence) {
+				last = index
+			}
 		}
+		String prefix = JsonOutput.toJson([model: requestBody?.model, messages: last >= 0 ? messages[0..last] : []])
+		return MessageDigest.getInstance('SHA-256').digest(prefix.getBytes('UTF-8')).encodeHex().toString()
+	}
+
+	protected static String formatCost(BigDecimal cost) {
+		if (cost > 0 && cost < 0.0001) {
+			return '<$0.0001'
+		}
+		return '$' + cost.setScale(4, RoundingMode.HALF_UP).toPlainString()
 	}
 
 	protected static String formatTokenCount(Integer value) {
@@ -1486,9 +1519,8 @@ class AnthropicProvider implements LlmProvider {
 	 * Anthropic asks that citations reach the reader, and an answer about which
 	 * release is current is only worth as much as the page it came from. Same
 	 * two constraints as the token footer: final answers only, because a
-	 * tool-call turn is replayed to the model as history, and ASCII only,
-	 * because the Morpheus chat storage path mangles anything else on the way
-	 * back out and the follow-up request then dies on invalid UTF-8.
+	 * tool-call turn is replayed to the model as history, and ASCII only, so
+	 * the replayed history survives whatever encoding a Morpheus version applies.
 	 */
 	protected LlmChatResponse appendSourceList(LlmChatResponse response) {
 		List<Map> sources = response?.metadata?.get('sources') as List<Map>
