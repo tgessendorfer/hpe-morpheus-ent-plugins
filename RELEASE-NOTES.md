@@ -69,7 +69,7 @@ MCP data and one the model made up look the same. Every response that calls tool
 
 **Cost in the chat, through OpenRouter.** With *Append token usage to answers* on, an integration
 against OpenRouter ends each final answer with `*Cost: $0.0184 (2 requests)*` instead of the token
-line. OpenRouter reports what every request cost, and the plugin adds up all requests of one
+line, or `*Kosten: $0.0184 (2 Anfragen)*` when the answer is in German. OpenRouter reports what every request cost, and the plugin adds up all requests of one
 question: an agent answer with tool rounds is many billed requests, and the last one alone would
 understate it several times over. Morpheus passes no conversation id, so requests are grouped by the
 conversation up to the user's latest message. Against `api.anthropic.com`, which reports no cost, the

@@ -81,7 +81,13 @@ class AnthropicProvider implements LlmProvider {
 	// server-tool loop from spending the whole conversation on one answer.
 	static final Integer MAX_PAUSE_TURN_CONTINUATIONS = 4
 	// One or more italic usage lines at the very end of an answer.
-	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*(?:Tokens|Cost): [^*\\n]*\\*)+\\s*$'
+	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*(?:Tokens|Cost|Kosten): [^*\\n]*\\*)+\\s*$'
+	// Enough to pick the footer's language, not a language detector: German answers
+	// are full of these words, English ones next to never contain them.
+	static final Set<String> GERMAN_MARKERS = ['der', 'die', 'das', 'den', 'dem', 'und', 'ist', 'sind', 'nicht', 'keine',
+		'mit', 'auf', 'ein', 'eine', 'gibt', 'es', 'auch', 'wird', 'oder', 'bei', 'zu', 'von', 'im', 'sich', 'wie'] as Set
+	static final Set<String> ENGLISH_MARKERS = ['the', 'and', 'is', 'are', 'of', 'to', 'with', 'not', 'no', 'for', 'there',
+		'this', 'that', 'it', 'be', 'on', 'as', 'by', 'has', 'have'] as Set
 	// One question is many billed requests once the agent calls tools, and only the
 	// last of them carries the answer the footer goes on - so cost is kept per question.
 	protected static final ConcurrentHashMap<String, Map> QUESTION_COSTS = new ConcurrentHashMap<>()
@@ -1347,8 +1353,10 @@ class AnthropicProvider implements LlmProvider {
 		def questionCost = response.metadata?.get('question_cost')
 		if (questionCost instanceof BigDecimal) {
 			int requests = toInteger(response.metadata.get('question_requests')) ?: 1
-			String count = requests > 1 ? " (${requests} requests)" : ''
-			response.message.content = "${response.message.content}\n\n*Cost: ${formatCost(questionCost)}${count}*".toString()
+			// In the language of the answer it sits under.
+			boolean german = looksGerman(response.message.content.toString())
+			String count = requests > 1 ? " (${requests} ${german ? 'Anfragen' : 'requests'})" : ''
+			response.message.content = "${response.message.content}\n\n*${german ? 'Kosten' : 'Cost'}: ${formatCost(questionCost)}${count}*".toString()
 			return response
 		}
 		LlmTokenUsage usage = response.tokenUsage
@@ -1479,6 +1487,14 @@ class AnthropicProvider implements LlmProvider {
 		}
 		String prefix = JsonOutput.toJson([model: requestBody?.model, messages: last >= 0 ? messages[0..last] : []])
 		return MessageDigest.getInstance('SHA-256').digest(prefix.getBytes('UTF-8')).encodeHex().toString()
+	}
+
+	protected static boolean looksGerman(String text) {
+		String lower = (text ?: '').toLowerCase()
+		List<String> words = lower.findAll(/\p{L}+/)
+		int german = (words.count { it in GERMAN_MARKERS } as int) + (lower =~ /[äöüß]/ ? 2 : 0)
+		int english = words.count { it in ENGLISH_MARKERS } as int
+		return german > english
 	}
 
 	protected static String formatCost(BigDecimal cost) {

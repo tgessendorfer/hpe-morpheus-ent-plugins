@@ -519,7 +519,8 @@ What has been checked against the live OpenRouter endpoint:
   at cannot be removed: it stays disabled, is logged, and that agent needs its model picked again.
 - **No `anthropic-ratelimit-*` headers.** The usage fields on the integration stay empty.
 - **Cost instead of tokens.** OpenRouter reports what each request cost. With **Append token usage
-  to answers** on, a final answer ends with `*Cost: $0.0184 (2 requests)*` rather than the token line —
+  to answers** on, a final answer ends with `*Cost: $0.0184 (2 requests)*` — or
+  `*Kosten: $0.0184 (2 Anfragen)*` under a German answer — rather than the token line,
   summed over every request of the question, because an agent answer with tool rounds is many billed
   requests and the last one alone would understate it. Morpheus passes no conversation id, so the
   requests of one question are recognised by the conversation up to the user's latest message.

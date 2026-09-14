@@ -447,6 +447,27 @@ class AnthropicProviderSpec extends Specification {
 		AnthropicProvider.stripUsageFooter(answer.message.content) == 'None.'
 	}
 
+	def "the cost line follows the language of the answer"() {
+		given:
+		AccountIntegration withFooter = configured([usageFooter: 'on'])
+		LlmChatResponse answer = provider.trackQuestionCost([model: 'm', messages: [[role: 'user', content: text]]], provider.parseMessageResponse([
+			stop_reason: 'end_turn', content: [[type: 'text', text: text]], usage: [input_tokens: 5, output_tokens: 2, cost: 0.0021]
+		]))
+
+		when:
+		provider.appendUsageFooter(answer, withFooter)
+
+		then:
+		answer.message.content == "${text}\n\n*${label}: \$0.0021*"
+		AnthropicProvider.stripUsageFooter(answer.message.content) == text
+
+		where:
+		text                                                             || label
+		'Es gibt keine Instanzen, und alle 4 Server laufen.'             || 'Kosten'
+		'There are no instances, and all 4 servers are running.'         || 'Cost'
+		'Alle Server laufen: proxmox, plex und rocky9 sind aktiv.'       || 'Kosten'
+	}
+
 	def "a single request that reports no cost keeps the token line"() {
 		given:
 		AccountIntegration withFooter = configured([usageFooter: 'on'])
