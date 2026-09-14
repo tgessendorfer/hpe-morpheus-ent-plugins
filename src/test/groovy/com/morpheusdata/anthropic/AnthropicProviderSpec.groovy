@@ -47,6 +47,16 @@ class AnthropicProviderSpec extends Specification {
 		bundle << [['messages', 'messages_de', 'messages_pl', 'messages_cs', 'messages_hu', 'messages_ro']]
 	}
 
+	def "the languages Morpheus lacks are offered as custom locales, each with a bundle"() {
+		given:
+		AnthropicLocalizationProvider localization = new AnthropicLocalizationProvider(null, null)
+
+		expect:
+		localization.customLocales*.code == ['cs', 'hu', 'ro']
+		localization.getCustomLocales(null)*.name == ['Czech', 'Hungarian', 'Romanian']
+		localization.customLocales.every { getClass().getResource("/i18n/messages_${it.code}.properties") != null }
+	}
+
 	def "descriptions fit Morpheus' 255-character columns, or plugin registration fails outright"() {
 		expect:
 		AnthropicPlugin.DESCRIPTION.length() <= 255

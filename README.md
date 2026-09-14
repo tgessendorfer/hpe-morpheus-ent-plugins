@@ -190,7 +190,8 @@ Fill in:
 
 The form is translated. Its labels and help texts follow the **Default Locale** under *User
 Settings*: English, German and Polish, plus Czech, Hungarian and Romanian, which Morpheus itself does
-not offer. German has been checked on a live appliance; the other translations have not, and a
+not offer — the plugin adds those three to the locale list, and picking one translates this form while
+the rest of Morpheus stays English. German has been checked on a live appliance; the other translations have not, and a
 native speaker's corrections are welcome. The plugin description in the plugin list stays English —
 Morpheus stores it as a single string.
 
