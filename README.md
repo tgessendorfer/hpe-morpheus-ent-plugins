@@ -191,8 +191,8 @@ Fill in:
 The form is translated. Its labels and help texts follow the **Default Locale** under *User
 Settings*: English, German and Polish, plus Czech, Hungarian and Romanian, which Morpheus itself does
 not offer — the plugin adds those three to the locale list, and picking one translates this form while
-the rest of Morpheus stays English. German has been checked on a live appliance; the other translations have not, and a
-native speaker's corrections are welcome. The plugin description in the plugin list stays English —
+the rest of Morpheus stays English. German, Polish and Czech have been shown on a live appliance, but only the German texts have been
+reviewed; corrections from native speakers are welcome. The plugin description in the plugin list stays English —
 Morpheus stores it as a single string.
 
 **Save.** The integration verifies itself by calling `GET /v1/models`, which doubles as the
@@ -564,6 +564,7 @@ Two things to know:
 | Answers show `�` where umlauts or other accented letters belong | The same encoding problem, through a gateway that accepts invalid bytes (OpenRouter): it replaced them with U+FFFD, the model repeated it, and Morpheus stored those answers. New requests on 1.5.0 are clean; for old conversations the log says `Replayed conversation contains N U+FFFD replacement characters` and names the message, and the provider tells the model not to copy them. |
 | Every model appears twice in the agent form, and one copy fails with *The AI model is no longer available* | A gateway listed the same model under two spellings on different refreshes (OpenRouter: with and without `[1m]`). Re-save the integration: the sync keeps one copy per model and removes the other. If the log says a copy could not be removed, an agent still uses it — pick that agent's model again. |
 | An answer looks invented, or does not match the appliance | Check whether a tool ran: `grep -E 'Anthropic (tool calls\|prompt cache)' /var/log/morpheus/morpheus-ui/current`. A question with no `tool calls` line was answered from the model or the conversation history, not from MCP. Smaller models such as Haiku tend to reuse an earlier answer, or quote example values from the MCP tool descriptions, instead of calling the tool. The built-in Morpheus MCP server loads tools per category, so a real lookup shows a `use_..._tools` call followed by the tool itself. |
+| In Polish, the integration dialog is titled *Edytuj {0} Integrację* | Not this plugin: Morpheus' own Polish text for `gomorpheus.administration.integrations.editHeader` expects a value the dialog never passes. It affects every integration. |
 | The chat's agent picker says **No agents found** for an agent you just created | The chat widget loads its agent list with the page. Reload the page. |
 | The agent still says it cannot reach the web | Re-save the integration after ticking **Enable Web Search and Fetch**, and start a *new* conversation — the tool catalog is fixed for the life of one. Also confirm the agent is on this integration and not a second one. |
 | `400 invalid_request_error` mentioning web search | Web search is disabled for the organization in the Anthropic Console under *Privacy*, or the **Restrict to Domains** list has a scheme or a trailing slash the API rejects. |

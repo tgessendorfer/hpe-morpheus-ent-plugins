@@ -78,7 +78,8 @@ truncated to zero.
 
 **The integration form speaks six languages.** Labels and help texts follow the Default Locale in
 User Settings: English, German, Polish, Czech, Hungarian and Romanian. German was checked on a live
-appliance, including the menu names Morpheus' own German translation uses. The Polish, Czech,
+appliance, including the menu names Morpheus' own German translation uses, and the Polish and Czech
+forms were shown there as well. The Polish, Czech,
 Hungarian and Romanian texts have not been reviewed by native speakers yet — corrections welcome.
 Czech, Hungarian and Romanian, which Morpheus itself does not offer, are added to the Default Locale
 list by the plugin; picking one translates this form, and the rest of Morpheus stays English. The
