@@ -21,6 +21,8 @@ matching the placeholder. Nothing else changed from 0.1.14.
 Jars for 0.1.14 and earlier are not published, because each of them carries
 that address.
 
+sha256 `89b4f1ca5d6936adca0d8fcc51e740d9b352dea0ff5cb38d71f877dae7e8660d`
+
 ---
 
 ## 0.1.14
