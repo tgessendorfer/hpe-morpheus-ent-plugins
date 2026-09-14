@@ -58,8 +58,12 @@ jobs:
       run: ./gradlew build --no-daemon --stacktrace
 
     - name: Trivy scan
-      uses: aquasecurity/trivy-action@0.33.1
+      # Pinned by commit: the action's tags were force-pushed to malware in
+      # March 2026 (GHSA-69fq-xp46-6x23). Its default Trivy binary is older
+      # than the fix for GHSA-mcj4-mphf-j9ff, so the version is set too.
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
       with:
+        version: 'v0.74.0'
         scan-type: 'rootfs'
         scan-ref: 'build/libs/'
         ignore-unfixed: true
