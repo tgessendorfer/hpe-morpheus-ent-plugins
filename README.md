@@ -626,16 +626,25 @@ releases (`.github/workflows/`).
 ## Relationship to the Local LLM plugin
 
 Morpheus also ships `local-llm-plugin` (`com.morpheusdata.localllm`) on the Exchange, which registers
-two providers — `ollama` and `openai-compatible`. The two plugins are complementary, not competing:
+two providers — `ollama` and `openai-compatible`. It is built for models you host yourself, and the
+plugins are complementary, not competing:
 
 | Use case | Plugin |
 |---|---|
 | Ollama on your own VM | `local-llm-plugin` → `ollama` |
-| vLLM / LiteLLM / any OpenAI-shaped endpoint | `local-llm-plugin` → `openai-compatible` |
-| Claude with caching, thinking and native tool use | this plugin |
+| vLLM, LM Studio, llama.cpp or LiteLLM on your own network | `local-llm-plugin` → `openai-compatible` |
+| Claude with caching, thinking and native tool use — direct or through OpenRouter | this plugin |
+| Other OpenRouter models | [morpheus-openrouter-plugin](https://github.com/tgessendorfer/morpheus-openrouter-plugin) (in development) |
 
 Install both and you can switch an Agent between a local model and Claude by changing its LLM
 integration, with no other configuration changes.
+
+**Local LLM 1.0.0 cannot reach cloud APIs such as OpenRouter or `api.openai.com`.** It always sets
+`ignoreSSL: true`, and with that option the plugin API's `HttpApiClient` removes the server name
+(SNI) from the TLS handshake. Endpoints behind Cloudflare abort such a handshake, and the integration
+form only says *Failed to create integration*. This plugin sets `ignoreSSL: false` and is not
+affected. The full analysis is in
+[docs/hpe-bug-report-local-llm-sni.md](https://github.com/tgessendorfer/morpheus-openrouter-plugin/blob/main/docs/hpe-bug-report-local-llm-sni.md).
 
 ## Companion project: hpe-kb-mcp
 
