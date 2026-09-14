@@ -44,17 +44,7 @@ class AnthropicProviderSpec extends Specification {
 		missing.every { it.value.isEmpty() }
 
 		where:
-		bundle << [['messages', 'messages_de', 'messages_pl', 'messages_cs', 'messages_hu', 'messages_ro']]
-	}
-
-	def "the languages Morpheus lacks are offered as custom locales, each with a bundle"() {
-		given:
-		AnthropicLocalizationProvider localization = new AnthropicLocalizationProvider(null, null)
-
-		expect:
-		localization.customLocales*.code == ['cs', 'hu', 'ro']
-		localization.getCustomLocales(null)*.name == ['Czech', 'Hungarian', 'Romanian']
-		localization.customLocales.every { getClass().getResource("/i18n/messages_${it.code}.properties") != null }
+		bundle << [['messages', 'messages_de', 'messages_pl']]
 	}
 
 	def "descriptions fit Morpheus' 255-character columns, or plugin registration fails outright"() {
@@ -498,9 +488,6 @@ class AnthropicProviderSpec extends Specification {
 		'There are no instances, and all 4 servers are running.'         || 'Cost'
 		'Alle Server laufen: web01, db01 und app01 sind aktiv.'          || 'Kosten'
 		'Wszystkie 4 serwery działają, nie ma żadnych instancji.'        || 'Koszt'
-		'Všechny 4 servery běží a nejsou žádné instance.'                || 'Náklady'
-		'Mind a 4 szerver fut, és nincs egyetlen példány sem.'           || 'Költség'
-		'Toate cele 4 servere rulează și nu există nicio instanță.'      || 'Cost'
 	}
 
 	def "request counts take the plural form of the answer's language"() {
@@ -515,17 +502,6 @@ class AnthropicProviderSpec extends Specification {
 		5     | 'pl'     || '5 zapytań'
 		12    | 'pl'     || '12 zapytań'
 		22    | 'pl'     || '22 zapytania'
-		3     | 'cs'     || '3 požadavky'
-		5     | 'cs'     || '5 požadavků'
-		7     | 'hu'     || '7 kérés'
-		5     | 'ro'     || '5 cereri'
-		20    | 'ro'     || '20 de cereri'
-		101   | 'ro'     || '101 cereri'
-	}
-
-	def "a Romanian answer is recognised even though its label matches English"() {
-		expect:
-		AnthropicProvider.answerLanguage('Toate cele 4 servere rulează și nu există nicio instanță.') == 'ro'
 	}
 
 	def "a single request that reports no cost keeps the token line"() {

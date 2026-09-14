@@ -189,10 +189,8 @@ Fill in:
 | **Restrict to Domains** | optional allow list, e.g. `docs.morpheusdata.com, community.hpe.com` |
 
 The form is translated. Its labels and help texts follow the **Default Locale** under *User
-Settings*: English, German and Polish, plus Czech, Hungarian and Romanian, which Morpheus itself does
-not offer — the plugin adds those three to the locale list, and picking one translates this form while
-the rest of Morpheus stays English. German, Polish and Czech have been shown on a live appliance, but only the German texts have been
-reviewed; corrections from native speakers are welcome. The plugin description in the plugin list stays English —
+Settings*: English, German and Polish. Both translations have been shown on a live appliance, but
+only the German texts have been reviewed; corrections from native speakers are welcome. The plugin description in the plugin list stays English —
 Morpheus stores it as a single string.
 
 **Save.** The integration verifies itself by calling `GET /v1/models`, which doubles as the
@@ -527,8 +525,7 @@ What has been checked against the live OpenRouter endpoint:
 - **No `anthropic-ratelimit-*` headers.** The usage fields on the integration stay empty.
 - **Cost instead of tokens.** OpenRouter reports what each request cost. With **Append token usage
   to answers** on, a final answer ends with `*Cost: $0.0184 (2 requests)*` — or
-  `*Kosten: $0.0184 (2 Anfragen)*` under a German answer, and likewise in Polish, Czech, Hungarian and
-  Romanian — rather than the token line,
+  `*Kosten: $0.0184 (2 Anfragen)*` under a German answer, and likewise in Polish — rather than the token line,
   summed over every request of the question, because an agent answer with tool rounds is many billed
   requests and the last one alone would understate it. Morpheus passes no conversation id, so the
   requests of one question are recognised by the conversation up to the user's latest message.

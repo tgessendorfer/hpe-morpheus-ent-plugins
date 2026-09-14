@@ -81,19 +81,16 @@ class AnthropicProvider implements LlmProvider {
 	// server-tool loop from spending the whole conversation on one answer.
 	static final Integer MAX_PAUSE_TURN_CONTINUATIONS = 4
 	// One or more italic usage lines at the very end of an answer.
-	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*(?:Tokens|Cost|Kosten|Koszt|Náklady|Költség): [^*\\n]*\\*)+\\s*$'
+	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*(?:Tokens|Cost|Kosten|Koszt): [^*\\n]*\\*)+\\s*$'
 	// Enough to pick the footer's language, not a language detector: answers in each
 	// language are full of its words and next to never contain the others'. Letters
 	// only one of the languages uses count extra.
 	static final Map<String, Set<String>> LANGUAGE_MARKERS = [
 		en: ['the', 'and', 'is', 'are', 'of', 'to', 'with', 'not', 'no', 'for', 'there', 'this', 'that', 'it', 'be', 'on', 'as', 'by', 'has', 'have'] as Set,
 		de: ['der', 'die', 'das', 'den', 'dem', 'und', 'ist', 'sind', 'nicht', 'keine', 'mit', 'auf', 'ein', 'eine', 'gibt', 'es', 'auch', 'wird', 'oder', 'bei', 'zu', 'von', 'im', 'sich', 'wie'] as Set,
-		pl: ['jest', 'są', 'się', 'nie', 'oraz', 'dla', 'czy', 'które', 'który', 'która', 'będzie', 'żadnych', 'działa', 'działają', 'wszystkie', 'w', 'i', 'na'] as Set,
-		cs: ['je', 'jsou', 'není', 'nejsou', 'nebo', 'pro', 'které', 'který', 'která', 'bude', 'běží', 'žádné', 'také', 'všechny', 'v', 've'] as Set,
-		hu: ['a', 'az', 'és', 'nem', 'van', 'vannak', 'egy', 'hogy', 'ez', 'is', 'fut', 'futnak', 'összes', 'szerver', 'szerverek', 'nincs', 'mind'] as Set,
-		ro: ['și', 'este', 'sunt', 'nu', 'de', 'la', 'în', 'cu', 'pentru', 'care', 'rulează', 'toate', 'servere', 'serverele', 'nicio', 'niciun'] as Set
+		pl: ['jest', 'są', 'się', 'nie', 'oraz', 'dla', 'czy', 'które', 'który', 'która', 'będzie', 'żadnych', 'działa', 'działają', 'wszystkie', 'w', 'i', 'na'] as Set
 	]
-	static final Map<String, String> LANGUAGE_LETTERS = [de: '[äß]', pl: '[ąęłńśźż]', cs: '[ěřůťď]', hu: '[őű]', ro: '[ăâîșțşţ]']
+	static final Map<String, String> LANGUAGE_LETTERS = [de: '[äß]', pl: '[ąęłńśźż]']
 	// One question is many billed requests once the agent calls tools, and only the
 	// last of them carries the answer the footer goes on - so cost is kept per question.
 	protected static final ConcurrentHashMap<String, Map> QUESTION_COSTS = new ConcurrentHashMap<>()
@@ -1504,7 +1501,7 @@ class AnthropicProvider implements LlmProvider {
 		return MessageDigest.getInstance('SHA-256').digest(prefix.getBytes('UTF-8')).encodeHex().toString()
 	}
 
-	/** en, de, pl, cs, hu or ro - whichever the answer reads as; English when in doubt. */
+	/** en, de or pl - whichever the answer reads as; English when in doubt. */
 	protected static String answerLanguage(String text) {
 		String lower = (text ?: '').toLowerCase()
 		List<String> words = lower.findAll(/\p{L}+/)
@@ -1517,7 +1514,7 @@ class AnthropicProvider implements LlmProvider {
 	}
 
 	protected static String costLabel(String language) {
-		return [de: 'Kosten', pl: 'Koszt', cs: 'Náklady', hu: 'Költség', ro: 'Cost'][language] ?: 'Cost'
+		return [de: 'Kosten', pl: 'Koszt'][language] ?: 'Cost'
 	}
 
 	/** "5 requests", with the plural form each language uses for that number. */
@@ -1529,12 +1526,6 @@ class AnthropicProvider implements LlmProvider {
 			int ones = count % 10
 			int tens = count % 100
 			noun = ones >= 2 && ones <= 4 && !(tens >= 12 && tens <= 14) ? 'zapytania' : 'zapytań'
-		} else if (language == 'cs') {
-			noun = count >= 2 && count <= 4 ? 'požadavky' : 'požadavků'
-		} else if (language == 'hu') {
-			noun = 'kérés'
-		} else if (language == 'ro') {
-			noun = count % 100 >= 20 || count % 100 == 0 ? 'de cereri' : 'cereri'
 		} else {
 			noun = 'requests'
 		}

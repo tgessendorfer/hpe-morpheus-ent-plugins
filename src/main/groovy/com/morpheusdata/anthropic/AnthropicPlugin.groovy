@@ -48,8 +48,6 @@ class AnthropicPlugin extends Plugin {
 		this.setWebsiteUrl('https://github.com/tgessendorfer/morpheus-anthropic-plugin')
 		AnthropicProvider anthropicProvider = new AnthropicProvider(this, morpheus)
 		this.pluginProviders.put(anthropicProvider.code, anthropicProvider)
-		AnthropicLocalizationProvider localizationProvider = new AnthropicLocalizationProvider(this, morpheus)
-		this.pluginProviders.put(localizationProvider.code, localizationProvider)
 	}
 
 	@Override
