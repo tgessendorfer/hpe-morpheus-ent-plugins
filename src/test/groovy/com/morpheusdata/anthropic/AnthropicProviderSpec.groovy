@@ -26,6 +26,27 @@ class AnthropicProviderSpec extends Specification {
 		return msg
 	}
 
+	def "every form label and help text has an entry in each language bundle"() {
+		given:
+		List<String> keys = provider.optionTypes.collectMany { OptionType optionType ->
+			[optionType.fieldCode] + (optionType.helpText ? [optionType.helpTextI18nCode] : [])
+		}
+		Map<String, List<String>> missing = bundle.collectEntries { String name ->
+			Properties properties = new Properties()
+			InputStream stream = getClass().getResourceAsStream("/i18n/${name}.properties")
+			assert stream != null: "i18n/${name}.properties is not on the classpath"
+			stream.withStream { properties.load(it) }
+			[(name): keys.findAll { !properties.getProperty(it)?.trim() }]
+		}
+
+		expect:
+		keys.every { it }
+		missing.every { it.value.isEmpty() }
+
+		where:
+		bundle << [['messages', 'messages_de']]
+	}
+
 	def "descriptions fit Morpheus' 255-character columns, or plugin registration fails outright"() {
 		expect:
 		AnthropicPlugin.DESCRIPTION.length() <= 255

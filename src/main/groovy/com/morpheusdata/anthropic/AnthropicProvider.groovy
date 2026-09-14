@@ -367,6 +367,15 @@ class AnthropicProvider implements LlmProvider {
 			helpText: 'Optional comma-separated allow list, for example: docs.morpheusdata.com, community.hpe.com, support.hpe.com. Bare hostnames with an optional path and no scheme. Leave empty to search the whole web. Narrowing this is the strongest control against a fetched page trying to talk the agent into something.'
 		)
 
+		// Labels and help texts resolve through the plugin's i18n bundles in
+		// src/main/resources/i18n, in the viewer's language; the literal texts above
+		// stay as the fallback.
+		optionTypes.each { OptionType optionType ->
+			optionType.fieldCode = "${optionType.code}.label".toString()
+			if (optionType.helpText) {
+				optionType.helpTextI18nCode = "${optionType.code}.help".toString()
+			}
+		}
 		return optionTypes
 	}
 
