@@ -123,8 +123,8 @@ class VMSync {
                 usedMemory       : cloudItem.mem?.toLong(),
                 usedCpu          : usedCpuPercent.toLong(),
                 parentServer     : parentServer,
-                osType           : 'unknown',
-                serverOs         : new OsType(code: 'unknown'),
+                osType           : cloudItem.osCode ?: 'unknown',
+                serverOs         : new OsType(code: cloudItem.osCode ?: 'unknown'),
                 category         : "proxmox.ve.vm.${cloud.id}",
                 computeServerType: computeServerType
             )
@@ -165,7 +165,12 @@ class VMSync {
                         maxMemory  : cloudItem.maxmem?.toLong(),
                         usedMemory : cloudItem.mem?.toLong(),
                         usedCpu    : usedCpuPercent.toLong(),
-                        powerState : cloudPowerState
+                        powerState : cloudPowerState,
+                        // Repairs records synced before the OS was read from the
+                        // Proxmox config. Only upgrades away from 'unknown': if an
+                        // operator has set a more specific OS by hand, keep theirs.
+                        osType     : (existingItem.osType in [null, '', 'unknown'])
+                                ? (cloudItem.osCode ?: 'unknown') : existingItem.osType
                 ]
 
                 Map capacityFieldValueMap = [
@@ -186,6 +191,12 @@ class VMSync {
                     needsUpdate = true
                 }
                 
+                if ((existingItem.serverOs?.code in [null, '', 'unknown']) && cloudItem.osCode
+                        && cloudItem.osCode != 'unknown') {
+                    existingItem.serverOs = new OsType(code: cloudItem.osCode)
+                    needsUpdate = true
+                }
+
                 if (needsUpdate) {
                     updates << existingItem
                 }

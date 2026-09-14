@@ -24,11 +24,15 @@ class ProxmoxVePlugin extends Plugin {
     @Override
     void initialize() {
         this.setName("Proxmox VE")
+        // Keep this short: plugin_instance.description is a bounded column and an
+        // over-long value fails the upload with a DataIntegrityViolationException.
+        this.setDescription("Proxmox VE 8/9 cloud: syncs nodes, VMs, networks, datastores, pools and templates, and provisions VMs.")
         this.registerProvider(new ProxmoxVeCloudProvider(this, this.morpheus))
         this.registerProvider(new ProxmoxVeProvisionProvider(this, this.morpheus))
         this.registerProvider(new ProxmoxVeOptionSourceProvider(this, this.morpheus))
         this.registerProvider(new ProxmoxVeNodeOptionSourceProvider(this, this.morpheus))
         this.registerProvider(new ProxmoxVeVirtualImageDatasetProvider(this, this.morpheus))
+        this.registerProvider(new ProxmoxVeCloudSummaryProvider(this, this.morpheus))
         def networkProvider = new ProxmoxNetworkProvider(this, this.morpheus)
         this.registerProvider(networkProvider)
         networkProviderCode = networkProvider.code

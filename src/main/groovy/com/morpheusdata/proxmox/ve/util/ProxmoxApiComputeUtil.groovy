@@ -1172,6 +1172,10 @@ class ProxmoxApiComputeUtil {
             if (vm?.template == 1 && vm?.type == "qemu") {
                 vm.ip = ""
                 def vmConfigInfo = callListApiV2(client, "nodes/$vm.node/qemu/$vm.vmid/config", authConfig)
+                def vmCfg = (vmConfigInfo?.data instanceof Map && vmConfigInfo.data.data instanceof Map)
+                        ? vmConfigInfo.data.data
+                        : (vmConfigInfo?.data instanceof Map ? vmConfigInfo.data : [:])
+                vm.osCode = morpheusOsCode(vmCfg.ostype as String)
                 vm.maxCores = (vmConfigInfo?.data?.sockets?.toInteger() ?: 0) * (vmConfigInfo?.data?.cores?.toInteger() ?: 0)
                 vm.coresPerSocket = vmConfigInfo?.data?.cores?.toInteger() ?: 0
 
@@ -1187,6 +1191,90 @@ class ProxmoxApiComputeUtil {
             }
         }
         return new ServiceResponse(success: true, data: vms)
+    }
+
+
+    /**
+     * List LXC containers. Proxmox keeps them apart from QEMU guests: they appear in
+     * cluster/resources with type "lxc", and their detail lives under
+     * nodes/{node}/lxc/{vmid} rather than .../qemu/{vmid}. listVMs filters this type
+     * out, which is why a container is invisible to Morpheus without this.
+     *
+     * No guest agent is involved. A container's address is in its config's netN
+     * string — "name=eth0,bridge=vmbr0,ip=<address>/<prefix>,..." — so it is parsed
+     * rather than queried, and a container set to DHCP simply has no address to give.
+     */
+    /**
+     * Morpheus OS code for a Proxmox `ostype`.
+     *
+     * Proxmox records it in every guest's config — "l26" for a modern Linux, "win11",
+     * "solaris" and so on — and the plugin discarded it, hard-coding "unknown" so
+     * every synced VM showed a grey question mark where an OS icon belongs.
+     * Anything unrecognised stays "unknown" rather than being guessed at.
+     */
+    static String morpheusOsCode(String proxmoxOsType) {
+        if (!proxmoxOsType) return 'unknown'
+        String t = proxmoxOsType.toLowerCase()
+        if (t in ['l24', 'l26']) return 'linux'
+        if (t == 'solaris') return 'solaris'
+        if (t.startsWith('w') || t.startsWith('win')) return 'windows'
+        return 'unknown'
+    }
+
+
+    static ServiceResponse listLXCs(HttpApiClient client, Map authConfig) {
+        log.debug("API Util listLXCs")
+        def containers = []
+        def resources = callListApiV2(client, "cluster/resources", authConfig)
+        resources.data.each { Map ct ->
+            if (ct?.type != "lxc" || ct?.template == 1) return
+            def cfg = callListApiV2(client, "nodes/$ct.node/lxc/$ct.vmid/config", authConfig)
+            // callListApiV2 already unwraps to the response body's `data`, so the
+            // config map is cfg.data. Accept the doubly-nested shape too rather than
+            // depending on which it is: reading one level too deep silently yields an
+            // empty map, and an empty map here looks exactly like a container with no
+            // address and no cores.
+            def cfgData = (cfg?.data instanceof Map && cfg.data.data instanceof Map) ? cfg.data.data
+                        : (cfg?.data instanceof Map ? cfg.data : [:])
+            ct.ip = extractLxcIpv4(cfgData)
+            // cluster/resources reports maxcpu; /nodes/{node}/lxc reports cpus. The
+            // config's `cores` is the authority when present.
+            ct.maxCores = (cfgData.cores?.toString()?.isInteger() ? cfgData.cores.toInteger()
+                          : (ct.maxcpu ?: ct.cpus ?: 0))
+            ct.coresPerSocket = ct.maxCores
+            ct.hostname = cfgData.hostname ?: ct.name
+            ct.ostype = cfgData.ostype
+            // rootfs reads "local-lvm:vm-101-disk-0,size=50G"; the datastore is the
+            // part before the colon, matching how listVMs reports disk storage.
+            ct.datastores = ([cfgData.rootfs] + cfgData.findAll { k, v -> k ==~ /^mp\d+$/ }.values())
+                    .findAll { it instanceof String && it.contains(':') }
+                    .collect { it.split(':')[0] }.unique()
+            containers << ct
+        }
+        log.debug("Found ${containers.size()} LXC container(s)")
+        return new ServiceResponse(success: true, data: containers)
+    }
+
+
+    /**
+     * IPv4 out of a Proxmox netN config string, or null.
+     *
+     * Handles the cases that actually occur: no netN at all, ip=dhcp, ip=manual,
+     * an IPv6-only container, and the CIDR suffix. Returning null rather than an
+     * empty string keeps "unknown" distinct from "none".
+     */
+    static String extractLxcIpv4(Map config) {
+        def nets = config?.findAll { k, v -> k ==~ /^net\d+$/ && v instanceof String }?.values() ?: []
+        for (String net : nets) {
+            def m = (net =~ /(?:^|,)ip=([^,]+)/)
+            if (!m.find()) continue
+            String raw = m.group(1).trim()
+            if (raw in ['dhcp', 'manual', 'auto']) continue
+            String addr = raw.split('/')[0]
+            // Reject IPv6 and anything that is not four dotted octets.
+            if (addr ==~ /^\d{1,3}(\.\d{1,3}){3}$/) return addr
+        }
+        return null
     }
 
 
@@ -1216,6 +1304,10 @@ class ProxmoxApiComputeUtil {
                     }
                 }
                 def vmConfigInfo = callListApiV2(client, "nodes/$vm.node/qemu/$vm.vmid/config", authConfig)
+                def vmCfg = (vmConfigInfo?.data instanceof Map && vmConfigInfo.data.data instanceof Map)
+                        ? vmConfigInfo.data.data
+                        : (vmConfigInfo?.data instanceof Map ? vmConfigInfo.data : [:])
+                vm.osCode = morpheusOsCode(vmCfg.ostype as String)
                 vm.maxCores = (vmConfigInfo?.data?.data?.sockets?.toInteger() ?: 0) * (vmConfigInfo?.data?.data?.cores?.toInteger() ?: 0)
                 vm.coresPerSocket = vmConfigInfo?.data?.data?.cores?.toInteger() ?: 0
 
@@ -1348,6 +1440,42 @@ class ProxmoxApiComputeUtil {
                         log.warn("No valid network interface found for node ${hvHost.node}, using node name as fallback")
                         hvHost.ipAddress = hvHost.node  // Use node name as fallback
                     }
+                }
+
+                // Socket topology, which /nodes does not carry.
+                //
+                // This is what Morpheus licensing counts: it derives sockets on
+                // a hypervisor host from its core count and cores-per-socket,
+                // and with cores-per-socket at 0 the answer is 0 sockets. The
+                // appliance then falls back to counting guests as public-cloud
+                // workloads at 15:1 -- a one-socket host running four VMs
+                // reported 0.2667 sockets instead of 1.
+                //
+                // /nodes/<node>/status has it: cpuinfo.sockets and cpuinfo.cores.
+                // Best effort -- a node that does not answer keeps the old
+                // behaviour rather than failing the whole host sync.
+                try {
+                    def statusInfo = callListApiV2(client, "nodes/$hvHost.node/status", authConfig)
+                    def cpuinfo = statusInfo?.success ? statusInfo.data?.cpuinfo : null
+                    if (cpuinfo) {
+                        def sockets = (cpuinfo.sockets ?: 0) as Integer
+                        def cores = (cpuinfo.cores ?: 0) as Integer
+                        hvHost.cpuSockets = sockets
+                        // Morpheus wants cores PER SOCKET, and Proxmox reports
+                        // the totals. Guard the division: a node reporting 0
+                        // sockets must leave this 0 rather than throw.
+                        hvHost.coresPerSocket = (sockets > 0 && cores > 0)
+                                ? (cores.intdiv(sockets)) : 0
+                        log.debug("Node ${hvHost.node}: ${sockets} socket(s), ${cores} core(s) -> coresPerSocket=${hvHost.coresPerSocket}")
+                    } else {
+                        log.warn("No cpuinfo for node ${hvHost.node}; socket count will stay unknown")
+                        hvHost.cpuSockets = 0
+                        hvHost.coresPerSocket = 0
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to read status for node ${hvHost.node}: ${e.message}")
+                    hvHost.cpuSockets = 0
+                    hvHost.coresPerSocket = 0
                 }
 
                 // Set networks (with null checking and safe fallback)

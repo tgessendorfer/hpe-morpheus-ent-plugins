@@ -89,11 +89,11 @@ jar {
 				'Morpheus-Name': 'Proxmox VE',
 				'Morpheus-Organization': 'morpheus',
 				'Morpheus-Code': 'proxmox-ve',
-				'Morpheus-Description': 'TODO: Fill in the Plugin Description',
+				'Morpheus-Description': 'Proxmox VE 8/9 cloud: syncs nodes, VMs, networks, datastores, pools and templates, and provisions VMs.',
 				'Morpheus-Logo': 'assets/morpheus.svg',
 				'Morpheus-Logo-Dark': 'assets/morpheus.svg',
-				'Morpheus-Labels': 'Plugin',
-				'Morpheus-Repo': 'https://github.com/gomorpheus/example',
+				'Morpheus-Labels': 'Plugin, Cloud, Proxmox',
+				'Morpheus-Repo': 'https://github.com/HewlettPackard/morpheus-proxmox-ve-plugin',
 				'Morpheus-Min-Appliance-Version': "6.3.0"
 		)
 	}

@@ -2,12 +2,14 @@ package com.morpheusdata.proxmox.ve
 
 import com.morpheusdata.proxmox.ve.sync.DatastoreSync
 import com.morpheusdata.proxmox.ve.sync.HostSync
+import com.morpheusdata.proxmox.ve.sync.LxcSync
 import com.morpheusdata.proxmox.ve.sync.NetworkSync
 import com.morpheusdata.proxmox.ve.sync.PoolSync
 import com.morpheusdata.proxmox.ve.sync.VirtualImageLocationSync
 import com.morpheusdata.core.MorpheusContext
 import com.morpheusdata.core.Plugin
 import com.morpheusdata.core.providers.CloudProvider
+import com.morpheusdata.core.providers.CloudSummaryProvider
 import com.morpheusdata.core.providers.ProvisionProvider
 import com.morpheusdata.core.util.HttpApiClient
 import com.morpheusdata.model.BackupProvider
@@ -96,11 +98,14 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 				displayOrder: 0,
 				fieldContext: 'domain',
 				fieldLabel: 'Proxmox API URL',
-				fieldCode: 'gomorpheus.optiontype.serviceUrl',
 				fieldName: 'serviceUrl',
 				inputType: OptionType.InputType.TEXT,
 				required: true,
-				defaultValue: ""
+				defaultValue: "",
+				placeHolder: 'https://proxmox.example.com:8006',
+				helpText: 'Full base URL of the Proxmox VE API, including scheme and port — the web UI address, e.g. https://proxmox.example.com:8006. ' +
+						'The plugin appends /api2/json itself. A bare hostname or IP is not accepted and fails validation with ' +
+						'"Unable to validate cloud connection using provided credentials and URL". A self-signed certificate is fine; it is not verified.'
 		)
 
 		options << new OptionType(
@@ -121,24 +126,27 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 				code: 'proxmox-username',
 				displayOrder: 2,
 				fieldContext: 'config',
-				fieldLabel: 'User Name',
-				fieldCode: 'gomorpheus.optiontype.UserName',
+				fieldLabel: 'API User Name',
 				fieldName: 'username',
 				inputType: OptionType.InputType.TEXT,
 				localCredential: true,
-				required: true
+				required: true,
+				placeHolder: 'root@pam',
+				helpText: 'Proxmox API user in user@realm form, e.g. root@pam. The realm is required — a bare "root" will not authenticate. ' +
+						'Run "pveum user list" on a node to see valid users. This account is used for the API only, never for SSH.'
 		)
 		options << new OptionType(
 				name: 'Password',
 				code: 'proxmox-password',
 				displayOrder: 3,
 				fieldContext: 'config',
-				fieldLabel: 'Password',
-				fieldCode: 'gomorpheus.optiontype.Password',
+				fieldLabel: 'API Password',
 				fieldName: 'password',
 				inputType: OptionType.InputType.PASSWORD,
 				localCredential: true,
-				required: true
+				required: true,
+				helpText: 'Password for the Proxmox API user above. This is the password you use to log into the Proxmox web UI — ' +
+						'not necessarily the same as the node SSH password below.'
 		)
 /*		options << new OptionType(
 				name: 'Proxmox Token',
@@ -159,24 +167,49 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 				code: 'proxmox-host-username',
 				displayOrder: 5,
 				fieldContext: 'config',
-				fieldLabel: 'Initial Host Username',
-				fieldCode: 'gomorpheus.optiontype.HostUserName',
+				fieldLabel: 'Node SSH Username',
 				fieldName: 'hostUsername',
 				inputType: OptionType.InputType.TEXT,
 				localCredential: false,
-				required: true
+				required: true,
+				placeHolder: 'root',
+				helpText: 'A Linux SSH account on the Proxmox nodes themselves — not a Proxmox API user, so no @realm. ' +
+						'Used after the cloud is added, to upload qcow2 images, run "qm disk import" / "qm set", and write cloud-init ' +
+						'snippets to /var/lib/vz/snippets. Those need root: the plugin runs them without sudo. ' +
+						'The same account must exist with the same password on every node, and SSH keys are not supported. ' +
+						'Not checked when you save the cloud, so a wrong value here only shows up at the first provision.'
 		)
 		options << new OptionType(
 				name: 'Host SSH Password',
 				code: 'proxmox-host-password',
 				displayOrder: 6,
 				fieldContext: 'config',
-				fieldLabel: 'Initial Host Password',
-				fieldCode: 'gomorpheus.optiontype.HostPassword',
+				fieldLabel: 'Node SSH Password',
 				fieldName: 'hostPassword',
 				inputType: OptionType.InputType.PASSWORD,
 				localCredential: false,
-				required: true
+				required: true,
+				helpText: 'SSH password for the account above, on every node. The node must allow password authentication ' +
+						'("sshd -T | grep passwordauthentication"); key-based auth is not supported by this plugin.'
+		)
+
+		// Read-only: shows the detected Proxmox VE version on the cloud detail page.
+		// refresh() writes it to the domain field, so there is nothing to enter —
+		// hence showOnCreate/showOnEdit false and displayValueOnDetails true.
+		options << new OptionType(
+				name: 'Proxmox VE Version',
+				code: 'proxmox-service-version',
+				displayOrder: 7,
+				fieldContext: 'domain',
+				fieldLabel: 'Proxmox VE Version',
+				fieldName: 'serviceVersion',
+				inputType: OptionType.InputType.TEXT,
+				required: false,
+				editable: false,
+				showOnCreate: false,
+				showOnEdit: false,
+				displayValueOnDetails: true,
+				helpText: 'Detected from the Proxmox API on each refresh.'
 		)
 
 
@@ -328,7 +361,27 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 				platform: PlatformType.linux,
 				managed: true,
 				provisionTypeCode: 'proxmox-provision-provider',
-				nodeType: 'proxmox-node'
+				// 'morpheus-node' rather than an invented 'proxmox-node': every built-in
+				// hypervisor type uses it (mvm, mvmHost, morpheusKvmLinux, vmwareKvm), and
+				// the host detail page answers 403 for a node type Morpheus does not know.
+				nodeType: 'morpheus-node'
+		)
+		serverTypes << new ComputeServerType (
+				name: 'Proxmox VE LXC Container',
+				code: 'proxmox-lxc-container',
+				description: 'Proxmox VE LXC Container (discovered)',
+				vmHypervisor: false,
+				controlPower: false,
+				reconfigureSupported: false,
+				externalDelete: false,
+				hasAutomation: false,
+				agentType: ComputeServerType.AgentType.none,
+				platform: PlatformType.linux,
+				managed: false,
+				guestVm: true,
+				selectable: false,
+				creatable: false,
+				nodeType: 'unmanaged'
 		)
 		serverTypes << new ComputeServerType (
 				name: 'Proxmox VE VM',
@@ -452,18 +505,50 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 	 * ServiceResponse.success == false, the Cloud status will be set to ServiceResponse.data['status'] or Cloud.Status.error
 	 * if not specified. So, to indicate that the Cloud is offline, return `ServiceResponse.error('cloud is not reachable', null, [status: Cloud.Status.offline])`
 	 */
+	/**
+	 * Morpheus asks the CLOUD provider for its summary provider — it does not scan
+	 * registered providers for one. Registering ProxmoxVeCloudSummaryProvider on the
+	 * plugin was therefore not enough: the UI_EXTENSION appeared in the provider list
+	 * and was never called, and the page rendered its `<!-- zone summary -->` slot
+	 * empty with nothing in the log, because no code ran to fail.
+	 */
+	@Override
+	CloudSummaryProvider getCloudSummaryProvider() {
+		return plugin.getProviderByCode('proxmox-ve-cloud-summary') as CloudSummaryProvider
+	}
+
 	@Override
 	ServiceResponse refresh(Cloud cloudInfo) {
 
 		log.debug("Refresh triggered, service url is: " + cloudInfo.serviceUrl)
 		HttpApiClient client = new HttpApiClient()
 		try {
+			// Record the Proxmox VE version on the cloud, so it is visible in Morpheus
+			// without opening the Proxmox UI. Never fatal: a cloud that cannot report
+			// its version should still sync.
+			try {
+				Map versionAuthConfig = plugin.getAuthConfig(cloudInfo)
+				ServiceResponse versionResponse = ProxmoxApiComputeUtil.getProxmoxVersion(client, versionAuthConfig)
+				String pveVersion = versionResponse?.data?.version?.toString()
+				if (versionResponse?.success && pveVersion && cloudInfo.serviceVersion != pveVersion) {
+					log.info("Proxmox VE version detected: ${pveVersion}")
+					cloudInfo.serviceVersion = pveVersion
+					context.async.cloud.save(cloudInfo).blockingGet()
+				}
+			} catch (versionError) {
+				log.warn("Unable to record the Proxmox VE version: ${versionError.message}")
+			}
+
 			log.debug("Synchronizing hosts, datastores, networks, VMs and virtual images...")
 			(new PoolSync(plugin, cloudInfo, client)).execute()
 			(new HostSync(plugin, cloudInfo, client)).execute()
 			(new DatastoreSync(plugin, cloudInfo, client)).execute()
 			(new NetworkSync(plugin, cloudInfo, client)).execute()
 			(new VMSync(plugin, cloudInfo, client, this)).execute()
+			// After VMSync: the two scope themselves by distinct server type codes,
+			// so order does not affect correctness, but running containers second
+			// keeps the log reading VMs-then-containers like the API does.
+			(new LxcSync(plugin, cloudInfo, client, this)).execute()
 			(new VirtualImageLocationSync(plugin, cloudInfo, client, this)).execute()
 
 		} catch (e) {

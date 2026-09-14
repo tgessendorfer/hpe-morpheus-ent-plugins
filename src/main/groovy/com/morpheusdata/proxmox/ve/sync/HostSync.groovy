@@ -28,6 +28,7 @@ class HostSync {
     private Map authConfig
     private String hostUID
     private String hostPWD
+    private String clusterVersion
 
     /**
      * @author Neil van Rensburg
@@ -88,6 +89,25 @@ class HostSync {
     }
 
 
+    /**
+     * Proxmox VE version of the cluster, e.g. "9.2.10". Fetched once per sync and
+     * cached; nodes in a cluster run the same version. Null if it cannot be read,
+     * which must never stop the sync.
+     */
+    private String getClusterVersion() {
+        if (this.@clusterVersion == null) {
+            try {
+                def versionResponse = ProxmoxApiComputeUtil.getProxmoxVersion(apiClient, authConfig)
+                this.@clusterVersion = versionResponse?.success ? versionResponse?.data?.version?.toString() : ''
+            } catch (e) {
+                log.warn("Unable to read the Proxmox VE version: ${e.message}")
+                this.@clusterVersion = ''
+            }
+        }
+        return this.@clusterVersion ?: null
+    }
+
+
     private addMissingHosts(Cloud cloud, Collection<Map> addList) {
         log.debug "addMissingHosts: ${cloud} ${addList.size()}"
         def serverType = new ComputeServerType(code: 'proxmox-ve-node')
@@ -122,6 +142,39 @@ class HostSync {
                         serverType       : 'hypervisor',
                         computeServerType: serverType,
                         serverOs         : serverOs,
+                        platformVersion  : getClusterVersion(),
+                        // Must not be null. views/admin/servers/_dashboard.gsp passes it to a
+                        // Long method, and a null there fails to dispatch — "Ambiguous method
+                        // overloading ... between [Character] and [Number]" — which Morpheus
+                        // renders as a 403 page, so the host detail page looks like a
+                        // permissions problem and is not one.
+                        //
+                        // Read from /nodes/<node>/status now (see
+                        // ProxmoxApiComputeUtil.listProxmoxHypervisorHosts). This is what
+                        // licensing counts sockets from: hardcoded to 0, a one-socket host
+                        // reported 0 sockets, and its guests fell into the public-cloud
+                        // bucket at 15:1. Still 0 when the node cannot say, which is the
+                        // honest answer and the old behaviour.
+                        coresPerSocket   : (cloudItem.coresPerSocket ?: 0) as Integer,
+                        // Both must be non-null or the host detail page cannot render.
+                        // admin/servers/_capacityInfo.gsp line 7 evaluates
+                        //   ((capacityInfo?.maxMemory ?: 0l) - server.reservedMemory) * server.provisionPercent
+                        // with a ?: guard on maxMemory and none on the other two, and the
+                        // template runs only for vmHypervisor types — so a null here throws
+                        // "Ambiguous method overloading for method java.lang.Long", which
+                        // Morpheus serves as its 403 "You do not have permissions" page. The
+                        // error names the wrong subsystem entirely; four separate permission
+                        // theories were built on it before the stack trace was read.
+                        //
+                        // These properties do not exist in plugin-api 1.2.13. They were added
+                        // in 1.4.x, which is why this plugin now builds against 1.4.2.
+                        reservedMemory   : 0.0d,
+                        provisionPercent : 1.0d,
+                        // The host page prints "${server.platform} ${server.platformVersion}",
+                        // but the whole block is behind <g:if test="${server.platform}">, so
+                        // leaving platform null hides the Proxmox version even when
+                        // platformVersion is set. osType alone feeds a different line.
+                        platform         : 'linux',
                         osType           : 'linux',
                         hostname         : cloudItem.node,
                         externalIp       : cloudItem.ipAddress,
@@ -187,6 +240,17 @@ class HostSync {
                         //sshPassword : hostPWD,
                         hostname    : cloudItem.hostName ?: cloudItem.node,
                         externalIp  : cloudItem.ipAddress,
+                        platformVersion: getClusterVersion(),
+                        platform       : 'linux',
+                        // The freshly read topology wins, so a host created by an earlier
+                        // build — every one of which stored 0 — is repaired on the next
+                        // sync rather than keeping its zero for ever. Falls back to what is
+                        // already stored when the node did not answer.
+                        coresPerSocket : ((cloudItem.coresPerSocket ?: existingItem.coresPerSocket) ?: 0) as Integer,
+                        // Repairs hosts synced by an earlier build, which were created before
+                        // these could be set and whose detail page therefore 403s.
+                        reservedMemory : existingItem.reservedMemory ?: 0.0d,
+                        provisionPercent: existingItem.provisionPercent ?: 1.0d,
                         maxCores    : maxCpu.toLong(),
                         maxStorage  : maxDisk.toLong(),
                         usedStorage : usedDisk.toLong(),
