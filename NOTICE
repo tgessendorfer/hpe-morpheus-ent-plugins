@@ -41,7 +41,7 @@ third party (Section 6).
 Bundled icon
 --------------------------------------------------------------------------------
 
-The icons in src/assets/images/ (anthropic.svg, anthropic-white.svg) are
+The icons in src/assets/images/ (anthropic-mark.svg, anthropic-mark-white.svg) are
 original artwork created for this project and are covered by this repository's
 Apache License, Version 2.0. They are not Anthropic brand assets, and no
 official Anthropic logo is redistributed with this software.
