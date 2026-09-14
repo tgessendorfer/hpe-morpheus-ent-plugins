@@ -188,6 +188,12 @@ Fill in:
 | **Max Web Searches per Request** | `5`. The only ceiling on what a looping agent can spend on search |
 | **Restrict to Domains** | optional allow list, e.g. `docs.morpheusdata.com, community.hpe.com` |
 
+The form is translated. Its labels and help texts follow the **Default Locale** under *User
+Settings*: English, German and Polish, plus Czech, Hungarian and Romanian, which Morpheus itself does
+not offer. German has been checked on a live appliance; the other translations have not, and a
+native speaker's corrections are welcome. The plugin description in the plugin list stays English —
+Morpheus stores it as a single string.
+
 **Save.** The integration verifies itself by calling `GET /v1/models`, which doubles as the
 connectivity test and populates the model catalog. A save that succeeds means the appliance reached
 Anthropic and the key is valid.
@@ -520,7 +526,8 @@ What has been checked against the live OpenRouter endpoint:
 - **No `anthropic-ratelimit-*` headers.** The usage fields on the integration stay empty.
 - **Cost instead of tokens.** OpenRouter reports what each request cost. With **Append token usage
   to answers** on, a final answer ends with `*Cost: $0.0184 (2 requests)*` — or
-  `*Kosten: $0.0184 (2 Anfragen)*` under a German answer — rather than the token line,
+  `*Kosten: $0.0184 (2 Anfragen)*` under a German answer, and likewise in Polish, Czech, Hungarian and
+  Romanian — rather than the token line,
   summed over every request of the question, because an agent answer with tool rounds is many billed
   requests and the last one alone would understate it. Morpheus passes no conversation id, so the
   requests of one question are recognised by the conversation up to the user's latest message.

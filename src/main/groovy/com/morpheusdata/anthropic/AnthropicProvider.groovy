@@ -81,13 +81,19 @@ class AnthropicProvider implements LlmProvider {
 	// server-tool loop from spending the whole conversation on one answer.
 	static final Integer MAX_PAUSE_TURN_CONTINUATIONS = 4
 	// One or more italic usage lines at the very end of an answer.
-	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*(?:Tokens|Cost|Kosten): [^*\\n]*\\*)+\\s*$'
-	// Enough to pick the footer's language, not a language detector: German answers
-	// are full of these words, English ones next to never contain them.
-	static final Set<String> GERMAN_MARKERS = ['der', 'die', 'das', 'den', 'dem', 'und', 'ist', 'sind', 'nicht', 'keine',
-		'mit', 'auf', 'ein', 'eine', 'gibt', 'es', 'auch', 'wird', 'oder', 'bei', 'zu', 'von', 'im', 'sich', 'wie'] as Set
-	static final Set<String> ENGLISH_MARKERS = ['the', 'and', 'is', 'are', 'of', 'to', 'with', 'not', 'no', 'for', 'there',
-		'this', 'that', 'it', 'be', 'on', 'as', 'by', 'has', 'have'] as Set
+	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*(?:Tokens|Cost|Kosten|Koszt|Náklady|Költség): [^*\\n]*\\*)+\\s*$'
+	// Enough to pick the footer's language, not a language detector: answers in each
+	// language are full of its words and next to never contain the others'. Letters
+	// only one of the languages uses count extra.
+	static final Map<String, Set<String>> LANGUAGE_MARKERS = [
+		en: ['the', 'and', 'is', 'are', 'of', 'to', 'with', 'not', 'no', 'for', 'there', 'this', 'that', 'it', 'be', 'on', 'as', 'by', 'has', 'have'] as Set,
+		de: ['der', 'die', 'das', 'den', 'dem', 'und', 'ist', 'sind', 'nicht', 'keine', 'mit', 'auf', 'ein', 'eine', 'gibt', 'es', 'auch', 'wird', 'oder', 'bei', 'zu', 'von', 'im', 'sich', 'wie'] as Set,
+		pl: ['jest', 'są', 'się', 'nie', 'oraz', 'dla', 'czy', 'które', 'który', 'która', 'będzie', 'żadnych', 'działa', 'działają', 'wszystkie', 'w', 'i', 'na'] as Set,
+		cs: ['je', 'jsou', 'není', 'nejsou', 'nebo', 'pro', 'které', 'který', 'která', 'bude', 'běží', 'žádné', 'také', 'všechny', 'v', 've'] as Set,
+		hu: ['a', 'az', 'és', 'nem', 'van', 'vannak', 'egy', 'hogy', 'ez', 'is', 'fut', 'futnak', 'összes', 'szerver', 'szerverek', 'nincs', 'mind'] as Set,
+		ro: ['și', 'este', 'sunt', 'nu', 'de', 'la', 'în', 'cu', 'pentru', 'care', 'rulează', 'toate', 'servere', 'serverele', 'nicio', 'niciun'] as Set
+	]
+	static final Map<String, String> LANGUAGE_LETTERS = [de: '[äß]', pl: '[ąęłńśźż]', cs: '[ěřůťď]', hu: '[őű]', ro: '[ăâîșțşţ]']
 	// One question is many billed requests once the agent calls tools, and only the
 	// last of them carries the answer the footer goes on - so cost is kept per question.
 	protected static final ConcurrentHashMap<String, Map> QUESTION_COSTS = new ConcurrentHashMap<>()
@@ -1363,9 +1369,9 @@ class AnthropicProvider implements LlmProvider {
 		if (questionCost instanceof BigDecimal) {
 			int requests = toInteger(response.metadata.get('question_requests')) ?: 1
 			// In the language of the answer it sits under.
-			boolean german = looksGerman(response.message.content.toString())
-			String count = requests > 1 ? " (${requests} ${german ? 'Anfragen' : 'requests'})" : ''
-			response.message.content = "${response.message.content}\n\n*${german ? 'Kosten' : 'Cost'}: ${formatCost(questionCost)}${count}*".toString()
+			String language = answerLanguage(response.message.content.toString())
+			String count = requests > 1 ? " (${requestCount(requests, language)})" : ''
+			response.message.content = "${response.message.content}\n\n*${costLabel(language)}: ${formatCost(questionCost)}${count}*".toString()
 			return response
 		}
 		LlmTokenUsage usage = response.tokenUsage
@@ -1498,12 +1504,41 @@ class AnthropicProvider implements LlmProvider {
 		return MessageDigest.getInstance('SHA-256').digest(prefix.getBytes('UTF-8')).encodeHex().toString()
 	}
 
-	protected static boolean looksGerman(String text) {
+	/** en, de, pl, cs, hu or ro - whichever the answer reads as; English when in doubt. */
+	protected static String answerLanguage(String text) {
 		String lower = (text ?: '').toLowerCase()
 		List<String> words = lower.findAll(/\p{L}+/)
-		int german = (words.count { it in GERMAN_MARKERS } as int) + (lower =~ /[äöüß]/ ? 2 : 0)
-		int english = words.count { it in ENGLISH_MARKERS } as int
-		return german > english
+		Map<String, Integer> scores = LANGUAGE_MARKERS.collectEntries { String language, Set<String> markers ->
+			String letters = LANGUAGE_LETTERS[language]
+			[(language): (words.count { it in markers } as int) + (letters && lower =~ letters ? 2 : 0)]
+		}
+		Map.Entry<String, Integer> best = scores.max { it.value }
+		return best.value > scores.en ? best.key : 'en'
+	}
+
+	protected static String costLabel(String language) {
+		return [de: 'Kosten', pl: 'Koszt', cs: 'Náklady', hu: 'Költség', ro: 'Cost'][language] ?: 'Cost'
+	}
+
+	/** "5 requests", with the plural form each language uses for that number. */
+	protected static String requestCount(int count, String language) {
+		String noun
+		if (language == 'de') {
+			noun = 'Anfragen'
+		} else if (language == 'pl') {
+			int ones = count % 10
+			int tens = count % 100
+			noun = ones >= 2 && ones <= 4 && !(tens >= 12 && tens <= 14) ? 'zapytania' : 'zapytań'
+		} else if (language == 'cs') {
+			noun = count >= 2 && count <= 4 ? 'požadavky' : 'požadavků'
+		} else if (language == 'hu') {
+			noun = 'kérés'
+		} else if (language == 'ro') {
+			noun = count % 100 >= 20 || count % 100 == 0 ? 'de cereri' : 'cereri'
+		} else {
+			noun = 'requests'
+		}
+		return "${count} ${noun}".toString()
 	}
 
 	protected static String formatCost(BigDecimal cost) {

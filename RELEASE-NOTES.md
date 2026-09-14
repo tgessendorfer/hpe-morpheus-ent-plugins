@@ -76,6 +76,13 @@ conversation up to the user's latest message. Against `api.anthropic.com`, which
 token line stays. Costs of a paused and resumed turn now add up as decimals instead of being
 truncated to zero.
 
+**The integration form speaks six languages.** Labels and help texts follow the Default Locale in
+User Settings: English, German, Polish, Czech, Hungarian and Romanian. German was checked on a live
+appliance, including the menu names Morpheus' own German translation uses. The Polish, Czech,
+Hungarian and Romanian texts have not been reviewed by native speakers yet — corrections welcome. The
+cost line under OpenRouter answers follows the language of the answer in the same six languages,
+with the plural forms each of them uses.
+
 **Web search no longer slows MCP agents down.** With web search on, Claude 4.6 and newer used to get
 `web_search_20260318` / `web_fetch_20260318`, which run the search inside code execution to filter
 results. Once code execution was there, the model also used it to process MCP tool results — measured
