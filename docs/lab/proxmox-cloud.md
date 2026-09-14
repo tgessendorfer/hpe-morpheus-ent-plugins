@@ -313,10 +313,12 @@ So the version is **stored but not displayable** in 9.0.1 from a plugin:
 | `GET /api/servers/{id}` → `platformVersion` | `9.2.10` |
 | Cloud Summary panel | fixed nine fields, no version |
 | Cloud → Hosts tab | columns are Power, OS, Name, Type, Cloud, IP, Compute, Memory, Storage, Status — no version |
-| Host detail page | would show it — but returns 403, see below |
+| Host detail page | would show it — but returned 403 at the time, see below |
 
-The version and the 403 are the same problem in the end: the host detail page
-is where a node's `platformVersion` belongs, and that page is unreachable.
+The version and the 403 turned out to be the same problem: the host detail page
+is where a node's `platformVersion` belongs, and at 0.1.2 that page was
+unreachable. *The 403 on the host page* below fixes the page, and *Where the
+version actually shows* puts the version on it.
 
 ## LXC containers — discovered since 0.1.9
 
@@ -377,12 +379,12 @@ the view.
 
 ## Guests: one VM was correct, the container was not synced
 
-Before 0.1.9 the cloud reported 1 hypervisor and 1 VM, which was right — `qm list` on the node
-returns exactly one QEMU guest, `9000 morpheus-appliance`. What is missing is
-`pct list`: **LXC container 101 `plex` is not synced at all**, because the
-plugin syncs QEMU guests only. Its TODO has "Add provision container host"
-unticked, so this is a known gap rather than a fault. A Proxmox host running
-containers will always look emptier in Morpheus than it is.
+Before 0.1.9 the cloud reported 1 hypervisor and 1 VM, which was right —
+`qm list` on the node returns exactly one QEMU guest, `9000 morpheus-appliance`.
+What was missing is `pct list`: **LXC container 101 `plex` was not synced at
+all**, because the plugin synced QEMU guests only. Its TODO had "Add provision
+container host" unticked, so this was a known gap rather than a fault. 0.1.9
+closed it for discovery — see *LXC containers — discovered since 0.1.9* above.
 
 ## The 403 on the host page: three theories, all wrong
 
@@ -411,7 +413,9 @@ compelling; changing it registered correctly and the 403 persisted.
 Nothing is logged at INFO, but `logback.xml` is `scan="true" scanPeriod="5
 seconds"`, so `com.morpheus` and `org.springframework.security` can be raised
 to DEBUG on a **running** appliance and reverted the same way — no restart, no
-downtime. Do that rather than assuming the log has nothing to say.
+downtime. Do that rather than assuming the log has nothing to say. The API
+cannot reproduce the failure: a bearer token fetching `/infrastructure/servers/1`
+gets `302` to the login form, so load the page in a browser session.
 
 The captured request settles it. Spring Security *allowed* it:
 
@@ -524,14 +528,16 @@ without trusting the page's appearance:
 This is a database write on a live appliance, so it belongs to whoever owns the
 appliance rather than to a script here.
 
-**The repair sticks.** `HostSync` updates a fixed set of fields and
-`reserved_memory` is not among them, so a cloud refresh cannot put it back to
-NULL — verified after several refreshes, the row still reads `0` and the host
-page still renders. What does *not* carry is the fix to **new** records: a node
-discovered later is created with the column NULL, because plugin-api 1.2.13
-exposes no `reservedMemory` property for the sync to set. One-off on a
-single-node lab; once per node on a real cluster, and only when each node first
-appears.
+**The repair sticks.** At 1.2.13 `HostSync` updated a fixed set of fields that
+did not include `reserved_memory`, so a cloud refresh could not put it back to
+NULL — verified after several refreshes, the row still read `0` and the host
+page still rendered. The fix did not carry to **new** records then, because
+plugin-api 1.2.13 exposes no `reservedMemory` property for the sync to set.
+
+That is no longer so. Since 0.1.6 `HostSync` sets `reserved_memory` to 0 when it
+creates a host, and on update fills a NULL while keeping any value already
+there (see above). The SQL is only needed on an appliance still running a build
+older than 0.1.6.
 
 ### Where the version actually shows: `platform`, not `platformVersion`
 
@@ -568,26 +574,6 @@ Three things worth knowing if you edit this further:
 - **Dropping `fieldCode` is what lets a custom `fieldLabel` win.** The stock
   fields carry i18n codes like `gomorpheus.optiontype.HostUserName`, which
   override the label set beside them.
-
-## Still open: 403 on the host detail page
-
-Clicking the `proxmox` host on the cloud's Hosts tab returns *"You do not have
-permissions to access this page"*, Error Code 403, for a System Admin on the
-master tenant.
-
-Ruled out so far: the record itself is fine and readable — `GET /api/servers/1`
-returns `200` with a correct `proxmox-ve-node` type, `managed: true`,
-`format: vmHypervisor`. Nothing is logged server-side in
-`/var/log/morpheus/morpheus-ui/current` at the time of the click, so this is a
-UI-layer route decision rather than an API denial. The role carries 171
-permissions, all `full` bar a handful of `read`, and **none of them is
-host-scoped** — no `infrastructure-hosts`, and no permission code containing
-"host" at all.
-
-Next step is a UI-session check rather than an API one: Administration › Roles ›
-System Admin, and look for a Hosts feature permission. A bearer token cannot
-fetch the page — `/infrastructure/servers/1` answers `302` to the login form —
-so this cannot be settled from the API side.
 
 ## Two prerequisites that are easy to miss
 
