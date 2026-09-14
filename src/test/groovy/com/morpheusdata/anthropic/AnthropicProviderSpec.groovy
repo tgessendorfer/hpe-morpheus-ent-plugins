@@ -284,6 +284,46 @@ class AnthropicProviderSpec extends Specification {
 		provider.estimateContextWindow('claude-3-5-haiku-latest', true) == AnthropicProvider.STANDARD_CONTEXT_WINDOW
 	}
 
+	def "a gateway model id with a vendor prefix and dotted version is sized like the native one"() {
+		expect:
+		provider.estimateContextWindow('anthropic/claude-sonnet-4.6', true) == AnthropicProvider.LONG_CONTEXT_WINDOW
+		provider.estimateMaxOutputTokens('anthropic/claude-sonnet-4.6') == provider.estimateMaxOutputTokens('claude-sonnet-4-6')
+	}
+
+	def "the catalog keeps Claude models in both the Anthropic and the OpenRouter spelling"() {
+		given: 'a models response mixing both spellings with the rest of a gateway catalog'
+		Map apiResponse = [data: [
+			[id: 'claude-sonnet-4-6', display_name: 'Claude Sonnet 4.6'],
+			[id: 'anthropic/claude-haiku-4.5', name: 'Anthropic: Claude Haiku 4.5'],
+			[id: 'anthropic/claude-haiku-4.5:batch', name: 'Anthropic: Claude Haiku 4.5 (batch)'],
+			[id: 'openai/gpt-5', name: 'OpenAI: GPT-5']
+		]]
+
+		when:
+		def models = provider.buildModelsFromApiResponse(null, apiResponse)
+
+		then: 'ids stay as listed, since that is the spelling the endpoint expects back'
+		models*.code == ['anthropic/claude-haiku-4.5', 'claude-sonnet-4-6']
+		and: "OpenRouter's vendor prefix is dropped from the name"
+		models*.name == ['Claude Haiku 4.5', 'Claude Sonnet 4.6']
+	}
+
+	def "an Anthropic-format listing from OpenRouter keeps its [1m] ids, drops the vendor prefix and reports the long window"() {
+		when:
+		def models = provider.buildModelsFromApiResponse(null, [data: [
+			[id: 'anthropic/claude-sonnet-4.6[1m]', display_name: 'Anthropic: Claude Sonnet 4.6', type: 'model'],
+			[id: 'anthropic/claude-fable-5.1:batch[1m]', display_name: 'Anthropic: Claude Fable 5.1 (batch)', type: 'model'],
+			[id: 'anthropic/~anthropic/claude-sonnet-latest[1m]', display_name: 'Anthropic: Claude Sonnet Latest', type: 'model'],
+			[id: 'anthropic/openai/gpt-5.5[1m]', display_name: 'OpenAI: GPT-5.5', type: 'model']
+		]])
+
+		then:
+		models*.code == ['anthropic/claude-sonnet-4.6[1m]']
+		models*.name == ['Claude Sonnet 4.6']
+		models*.contextWindow == [AnthropicProvider.LONG_CONTEXT_WINDOW]
+		provider.supportsDynamicFiltering('anthropic/claude-sonnet-4.6[1m]')
+	}
+
 	def "thinking blocks and cache usage are surfaced in the response"() {
 		given:
 		Map apiResponse = [
@@ -407,6 +447,119 @@ class AnthropicProviderSpec extends Specification {
 		then: 'a footer here would be billed back as context on every later turn'
 		response.finishReason == 'tool_calls'
 		response.message.content == 'Checking.'
+	}
+
+	def "bytes carried as low surrogates are decoded back into the characters they were"() {
+		given:
+		Map stats = [:]
+
+		expect: 'U+DCC3 U+DCBC are the two UTF-8 bytes of u-umlaut'
+		AnthropicProvider.repairSurrogates('f\uDCC3\uDCBCr', stats) == 'für'
+		stats.count == 2
+		stats.sample == 'U+DCC3 U+DCBC'
+	}
+
+	def "an unpaired surrogate that is no escaped byte is dropped, while a real pair is kept"() {
+		given:
+		Map stats = [:]
+
+		expect:
+		AnthropicProvider.repairSurrogates('a\uD83Db 👋', stats) == 'ab 👋'
+		stats.count == 1
+		stats.sample == 'U+D83D'
+	}
+
+	def "replacement characters are counted across nested message content"() {
+		expect:
+		AnthropicProvider.countReplacementChars([[content: 'L�uft'], [content: [[text: '��']]]]) == 3
+		AnthropicProvider.countReplacementChars([[content: 'Läuft']]) == 0
+	}
+
+	def "clean text passes through untouched"() {
+		given:
+		Map stats = [:]
+
+		expect:
+		AnthropicProvider.repairSurrogates('Grüße 👋', stats) == 'Grüße 👋'
+		!stats.count
+	}
+
+	def "a request carrying mangled history is repaired before it is sent"() {
+		given: 'the conversation that failed with 400 surrogates not allowed after switching agents'
+		LlmChatRequest request = new LlmChatRequest(
+			model: 'claude-sonnet-5',
+			messages: [
+				message('user', 'Wie viele Instanzen?'),
+				message('assistant', 'Bereit f\uDCC3\uDCBCr die erste Instanz \uD800.'),
+				message('user', 'Und laufende?')
+			]
+		)
+
+		when:
+		Map body = provider.buildMessagesRequestBody(request, integration, false)
+
+		then:
+		body.messages[1].content == 'Bereit für die erste Instanz .'
+		body.messages.every { !(it.content as String).toCharArray().any { char c -> Character.isSurrogate(c) } }
+	}
+
+	def "history that lost characters to U+FFFD gets a note telling the model not to copy them"() {
+		given:
+		LlmChatRequest request = new LlmChatRequest(
+			model: 'anthropic/claude-sonnet-4.6[1m]',
+			messages: [
+				message('system', 'You are a Morpheus operator.'),
+				message('user', 'Which servers run?'),
+				message('assistant', 'Status: L�uft'),
+				message('user', 'And VMs?')
+			]
+		)
+
+		when:
+		Map body = provider.buildMessagesRequestBody(request, integration, false)
+
+		then: 'the note sits after the cached system prompt, so the cached prefix stays byte-identical'
+		body.system[0].text == 'You are a Morpheus operator.'
+		body.system[0].cache_control
+		body.system[-1].text == AnthropicProvider.REPLACEMENT_CHARACTER_NOTE
+		!body.system[-1].cache_control
+	}
+
+	def "clean history gets no replacement-character note"() {
+		given:
+		LlmChatRequest request = new LlmChatRequest(
+			model: 'claude-sonnet-5',
+			messages: [message('system', 'You are a Morpheus operator.'), message('user', 'Which servers run?')]
+		)
+
+		expect:
+		provider.buildMessagesRequestBody(request, integration, false).system*.text == ['You are a Morpheus operator.']
+	}
+
+	def "usage footers are stripped from answers replayed as history"() {
+		given: 'an answer with the plugin footer, and a later one where the model imitated it above the real one'
+		LlmChatRequest request = new LlmChatRequest(
+			model: 'anthropic/claude-haiku-4.5',
+			messages: [
+				message('user', 'How many instances are there?'),
+				message('assistant', 'There are 0 instances.\n\n*Tokens: 13,229 cached, 1,405 input, 61 output*'),
+				message('user', 'How many are unmanaged?'),
+				message('assistant', 'There are 0 unmanaged instances.\n\n*Tokens: 13,229 cached, 1,534 input, 69 output*\n\n*Tokens: 13,229 cached, 1,747 input, 91 output*'),
+				message('user', 'And stopped ones?')
+			]
+		)
+
+		when:
+		Map body = provider.buildMessagesRequestBody(request, integration, false)
+
+		then: 'the model never sees a footer it could learn to write itself'
+		body.messages*.content == [
+			'How many instances are there?',
+			'There are 0 instances.',
+			'How many are unmanaged?',
+			'There are 0 unmanaged instances.',
+			'And stopped ones?'
+		]
 	}
 
 	def "extended thinking still wins over an explicit sampling opt-in"() {
@@ -635,6 +788,9 @@ class AnthropicProviderSpec extends Specification {
 		// Older than 4.6 despite the family number, and a 400 with the dated variant.
 		'claude-haiku-4-5'    || [AnthropicProvider.WEB_SEARCH_TOOL_TYPE_BASIC, AnthropicProvider.WEB_FETCH_TOOL_TYPE_BASIC]
 		'claude-sonnet-4-5'   || [AnthropicProvider.WEB_SEARCH_TOOL_TYPE_BASIC, AnthropicProvider.WEB_FETCH_TOOL_TYPE_BASIC]
+		// OpenRouter spells the same models with a vendor prefix and a dotted version.
+		'anthropic/claude-sonnet-4.6' || [AnthropicProvider.WEB_SEARCH_TOOL_TYPE, AnthropicProvider.WEB_FETCH_TOOL_TYPE]
+		'anthropic/claude-haiku-4.5'  || [AnthropicProvider.WEB_SEARCH_TOOL_TYPE_BASIC, AnthropicProvider.WEB_FETCH_TOOL_TYPE_BASIC]
 	}
 
 	def "an allow list is normalised to the bare hostnames the API accepts"() {

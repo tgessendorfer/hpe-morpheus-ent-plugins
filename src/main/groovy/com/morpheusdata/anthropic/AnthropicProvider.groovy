@@ -33,6 +33,10 @@ import groovy.json.JsonBuilder
 import groovy.json.JsonSlurper
 import groovy.util.logging.Slf4j
 
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -75,6 +79,11 @@ class AnthropicProvider implements LlmProvider {
 	// A paused turn is resumed by resending it unchanged; the cap stops a runaway
 	// server-tool loop from spending the whole conversation on one answer.
 	static final Integer MAX_PAUSE_TURN_CONTINUATIONS = 4
+	// One or more italic usage lines at the very end of an answer.
+	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*Tokens: [^*\\n]*\\*)+\\s*$'
+	static final String REPLACEMENT_CHARACTER_NOTE = 'Some earlier turns of this conversation came back from the chat ' +
+		'application with characters replaced by U+FFFD. Treat each such character as unknown and never copy it; ' +
+		'write every character of your answer correctly, including umlauts and other accented letters.'
 
 	AnthropicProvider(Plugin plugin, MorpheusContext morpheusContext) {
 		this.plugin = plugin
@@ -624,7 +633,13 @@ class AnthropicProvider implements LlmProvider {
 				return
 			}
 
-			messages << [role: role == 'assistant' ? 'assistant' : 'user', content: msg.content?.toString() ?: '']
+			String content = msg.content?.toString() ?: ''
+			if (role == 'assistant') {
+				// A final answer comes back as history on the next question. Left in, its
+				// usage footer teaches the model to write one itself, with invented numbers.
+				content = stripUsageFooter(content)
+			}
+			messages << [role: role == 'assistant' ? 'assistant' : 'user', content: content]
 		}
 
 		boolean cachingEnabled = isPromptCachingEnabled(accountIntegration)
@@ -717,7 +732,21 @@ class AnthropicProvider implements LlmProvider {
 		if (stream != null) {
 			requestBody.stream = stream
 		}
-		return requestBody
+		// Last, so it covers everything Morpheus handed over - history, system prompt
+		// and MCP tool catalog alike.
+		Map stats = [:]
+		Map repaired = repairSurrogatesDeep(requestBody, stats) as Map
+		if (stats.count) {
+			log.warn("Repaired ${stats.count} unpaired surrogate characters in the request (first: ${stats.sample})")
+		}
+		int replaced = countReplacementChars(repaired.messages)
+		if (replaced) {
+			log.warn("Replayed conversation contains ${replaced} U+FFFD replacement characters - that text was lost before it reached the plugin (${describeReplacementContext(repaired.messages as List)})")
+			// The characters cannot be restored here, but a model that reads "L�uft" in
+			// its own earlier answer starts writing it that way too.
+			appendSystemNote(repaired, REPLACEMENT_CHARACTER_NOTE)
+		}
+		return repaired
 	}
 
 	/**
@@ -816,7 +845,7 @@ class AnthropicProvider implements LlmProvider {
 	 * minor number on the family before them.
 	 */
 	protected boolean supportsDynamicFiltering(String model) {
-		String id = model?.toLowerCase() ?: ''
+		String id = normalizeModelId(model)
 		return id.contains('-4-6') || id.contains('-4-7') || id.contains('-4-8') ||
 			id.contains('sonnet-5') || id.contains('opus-5') || id.contains('fable-5') || id.contains('mythos-5')
 	}
@@ -957,6 +986,9 @@ class AnthropicProvider implements LlmProvider {
 		}
 
 		if (toolCalls) {
+			// The chat shows no trace of tool use, so without this an answer built from
+			// MCP data cannot be told apart from one the model made up.
+			log.info("Anthropic tool calls: ${toolCalls.collect { (it.function as Map).name }.join(', ')}")
 			response.metadata.put('tool_calls', toolCalls)
 			if (message.metadata == null) {
 				message.metadata = [:]
@@ -1039,13 +1071,18 @@ class AnthropicProvider implements LlmProvider {
 				}
 				Map entryMap = entry as Map
 				String modelId = entryMap.id?.toString()
-				if (!modelId || !modelId.startsWith('claude')) {
+				if (!isClaudeModelId(modelId)) {
 					return
 				}
 				LlmModel model = new LlmModel()
+				// Kept exactly as listed: that is the spelling the endpoint expects back.
 				model.code = modelId
 				model.externalId = modelId
-				model.name = entryMap.display_name?.toString() ?: formatModelName(modelId)
+				// Anthropic calls it display_name, OpenRouter name - or display_name as well
+				// when it answers in Anthropic's format. OpenRouter also prefixes the vendor,
+				// on most models but not all, so that is dropped for one consistent list.
+				String listedName = (entryMap.display_name ?: entryMap.name)?.toString()?.replaceFirst('^Anthropic:\\s*', '')
+				model.name = listedName ?: formatModelName(modelId)
 				model.providerCode = PROVIDER_CODE
 				model.modelType = 'chat'
 				model.contextWindow = estimateContextWindow(modelId, longContext)
@@ -1071,11 +1108,37 @@ class AnthropicProvider implements LlmProvider {
 	}
 
 	/**
+	 * Claude chat models, as Anthropic lists them ({@code claude-sonnet-4-6}) or as
+	 * a gateway that prefixes the vendor does ({@code anthropic/claude-sonnet-4.6}
+	 * on OpenRouter). Suffixed variants such as {@code :batch} are left out, since
+	 * each duplicates a model already in the list.
+	 */
+	protected boolean isClaudeModelId(String modelId) {
+		if (!modelId || modelId.contains(':')) {
+			return false
+		}
+		return modelId.startsWith('claude') || modelId.startsWith('anthropic/claude')
+	}
+
+	/**
+	 * One spelling for the capability checks, so they ignore the vendor prefix, the
+	 * dotted version and the [1m] variant suffix a gateway uses. Only for matching -
+	 * never sent anywhere.
+	 */
+	protected static String normalizeModelId(String modelId) {
+		return (modelId ?: '').toLowerCase().replaceFirst('^anthropic/', '').replaceFirst('\\[[^\\]]*\\]$', '').replace('.', '-')
+	}
+
+	/**
 	 * Claude models expose a 200k token context by default. Sonnet 4.5 and newer
 	 * can be extended to 1M via the context-1m beta header; that larger window is
 	 * only reported when the integration actually enables it.
 	 */
 	protected Long estimateContextWindow(String modelId, boolean longContext = false) {
+		// OpenRouter's Anthropic-format listing marks its 1M-context models this way.
+		if (modelId?.toLowerCase()?.endsWith('[1m]')) {
+			return LONG_CONTEXT_WINDOW
+		}
 		if (longContext && supportsLongContext(modelId)) {
 			return LONG_CONTEXT_WINDOW
 		}
@@ -1083,12 +1146,12 @@ class AnthropicProvider implements LlmProvider {
 	}
 
 	protected boolean supportsLongContext(String modelId) {
-		String id = modelId?.toLowerCase() ?: ''
+		String id = normalizeModelId(modelId)
 		return id.contains('sonnet-4-5') || id.contains('sonnet-4-6') || id.contains('sonnet-5') || id.contains('opus-5')
 	}
 
 	protected Long estimateMaxOutputTokens(String modelId) {
-		String id = modelId?.toLowerCase() ?: ''
+		String id = normalizeModelId(modelId)
 		if (id.contains('haiku-4') || id.contains('sonnet-4')) {
 			return 64000L
 		}
@@ -1247,6 +1310,149 @@ class AnthropicProvider implements LlmProvider {
 		// tags in the answer. Markdown itself has no notion of type size.
 		response.message.content = "${response.message.content}\n\n*Tokens: ${parts.join(', ')}*"
 		return response
+	}
+
+	/**
+	 * Removes usage footers from the end of an answer that is being replayed - the
+	 * plugin's own, and any imitation the model wrote before they were stripped.
+	 */
+	protected static String stripUsageFooter(String content) {
+		return content?.replaceFirst(USAGE_FOOTER_PATTERN, '')
+	}
+
+	/**
+	 * Removes unpaired UTF-16 surrogates before a request is serialised.
+	 *
+	 * Morpheus can hand a replayed conversation back with them, and no JSON encoder
+	 * turns one into valid UTF-8: api.anthropic.com then rejects the whole request
+	 * with "str is not valid UTF-8: surrogates not allowed", and every later turn of
+	 * that conversation fails the same way. A common way for raw bytes to travel
+	 * inside a string is one low surrogate per byte (U+DC80..U+DCFF), so a run of
+	 * those is decoded back as UTF-8 when it is valid; any other unpaired surrogate
+	 * is dropped.
+	 */
+	protected static Object repairSurrogatesDeep(Object value, Map stats) {
+		if (value instanceof CharSequence) {
+			return repairSurrogates(value.toString(), stats)
+		}
+		if (value instanceof Map) {
+			Map copy = new LinkedHashMap()
+			(value as Map).each { key, entry -> copy.put(key, repairSurrogatesDeep(entry, stats)) }
+			return copy
+		}
+		if (value instanceof List) {
+			return (value as List).collect { repairSurrogatesDeep(it, stats) }
+		}
+		return value
+	}
+
+	protected static String repairSurrogates(String text, Map stats) {
+		if (!text) {
+			return text
+		}
+		StringBuilder out = null
+		int length = text.length()
+		int i = 0
+		while (i < length) {
+			char c = text.charAt(i)
+			if (Character.isHighSurrogate(c) && i + 1 < length && Character.isLowSurrogate(text.charAt(i + 1))) {
+				out?.append(c)?.append(text.charAt(i + 1))
+				i += 2
+				continue
+			}
+			if (!Character.isSurrogate(c)) {
+				out?.append(c)
+				i++
+				continue
+			}
+			if (out == null) {
+				out = new StringBuilder(length).append(text, 0, i)
+			}
+			int end = i
+			ByteArrayOutputStream bytes = new ByteArrayOutputStream()
+			while (end < length && (int) text.charAt(end) >= 0xDC80 && (int) text.charAt(end) <= 0xDCFF) {
+				bytes.write((int) text.charAt(end) - 0xDC00)
+				end++
+			}
+			int skipTo = Math.max(end, i + 1)
+			recordSurrogates(stats, text, i, skipTo)
+			String decoded = end > i ? decodeStrictUtf8(bytes.toByteArray()) : null
+			if (decoded != null) {
+				out.append(decoded)
+			}
+			i = skipTo
+		}
+		return out != null ? out.toString() : text
+	}
+
+	/** Adds a text block after whatever system prompt the request has, cached or not. */
+	protected static void appendSystemNote(Map requestBody, String note) {
+		def system = requestBody.system
+		List blocks = system instanceof List ? new ArrayList(system as List) : (system ? [[type: 'text', text: system.toString()]] : [])
+		blocks << [type: 'text', text: note]
+		requestBody.system = blocks
+	}
+
+	/** Where the first U+FFFD sits: message index, role and a short ASCII-safe excerpt around it. */
+	protected static String describeReplacementContext(List messages) {
+		for (int index = 0; index < (messages?.size() ?: 0); index++) {
+			Map message = messages[index] instanceof Map ? messages[index] as Map : [:]
+			String text = firstTextContaining(message.content, '�')
+			if (text != null) {
+				int at = text.indexOf('�')
+				String excerpt = text.substring(Math.max(0, at - 24), Math.min(text.length(), at + 24))
+				String safe = excerpt.collect { String ch -> (ch.charAt(0) as int) in 0x20..0x7E ? ch : String.format('<U+%04X>', ch.charAt(0) as int) }.join()
+				return "first in message ${index}, role ${message.role}: ${safe}"
+			}
+		}
+		return 'not located'
+	}
+
+	protected static String firstTextContaining(Object value, String needle) {
+		if (value instanceof CharSequence) {
+			return value.toString().contains(needle) ? value.toString() : null
+		}
+		Collection children = value instanceof Map ? (value as Map).values() : value instanceof List ? value as List : []
+		for (Object child : children) {
+			String found = firstTextContaining(child, needle)
+			if (found != null) {
+				return found
+			}
+		}
+		return null
+	}
+
+	protected static int countReplacementChars(Object value) {
+		if (value instanceof CharSequence) {
+			return value.toString().count('�')
+		}
+		if (value instanceof Map) {
+			return (value as Map).values().sum(0) { countReplacementChars(it) } as int
+		}
+		if (value instanceof List) {
+			return (value as List).sum(0) { countReplacementChars(it) } as int
+		}
+		return 0
+	}
+
+	protected static String decodeStrictUtf8(byte[] bytes) {
+		try {
+			return StandardCharsets.UTF_8.newDecoder()
+				.onMalformedInput(CodingErrorAction.REPORT)
+				.onUnmappableCharacter(CodingErrorAction.REPORT)
+				.decode(ByteBuffer.wrap(bytes)).toString()
+		} catch (CharacterCodingException ignored) {
+			return null
+		}
+	}
+
+	protected static void recordSurrogates(Map stats, String text, int from, int to) {
+		stats.count = ((stats.count ?: 0) as Integer) + (to - from)
+		if (!stats.sample) {
+			stats.sample = (from..<Math.min(to, from + 8)).collect { int index ->
+				String.format('U+%04X', (int) text.charAt(index))
+			}.join(' ')
+		}
 	}
 
 	protected static String formatTokenCount(Integer value) {

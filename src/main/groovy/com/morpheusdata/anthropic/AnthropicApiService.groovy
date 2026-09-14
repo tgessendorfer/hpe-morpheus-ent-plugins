@@ -81,7 +81,10 @@ class AnthropicApiService {
 		// limit has to travel as a query parameter: HttpApiClient percent-encodes
 		// the path it is given, so a '?' inside it would be sent as %3F and the
 		// request would come back 404.
-		return executeGet(baseUrl, MODELS_PATH, apiKey, apiVersion, null, opts ?: [:], [limit: '100'])
+		// 1000 is the Anthropic maximum and keeps the catalog to one page. It matters
+		// behind a gateway: OpenRouter honours the limit across its whole multi-vendor
+		// catalog, and at 100 most Claude models fell beyond the first page.
+		return executeGet(baseUrl, MODELS_PATH, apiKey, apiVersion, null, opts ?: [:], [limit: '1000'])
 	}
 
 	/**

@@ -101,7 +101,7 @@ class AnthropicApiServiceSpec extends Specification {
 		spy.listModels('https://api.anthropic.com', 'sk-ant-test')
 
 		then: 'the path carries no query string - HttpApiClient would percent-encode the ? into %3F and the call would 404'
-		1 * spy.executeGet('https://api.anthropic.com', '/v1/models', 'sk-ant-test', _, null, [:], [limit: '100']) >> [success: true]
+		1 * spy.executeGet('https://api.anthropic.com', '/v1/models', 'sk-ant-test', _, null, [:], [limit: '1000']) >> [success: true]
 	}
 
 	def "executeGet puts query parameters on the request options rather than the path"() {
@@ -112,5 +112,28 @@ class AnthropicApiServiceSpec extends Specification {
 		then:
 		options.queryParams == [limit: '100']
 		!AnthropicApiService.MODELS_PATH.contains('?')
+	}
+
+	def "a JSON response without a charset is read as UTF-8"() {
+		given: 'a local endpoint answering like OpenRouter and api.anthropic.com do: application/json, no charset'
+		com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(new InetSocketAddress('127.0.0.1', 0), 0)
+		server.createContext('/v1/messages', { com.sun.net.httpserver.HttpExchange exchange ->
+			byte[] body = '{"type":"message","content":[{"type":"text","text":"Läuft"}]}'.getBytes('UTF-8')
+			exchange.responseHeaders.add('Content-Type', 'application/json')
+			exchange.sendResponseHeaders(200, body.length)
+			exchange.responseBody.withStream { it.write(body) }
+		} as com.sun.net.httpserver.HttpHandler)
+		server.start()
+
+		when:
+		Map result = new AnthropicApiService().createMessage("http://127.0.0.1:${server.address.port}", 'sk-ant-test',
+			[model: 'claude-haiku-4-5', max_tokens: 1, messages: []])
+
+		then:
+		result.success
+		result.data.content[0].text == 'Läuft'
+
+		cleanup:
+		server.stop(0)
 	}
 }

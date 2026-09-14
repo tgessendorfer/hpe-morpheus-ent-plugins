@@ -289,6 +289,10 @@ Two settings deserve thought:
   between turns**. Keep timestamps, user names and any other varying context out of it, or the cached
   prefix is invalidated on every turn and `cache_read_input_tokens` stays at zero.
 
+> **The new agent is missing from the chat's agent picker?** The chat widget loads its agent list
+> with the page, so an agent created afterwards does not appear — searching for it returns
+> *No agents found*. Reload the page.
+
 ![Agent conversation with live tool calls](docs/images/09-agent-conversation.png)
 
 That exchange is the plugin working end to end: Claude calls the Morpheus MCP tools, reads the
@@ -327,7 +331,9 @@ ends with an italic line:
 
 Only final answers get it. A turn that ends in a tool call is replayed to Anthropic as conversation
 history on the next request, so a footer there would enter the model's own context and be re-billed
-every turn after. The line is deliberately plain ASCII: Morpheus' storage path corrupts non-ASCII
+every turn after. Final answers are replayed too, on the next question, so the provider strips the
+footer from them before sending: a model that can read its earlier footers starts writing its own,
+with invented numbers, above the real one. The line is deliberately plain ASCII: Morpheus' storage path corrupts non-ASCII
 characters on that replay, and an arrow glyph in an early version killed the follow-up request with
 `400 ... str is not valid UTF-8: surrogates not allowed`. Markdown italics are as subtle as it gets
 — the chat renderer escapes raw HTML, so `<sub>` for smaller type shows up as literal tags.
@@ -475,6 +481,43 @@ alternative: web search discovers the document id, the MCP server reads the docu
 
 ---
 
+## Going through OpenRouter
+
+OpenRouter serves an Anthropic-compatible Messages endpoint, so this integration type works against
+it as it is — no second plugin, and the tool bridge, caching and streaming stay the same.
+
+| Field | Value |
+|---|---|
+| **API Endpoint** | `https://openrouter.ai/api` — the plugin appends `/v1/messages` and `/v1/models` |
+| **Credentials** | an OpenRouter key (`sk-or-v1-...`) |
+
+What has been checked against the live OpenRouter endpoint:
+
+- **Authentication** — the `x-api-key` header the plugin sends is accepted.
+- **Model ids** — OpenRouter lists `anthropic/claude-sonnet-4.6`, and the catalog keeps that spelling.
+  The `:batch` variants are skipped, and display names drop OpenRouter's `Anthropic: ` prefix. Web
+  search tool versions and the 1M window are chosen from the same model version either way.
+- **Prompt caching passes through.** A repeated request with a cached system prompt came back with
+  `cache_read_input_tokens: 13602` and cost about a twelfth of the first one. An agent on the
+  built-in Morpheus MCP server read 13,229 tokens from the cache on every turn.
+- **Model ids depend on the listing format.** Asked in Anthropic's format, as this plugin does,
+  OpenRouter lists its 1M-context Claude models as `anthropic/claude-sonnet-4.6[1m]`; in its own format
+  the same model is `anthropic/claude-sonnet-4.6`. Refreshes have seen both, which left each such model
+  in the catalog twice with one copy disabled — and Morpheus still offers disabled models in the agent
+  form, where picking one fails with *The AI model is no longer available*. The sync treats both
+  spellings as one model, keeps the stored copy and removes the leftover. A copy an agent still points
+  at cannot be removed: it stays disabled, is logged, and that agent needs its model picked again.
+- **No `anthropic-ratelimit-*` headers.** The usage fields on the integration stay empty.
+
+Two things to know:
+
+- **A successful save does not prove the key.** OpenRouter's model list is public and answers `200`
+  to any key, so status `ok` and a populated catalog only prove the appliance reached OpenRouter. The
+  first chat is the real test.
+- **Not yet verified through OpenRouter:** web search and fetch, and the 1M context beta header.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -493,6 +536,11 @@ alternative: web search discovers the document id, the MCP server reads the docu
 | TLS handshake failures | Behind a TLS-inspecting proxy, drop the proxy CA into `/etc/pki/ca-trust/source/anchors/`, run `update-ca-trust`, then `morpheus-ctl restart`. |
 | `cache_read_input_tokens` stays 0 after turn 2 | See [Proving it works](#proving-it-works). |
 | Thinking enabled and requests get rejected | The thinking budget must be **below** max output tokens. The provider raises `max_tokens` automatically, but an explicit per-request `max_tokens` below the budget still fails. |
+| A conversation fails on every turn with `400 ... str is not valid UTF-8: surrogates not allowed` | Morpheus handed back stored history containing unpaired surrogates, typically after answers with non-ASCII characters. The provider repairs them before sending and logs `Repaired N unpaired surrogate characters`; on an older plugin version, start a new conversation. `api.anthropic.com` rejects such a request outright, so switching an agent from a more tolerant gateway to it mid-conversation is where this shows up. |
+| Answers show `�` where umlauts or other accented letters belong | Morpheus replays stored chat history with non-ASCII characters replaced by U+FFFD; the log says `Replayed conversation contains N U+FFFD replacement characters` and names the message. Those characters are gone before the plugin sees them. The provider adds a note telling the model not to copy them, so new answers come out correct. |
+| Every model appears twice in the agent form, and one copy fails with *The AI model is no longer available* | A gateway listed the same model under two spellings on different refreshes (OpenRouter: with and without `[1m]`). Re-save the integration: the sync keeps one copy per model and removes the other. If the log says a copy could not be removed, an agent still uses it — pick that agent's model again. |
+| An answer looks invented, or does not match the appliance | Check whether a tool ran: `grep -E 'Anthropic (tool calls\|prompt cache)' /var/log/morpheus/morpheus-ui/current`. A question with no `tool calls` line was answered from the model or the conversation history, not from MCP. Smaller models such as Haiku tend to reuse an earlier answer, or quote example values from the MCP tool descriptions, instead of calling the tool. The built-in Morpheus MCP server loads tools per category, so a real lookup shows a `use_..._tools` call followed by the tool itself. |
+| The chat's agent picker says **No agents found** for an agent you just created | The chat widget loads its agent list with the page. Reload the page. |
 | The agent still says it cannot reach the web | Re-save the integration after ticking **Enable Web Search and Fetch**, and start a *new* conversation — the tool catalog is fixed for the life of one. Also confirm the agent is on this integration and not a second one. |
 | `400 invalid_request_error` mentioning web search | Web search is disabled for the organization in the Anthropic Console under *Privacy*, or the **Restrict to Domains** list has a scheme or a trailing slash the API rejects. |
 | The agent answers about a URL without reading it | `web_fetch` only reads URLs already in the conversation. Paste the link in the chat; a link that exists only in the agent's system prompt does not count. |
