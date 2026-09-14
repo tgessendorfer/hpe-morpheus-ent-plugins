@@ -2,6 +2,31 @@
 
 <u>This is a COMMUNITY maintained plugin WITHOUT official Morpheus support.</u>
 
+> ### About this fork
+>
+> A lab build, verified on **HPE Morpheus Enterprise 9.0.1** with **Proxmox VE
+> 9.2.10**. `main` is upstream `main`, plus
+> [ThePoshArchitect's Proxmox VE 9 commit](https://github.com/ThePoshArchitect/morpheus-proxmox-ve-plugin/commit/5841b29),
+> plus these changes:
+>
+> - **LXC containers are discovered** (read-only). Upstream syncs QEMU guests only.
+> - **Each guest's OS is read from Proxmox** instead of reporting Unknown.
+> - **The host detail page no longer returns 403.** The cause was a null
+>   `reservedMemory` that breaks the page render, which the plugin can only set
+>   on Plugin API 1.4.2.
+> - Hosts carry their platform, Proxmox version and socket topology.
+> - Every cloud form field has help text and a placeholder.
+>
+> Prebuilt jars are under
+> [Releases](https://github.com/tgessendorfer/morpheus-proxmox-ve-plugin/releases).
+> Changes per version are in [`RELEASE-NOTES.md`](RELEASE-NOTES.md), and
+> installing is covered in [`docs/lab/installing.md`](docs/lab/installing.md).
+> What breaks on Proxmox VE 9 and how the fixes were found is in
+> [`docs/lab/`](docs/lab/proxmox-cloud.md).
+>
+> The same terms as upstream apply: community code, no support, Apache 2.0.
+> The commit history records every change made to the upstream files.
+
 The Proxmox Plugin is a Morpheus Cloud Plugin that synchronizes VMs, templates, datastores, networks, resource pools and hypervisor hosts,
 then exposes VM Instance provisioning functionality. 
 
