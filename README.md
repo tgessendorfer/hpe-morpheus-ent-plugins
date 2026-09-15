@@ -175,9 +175,6 @@ never learns to write its own.
 
 ![Agent chat with the cost footer](docs/images/10-agent-chat.png)
 
-This answer also shows a Morpheus defect in the MCP tool `list_instances`; see
-[Troubleshooting](#troubleshooting).
-
 ### Prompt caching
 
 The plugin sets no cache breakpoints. Providers that cache on their own still do: with OpenAI
@@ -207,7 +204,8 @@ OpenRouter routes requests sent to `https://eu.openrouter.ai/api/v1` or
 model ids. The model list there contains only eligible models.
 
 In-region routing needs OpenRouter's **Business or Enterprise plan**, chosen by an organization admin
-under *Settings > Preferences > Account Type* on openrouter.ai. Without it, OpenRouter still accepts
+under *Settings > Preferences > Account Type* on openrouter.ai. Business is self-serve: an upgrade by
+credit card, without a contract or enterprise sales. Without it, OpenRouter still accepts
 the key check and serves the model list, but refuses every chat request. The plugin therefore sends
 one request for a model that cannot exist when you save an integration against a regional domain:
 without the plan it comes back refused, and the save fails with an explanation; with the plan it
