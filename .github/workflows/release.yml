@@ -1,0 +1,97 @@
+name: release
+
+# One tag prefix per plugin. The tag names the plugin and its version, for example
+# anthropic-v1.5.0, openrouter-v0.1.1 or proxmox-ve-v0.1.15-lab.
+on:
+  push:
+    tags:
+      - 'anthropic-v*'
+      - 'openrouter-v*'
+      - 'proxmox-ve-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Work out the plugin and version from the tag
+        id: tag
+        run: |
+          tag="$GITHUB_REF_NAME"
+          case "$tag" in
+            anthropic-v*)  dir=llm/anthropic;    name=Anthropic;    version="${tag#anthropic-v}" ;;
+            openrouter-v*) dir=llm/openrouter;   name=OpenRouter;   version="${tag#openrouter-v}" ;;
+            proxmox-ve-v*) dir=cloud/proxmox-ve; name="Proxmox VE"; version="${tag#proxmox-ve-v}" ;;
+            *) echo "::error::Unknown tag prefix: $tag"; exit 1 ;;
+          esac
+          # A Proxmox VE lab build carries -lab in its tag but not in gradle.properties.
+          base="${version%-lab}"
+          declared=$(sed -n 's/^version=//p' "$dir/gradle.properties" | tr -d '\r')
+          if [ "$declared" != "$base" ]; then
+            echo "::error::Tag $tag does not match version=$declared in $dir/gradle.properties"
+            exit 1
+          fi
+          {
+            echo "dir=$dir"
+            echo "title=$name $version"
+            echo "version=$version"
+            echo "base=$base"
+          } >> "$GITHUB_OUTPUT"
+
+      # Groovy 3.0.9 does not run on JDK 21, and Gradle 8.3 caps at JDK 20.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Test and build
+        working-directory: ${{ steps.tag.outputs.dir }}
+        run: ./gradlew clean test shadowJar --no-daemon
+
+      - name: Collect the jar, its checksum and the release notes
+        working-directory: ${{ steps.tag.outputs.dir }}
+        env:
+          DIR: ${{ steps.tag.outputs.dir }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          BASE: ${{ steps.tag.outputs.base }}
+        run: |
+          out="$RUNNER_TEMP/release"
+          mkdir -p "$out"
+          jar=$(ls build/libs/*-all.jar)
+          file=$(basename "$jar")
+          # proxmox-ve-0.1.15-all.jar is published as proxmox-ve-0.1.15-lab-all.jar.
+          if [ "$VERSION" != "$BASE" ]; then
+            file="${file%-all.jar}${VERSION#"$BASE"}-all.jar"
+          fi
+          cp "$jar" "$out/$file"
+          (cd "$out" && sha256sum "$file" > SHA256SUMS)
+          # The section "## <version>" of RELEASE-NOTES.md becomes the release body.
+          awk -v heading="## $BASE" '
+            $0 == heading { found = 1; next }
+            found && (/^## / || /^---$/) { exit }
+            found { print }
+          ' RELEASE-NOTES.md > "$RUNNER_TEMP/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "::warning::No section for $BASE in $DIR/RELEASE-NOTES.md"
+            echo "See $DIR/RELEASE-NOTES.md." > "$RUNNER_TEMP/notes.md"
+          fi
+          ls -l "$out"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ steps.tag.outputs.title }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TITLE" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --latest=false

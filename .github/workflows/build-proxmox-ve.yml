@@ -1,0 +1,72 @@
+# Copyright 2025 Hewlett Packard Enterprise Development LP
+#
+name: build proxmox-ve
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'cloud/proxmox-ve/**'
+      - '.github/workflows/build-proxmox-ve.yml'
+  pull_request:
+    paths:
+      - 'cloud/proxmox-ve/**'
+      - '.github/workflows/build-proxmox-ve.yml'
+  workflow_dispatch:
+
+# Cancel any running jobs for this same ref/PR
+concurrency:
+  group: proxmox-ve-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud/proxmox-ve
+    steps:
+      - uses: actions/checkout@v7
+
+      # Gradle 8.3 is pinned by the wrapper and caps at JDK 20. The lab jars are built with 17.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run CodeNarc code quality check
+        run: ./gradlew codenarcMain --no-daemon --stacktrace
+        continue-on-error: true
+
+      - name: Upload CodeNarc reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: proxmox-ve-codenarc-reports
+          path: cloud/proxmox-ve/build/reports/codenarc/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Run build
+        run: ./gradlew build --no-daemon --stacktrace
+
+      - name: Trivy scan
+        # Pinned by commit: the action's tags were force-pushed to malware in
+        # March 2026 (GHSA-69fq-xp46-6x23). Its default Trivy binary is older
+        # than the fix for GHSA-mcj4-mphf-j9ff, so the version is set too.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          version: 'v0.74.0'
+          scan-type: 'rootfs'
+          scan-ref: 'cloud/proxmox-ve/build/libs/'
+          ignore-unfixed: true
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
