@@ -175,6 +175,9 @@ never learns to write its own.
 
 ![Agent chat with the cost footer](docs/images/10-agent-chat.png)
 
+The footer is right, the answer is not: the appliance had servers, clouds and groups. See
+*An agent answers "0"* in [Troubleshooting](#troubleshooting).
+
 ### Prompt caching
 
 The plugin sets no cache breakpoints. Providers that cache on their own still do: with OpenAI
@@ -243,6 +246,7 @@ and stop sequences unchanged; OpenRouter drops the parameters a model does not s
 | The log says `Only List These Models '...' matches none of N models and is ignored` | A typo in the allow list. The list stays complete until it is fixed. |
 | An agent fails after the model list was narrowed | Its model is disabled because it is no longer listed. The log names it. List it again, or give the agent another model. |
 | The model tab has no search | Not available to plugins on 9.0.1. Use the allow list. Reported to HPE: [docs/hpe-feature-request-llm-model-search.md](docs/hpe-feature-request-llm-model-search.md). |
+| An agent answers **"0"** or "none" although the objects exist | Some models fill every optional parameter of an MCP tool with an empty value, and the built-in Morpheus MCP tools take `""` and `0` as filters: `list_servers` with `status: ""` or `zoneId: 0` finds nothing, while `list_servers` without arguments lists every server. Seen with `openai/gpt-5.4-nano`. The log shows the tool call, but the next request's input grows by only a few dozen tokens. The plugin forwards tool arguments unchanged; use another model for the agent. |
 | An agent says it cannot count instances: *"Looks like the server threw a gasket"* | Morpheus defect, not the plugin: `GET /api/instances` fails with `duplicate association path: containers.server` when the MCP tool `list_instances` is called with `agentInstalled` together with `serverId` or `hostId`. Each filter alone works. Smaller models pick that combination. |
 | An answer looks invented | Check for `OpenRouter tool calls` in the log. Smaller models sometimes answer from the example values in the MCP tool descriptions (`delegate_to_specialist`) instead of calling a tool. |
 | A new agent is missing from the chat's agent picker | The picker loads its list with the page. Reload the page. |

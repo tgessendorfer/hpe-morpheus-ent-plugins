@@ -84,4 +84,11 @@ Reported to HPE in `docs/`:
 - The MCP tool `list_instances` fails with a server error when called with `agentInstalled`
   together with `serverId` or `hostId`.
 
+### Known model behaviour
+
+- **`openai/gpt-5.4-nano` fills every optional MCP tool parameter with an empty value**, and the
+  built-in Morpheus MCP tools treat `""` and `0` as filters, so the agent answers "0" for servers,
+  clouds or groups that exist. The plugin forwards tool arguments unchanged; use another model for
+  the agent. Other models were not checked for this.
+
 **Full Changelog**: https://github.com/tgessendorfer/morpheus-openrouter-plugin/commits/v0.1.0
