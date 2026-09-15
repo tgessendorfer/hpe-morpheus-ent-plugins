@@ -62,6 +62,7 @@ class OpenRouterProvider implements LlmProvider {
 	static final String PROVIDER_CODE = 'openrouter'
 	static final String PROVIDER_NAME = 'OpenRouter'
 	static final String DEFAULT_API_URL = 'https://openrouter.ai/api/v1'
+	static final String API_KEY_PREFIX = 'sk-or-'
 	static final String REASONING_EFFORT_DEFAULT = 'default'
 	static final List<String> REASONING_EFFORTS = ['low', 'medium', 'high']
 	// A model that goes away within this many days says so in its name.
@@ -296,7 +297,14 @@ class OpenRouterProvider implements LlmProvider {
 			// The model list answers any key or none, so the key is checked on its own.
 			Map keyResult = apiService.getKey(baseUrl, apiKey, clientOpts) ?: [success: false, msg: 'no response']
 			if (!keyResult.success) {
-				return validationError("OpenRouter did not accept the API key at ${baseUrl}${OpenRouterApiService.KEY_PATH}: ${keyResult.msg}")
+				String message = "OpenRouter did not accept the API key at ${baseUrl}${OpenRouterApiService.KEY_PATH}: ${keyResult.msg}"
+				if (!apiKey.trim().startsWith(API_KEY_PREFIX)) {
+					// OpenRouter answers a token in any other format with "Missing Authentication
+					// header", although the header was sent. A format check is not made a hard
+					// rule, in case OpenRouter changes its key format.
+					message = "${message.endsWith('.') ? message : message + '.'} OpenRouter keys start with ${API_KEY_PREFIX}; check that the whole key was pasted."
+				}
+				return validationError(message)
 			}
 			Map modelsResult = apiService.listModels(baseUrl, apiKey, clientOpts) ?: [success: false, msg: 'no response']
 			if (!modelsResult.success) {

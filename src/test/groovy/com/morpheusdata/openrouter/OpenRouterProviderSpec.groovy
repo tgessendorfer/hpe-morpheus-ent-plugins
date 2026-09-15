@@ -127,6 +127,23 @@ class OpenRouterProviderSpec extends Specification {
 		0 * api.listModels(*_)
 		!response.success
 		response.msg.contains('User not found.')
+		!response.msg.contains('keys start with')
+	}
+
+	def "a key in the wrong format gets a hint, since OpenRouter's own message points elsewhere"() {
+		given: 'what OpenRouter answered on 2026-09-15 to a Bearer token not starting with sk-or-'
+		OpenRouterApiService api = Stub()
+		api.getKey(*_) >> [success: false, msg: 'API returned 401: Missing Authentication header']
+		provider.apiService = api
+		AccountIntegration ai = new AccountIntegration(serviceUrl: OpenRouterProvider.DEFAULT_API_URL, servicePassword: '1234567890')
+
+		when:
+		ServiceResponse response = provider.validate(new LlmIntegration(accountIntegration: ai), [:])
+
+		then:
+		!response.success
+		response.msg == 'OpenRouter did not accept the API key at https://openrouter.ai/api/v1/key: API returned 401: ' +
+			'Missing Authentication header. OpenRouter keys start with sk-or-; check that the whole key was pasted.'
 	}
 
 	def "a base URL that answers with a web page fails validation"() {
