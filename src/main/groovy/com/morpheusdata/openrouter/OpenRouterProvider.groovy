@@ -42,6 +42,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeParseException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.regex.Pattern
 
 /**
  * LlmProvider implementation for OpenRouter's OpenAI-compatible API.
@@ -257,13 +258,25 @@ class OpenRouterProvider implements LlmProvider {
 		)
 
 		optionTypes << new OptionType(
+			code: "${PROVIDER_CODE}.modelAllowList",
+			name: 'Model Allow List',
+			fieldName: 'modelAllowList',
+			fieldLabel: 'Only List These Models',
+			fieldContext: 'config',
+			inputType: OptionType.InputType.TEXT,
+			displayOrder: 9,
+			required: false,
+			helpText: 'Optional comma-separated model ids, with * as a wildcard, for example: openai/gpt-5*, google/gemini-3*, mistralai/*. Only matching models are listed, which keeps the model tab and the agent form short. Leave empty to list every model that supports tool calling. The two checkboxes above still apply. A model that drops out of the list is removed when the list is refreshed, which saving does, unless an agent still uses it.'
+		)
+
+		optionTypes << new OptionType(
 			code: "${PROVIDER_CODE}.usageFooter",
 			name: 'Cost Footer',
 			fieldName: 'usageFooter',
 			fieldLabel: 'Append Cost to Answers',
 			fieldContext: 'config',
 			inputType: OptionType.InputType.CHECKBOX,
-			displayOrder: 9,
+			displayOrder: 10,
 			required: false,
 			helpText: 'Adds an italic line to the end of each final answer with what the whole question cost, summed over all of its requests as OpenRouter reports them. Morpheus shows no usage anywhere in the chat. Tool-call turns are left untouched, and the line is removed before an answer is replayed as history.'
 		)
@@ -683,6 +696,7 @@ class OpenRouterProvider implements LlmProvider {
 		AccountIntegration accountIntegration = llmIntegration?.accountIntegration
 		boolean includeAnthropic = isIncludeAnthropicModels(accountIntegration)
 		boolean includeFree = isIncludeFreeModels(accountIntegration)
+		List<Pattern> allowList = parseModelAllowList(accountIntegration?.getConfigProperty('modelAllowList')?.toString())
 		LocalDate today = LocalDate.now(ZoneOffset.UTC)
 		List<LlmModel> models = []
 		def modelData = apiResponse?.data
@@ -692,7 +706,7 @@ class OpenRouterProvider implements LlmProvider {
 					return
 				}
 				Map entryMap = entry as Map
-				if (!isListedModel(entryMap, includeAnthropic, includeFree, today)) {
+				if (!isListedModel(entryMap, includeAnthropic, includeFree, today, allowList)) {
 					return
 				}
 				String modelId = entryMap.id.toString().trim()
@@ -735,8 +749,10 @@ class OpenRouterProvider implements LlmProvider {
 	 *    entries are served by the Batch API alone.
 	 *  - No {@code anthropic/*} unless ticked: the Anthropic plugin caches the tool catalog.
 	 *  - Nothing past its expiration date.
+	 *  - Only ids matching the allow list, when the integration has one. It narrows the
+	 *    list further and never brings back a model the rules above leave out.
 	 */
-	protected static boolean isListedModel(Map entry, boolean includeAnthropic, boolean includeFree, LocalDate today) {
+	protected static boolean isListedModel(Map entry, boolean includeAnthropic, boolean includeFree, LocalDate today, List<Pattern> allowList = []) {
 		String id = entry?.id?.toString()?.trim()
 		if (!id) {
 			return false
@@ -759,7 +775,23 @@ class OpenRouterProvider implements LlmProvider {
 			return false
 		}
 		LocalDate expires = expirationDate(entry)
-		return expires == null || !expires.isBefore(today)
+		if (expires != null && expires.isBefore(today)) {
+			return false
+		}
+		return !allowList || allowList.any { Pattern pattern -> pattern.matcher(id).matches() }
+	}
+
+	/**
+	 * The allow list as case-insensitive patterns matching a whole model id, with * as
+	 * the only wildcard. Empty when nothing is configured.
+	 */
+	protected static List<Pattern> parseModelAllowList(String configured) {
+		if (!configured?.trim()) {
+			return []
+		}
+		return configured.split(/[,\s]+/).findAll { it }.collect { String glob ->
+			Pattern.compile(glob.split(/\*/, -1).collect { String part -> Pattern.quote(part) }.join('.*'), Pattern.CASE_INSENSITIVE)
+		}
 	}
 
 	/** The listed name, with the date a model goes away when that is less than a year off. */

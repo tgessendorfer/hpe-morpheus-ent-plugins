@@ -30,9 +30,13 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Syncs the model catalog returned by GET /models into Morpheus.
- * Models that disappear from the catalog, or that the integration's filters no
- * longer list, are disabled rather than deleted so existing Agents keep a
- * resolvable reference.
+ *
+ * Models that are no longer listed - dropped from OpenRouter's catalog, or filtered
+ * out by the integration's settings - are removed. Morpheus 9.0.1 shows disabled
+ * models exactly like enabled ones, in the integration's model tab and in the agent
+ * form, where picking one fails. The foreign key from ai_agent.model_id to llm_model
+ * has no cascade, so a model an agent still uses cannot be removed; that one is
+ * disabled instead and logged.
  */
 @Slf4j
 class LlmModelsSync {
@@ -41,6 +45,12 @@ class LlmModelsSync {
 	protected final LlmIntegration llmIntegration
 	protected final String providerCode
 	protected final OpenRouterApiService apiService
+
+	// What one sync did, for its log line.
+	protected int addedCount = 0
+	protected int updatedCount = 0
+	protected int removedCount = 0
+	protected int disabledCount = 0
 
 	private static final ConcurrentHashMap<Long, Object> SYNC_LOCKS = new ConcurrentHashMap<>()
 
@@ -59,7 +69,7 @@ class LlmModelsSync {
 		}
 		Map apiResponse = result.data instanceof Map ? result.data as Map : [:]
 		// A wrong base URL can answer 200 with a web page instead of the catalog. Synced
-		// as an empty catalog, that would disable every model the integration has.
+		// as an empty catalog, that would remove every model the integration has.
 		if (!(apiResponse.data instanceof List)) {
 			log.warn("Skipping OpenRouter model sync: ${baseUrl}${OpenRouterApiService.MODELS_PATH} returned no model list")
 			return [success: false, msg: "${baseUrl}${OpenRouterApiService.MODELS_PATH} returned no model list".toString()]
@@ -93,13 +103,18 @@ class LlmModelsSync {
 	}
 
 	protected void sync(Collection<LlmModel> freshModels) {
+		addedCount = 0
+		updatedCount = 0
+		removedCount = 0
+		disabledCount = 0
+		Collection<LlmModel> listed = uniqueByCode(freshModels)
 		DataQuery query = new DataQuery().withFilter('providerCode', providerCode).withFilter('llmIntegration.id', llmIntegration.id)
 		List<LlmModel> existingModels = removeDuplicateModels(morpheusContext.llm.model.list(query).toList().blockingGet())
-		SyncTask<LlmModel, LlmModel, LlmModel> syncTask = new SyncTask<>(Observable.fromIterable(existingModels), uniqueByCode(freshModels))
+		SyncTask<LlmModel, LlmModel, LlmModel> syncTask = new SyncTask<>(Observable.fromIterable(existingModels), listed)
 		syncTask.addMatchFunction { LlmModel existingModel, LlmModel freshModel ->
 			existingModel.code == freshModel.code
 		}.onDelete { List<LlmModel> removeList ->
-			disableMissingModels(removeList)
+			retireMissingModels(removeList)
 		}.onAdd { List<LlmModel> addList ->
 			addMissingModels(addList)
 		}.withLoadObjectDetails { List<SyncTask.UpdateItemDto<LlmModel, LlmModel>> updateItems ->
@@ -109,6 +124,10 @@ class LlmModelsSync {
 		}.onUpdate { List<SyncTask.UpdateItem<LlmModel, LlmModel>> updateList ->
 			updateMatchedModels(updateList)
 		}.start()
+		// The debug lines per model are off on an appliance; this one says what the
+		// integration's settings did to its model list.
+		log.info("OpenRouter model sync for integration ${llmIntegration.id}: ${listed.size()} listed, ${addedCount} added, " +
+			"${updatedCount} updated, ${removedCount} removed, ${disabledCount} disabled because an agent still uses them")
 	}
 
 	/** One fresh entry per model code; the first one wins. */
@@ -120,11 +139,9 @@ class LlmModelsSync {
 
 	/**
 	 * Collapses stored copies of one model to a single one - enabled first, newest
-	 * after that - and removes the rest. Morpheus still offers disabled models in the
-	 * agent form, so a leftover copy is one an administrator can pick and then watch
-	 * fail with "The AI model is no longer available". A copy that cannot be removed,
-	 * typically because an agent still points at it, stays disabled and is logged so
-	 * that agent can be given a model again.
+	 * after that - and removes the rest. A copy that cannot be removed, because an
+	 * agent still points at it, stays disabled and is logged so that agent can be
+	 * given a model again.
 	 */
 	protected List<LlmModel> removeDuplicateModels(List<LlmModel> existingModels) {
 		List<LlmModel> keep = []
@@ -139,40 +156,62 @@ class LlmModelsSync {
 		if (!extras) {
 			return keep
 		}
-		List<LlmModel> failed
-		String reason = null
-		try {
-			def result = morpheusContext.llm.model.bulkRemove(extras).blockingGet()
-			failed = result?.success == false && !result?.failedItems ? extras : (result?.failedItems ?: []) as List<LlmModel>
-			reason = result?.msg
-		} catch (Exception e) {
-			failed = extras
-			reason = e.message
-		}
+		List<LlmModel> failed = removeModels(extras)
 		List<LlmModel> removed = extras - failed
 		if (removed) {
 			log.info("Removed duplicate OpenRouter models: ${removed*.code}")
 		}
 		if (failed) {
-			log.warn("Could not remove duplicate OpenRouter models ${failed*.code} (${reason}); left disabled - an agent may still point at them")
-			List<LlmModel> disable = failed.findAll { it.enabled != false }
-			disable.each { it.enabled = false }
-			if (disable) {
-				morpheusContext.llm.model.bulkSave(disable).blockingGet()
-			}
+			log.warn("Could not remove duplicate OpenRouter models ${failed*.code}; left disabled - an agent may still point at them")
+			disable(failed)
 		}
 		return keep
 	}
 
-	protected void disableMissingModels(List<LlmModel> removeList) {
-		List<LlmModel> saveList = []
-		removeList?.each { LlmModel model ->
-			if (model?.enabled) {
-				log.debug("Disabling OpenRouter model no longer listed: ${model.code}")
-				model.enabled = false
-				saveList << model
-			}
+	/** Removes models that are no longer listed; one an agent still uses is disabled instead. */
+	protected void retireMissingModels(List<LlmModel> missing) {
+		if (!missing) {
+			return
 		}
+		List<LlmModel> failed = removeModels(missing)
+		removedCount += missing.size() - failed.size()
+		if (failed) {
+			disabledCount += failed.size()
+			log.info("OpenRouter models no longer listed but still used by an agent, left disabled: ${failed*.code}")
+			disable(failed)
+		}
+	}
+
+	/**
+	 * Removes the given models and returns the ones that could not be removed. A single
+	 * model an agent still points at fails a whole bulk removal, so a batch that fails
+	 * as a whole is retried one model at a time.
+	 */
+	protected List<LlmModel> removeModels(List<LlmModel> models) {
+		if (!models) {
+			return []
+		}
+		try {
+			def result = morpheusContext.llm.model.bulkRemove(models).blockingGet()
+			List<LlmModel> failedItems = (result?.failedItems ?: []) as List<LlmModel>
+			if (failedItems) {
+				return failedItems
+			}
+			if (result?.success != false) {
+				return []
+			}
+		} catch (Exception e) {
+			log.debug("Could not remove OpenRouter models ${models*.code}: ${e.message}")
+		}
+		if (models.size() == 1) {
+			return models
+		}
+		return models.findAll { LlmModel model -> removeModels([model]) }
+	}
+
+	protected void disable(List<LlmModel> models) {
+		List<LlmModel> saveList = models.findAll { it.enabled != false }
+		saveList.each { it.enabled = false }
 		if (saveList) {
 			morpheusContext.llm.model.bulkSave(saveList).blockingGet()
 		}
@@ -188,6 +227,7 @@ class LlmModelsSync {
 			log.debug("Adding new OpenRouter model: ${model.code}")
 		}
 		morpheusContext.llm.model.bulkCreate(addList).blockingGet()
+		addedCount += addList.size()
 	}
 
 	protected void updateMatchedModels(List<SyncTask.UpdateItem<LlmModel, LlmModel>> updateList) {
@@ -229,6 +269,7 @@ class LlmModelsSync {
 		}
 		if (saveList) {
 			morpheusContext.llm.model.bulkSave(saveList).blockingGet()
+			updatedCount += saveList.size()
 		}
 	}
 }

@@ -23,7 +23,9 @@ class LlmModelsSyncSpec extends Specification {
 	List<LlmModel> saved = []
 	List<LlmModel> created = []
 	List<LlmModel> removed = []
-	boolean removeThrows = false
+	// Ids of models an agent points at. Removing one fails the whole call, like the
+	// foreign key from ai_agent.model_id does.
+	Set<Long> usedByAgent = [] as Set
 
 	private LlmModel model(Long id, String code, Boolean enabled = true) {
 		return new LlmModel(id: id, code: code, name: code, enabled: enabled, llmIntegration: integration, metadata: [:])
@@ -40,8 +42,8 @@ class LlmModelsSyncSpec extends Specification {
 		modelService.bulkSave(_) >> { List<List<LlmModel>> args -> saved.addAll(args[0]); Single.just(Mock(BulkSaveResult)) }
 		modelService.bulkCreate(_) >> { List<List<LlmModel>> args -> created.addAll(args[0]); Single.just(Mock(BulkCreateResult)) }
 		modelService.bulkRemove(_) >> { List<List<LlmModel>> args ->
-			if (removeThrows) {
-				throw new RuntimeException('Cannot delete or update a parent row: a foreign key constraint fails')
+			if (args[0].any { it.id in usedByAgent }) {
+				throw new RuntimeException('Cannot delete or update a parent row: a foreign key constraint fails (fk_ai_agent_model)')
 			}
 			removed.addAll(args[0])
 			Single.just(removeResult)
@@ -49,7 +51,7 @@ class LlmModelsSyncSpec extends Specification {
 		return new LlmModelsSync(context, integration, 'openrouter', apiService)
 	}
 
-	def "a model that is no longer listed is disabled, not deleted"() {
+	def "a model that is no longer listed is removed"() {
 		given:
 		LlmModelsSync sync = syncOver([model(1L, 'openai/gpt-5.5'), model(2L, 'z-ai/glm-4.5')])
 
@@ -57,10 +59,40 @@ class LlmModelsSyncSpec extends Specification {
 		sync.execute([model(null, 'openai/gpt-5.5')])
 
 		then:
-		saved*.id == [2L]
-		saved*.enabled == [false]
+		removed*.id == [2L]
+		saved.isEmpty()
 		created.isEmpty()
-		removed.isEmpty()
+		sync.removedCount == 1
+		sync.disabledCount == 0
+	}
+
+	def "a model an agent still uses stays disabled, and the rest of the batch is removed all the same"() {
+		given: 'unticking a checkbox drops three models, one of which an agent uses'
+		usedByAgent << 3L
+		LlmModelsSync sync = syncOver([model(1L, 'openai/gpt-5.5'), model(2L, 'anthropic/claude-haiku-4.5'),
+									   model(3L, 'anthropic/claude-sonnet-5'), model(4L, 'google/gemma-4-31b-it:free')])
+
+		when:
+		sync.execute([model(null, 'openai/gpt-5.5')])
+
+		then:
+		removed*.id as Set == [2L, 4L] as Set
+		saved*.id == [3L]
+		saved*.enabled == [false]
+		sync.removedCount == 2
+		sync.disabledCount == 1
+	}
+
+	def "a leftover that was already disabled is removed too"() {
+		given: 'what version 0.1.0-SNAPSHOT left behind, which only disabled such models'
+		LlmModelsSync sync = syncOver([model(1L, 'openai/gpt-5.5'), model(2L, 'anthropic/claude-opus-4', false)])
+
+		when:
+		sync.execute([model(null, 'openai/gpt-5.5')])
+
+		then:
+		removed*.id == [2L]
+		saved.isEmpty()
 	}
 
 	def "a new model is created and a known one is left alone"() {
@@ -73,6 +105,9 @@ class LlmModelsSyncSpec extends Specification {
 		then:
 		created*.code == ['qwen/qwen3.5-9b']
 		saved.isEmpty()
+		removed.isEmpty()
+		sync.addedCount == 1
+		sync.updatedCount == 0
 	}
 
 	def "stored copies of one model collapse to the enabled one and the leftover is removed"() {
@@ -90,7 +125,7 @@ class LlmModelsSyncSpec extends Specification {
 
 	def "a copy that cannot be removed stays disabled"() {
 		given: 'an agent still points at the leftover copy'
-		removeThrows = true
+		usedByAgent << 16L
 		LlmModelsSync sync = syncOver([model(16L, 'openai/gpt-5.5'), model(37L, 'openai/gpt-5.5')])
 
 		when:
@@ -110,9 +145,10 @@ class LlmModelsSyncSpec extends Specification {
 		when:
 		Map result = sync.execute('https://openrouter.ai/v1', 'sk-or-v1-test', [:]) { Map response -> [] }
 
-		then: 'an empty catalog would have disabled every model'
+		then: 'an empty catalog would have removed every model'
 		!result.success
 		saved.isEmpty()
 		created.isEmpty()
+		removed.isEmpty()
 	}
 }

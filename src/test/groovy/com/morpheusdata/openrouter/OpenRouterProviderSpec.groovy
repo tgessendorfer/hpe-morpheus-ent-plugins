@@ -531,6 +531,54 @@ class OpenRouterProviderSpec extends Specification {
 		model.metadata.supportsVision
 	}
 
+	def "an allow list keeps only matching models, case-insensitively and with wildcards"() {
+		given:
+		AccountIntegration narrowed = configured([modelAllowList: 'openai/gpt-5*,  GOOGLE/gemini-3* deepseek/deepseek-v4-flash-0731'])
+		Map catalog = [data: [
+			catalogEntry('openai/gpt-5.5'),
+			catalogEntry('openai/gpt-4.1'),
+			catalogEntry('google/gemini-3.5-flash-lite'),
+			catalogEntry('google/gemini-2.5-pro'),
+			catalogEntry('deepseek/deepseek-v4-flash-0731'),
+			catalogEntry('deepseek/deepseek-v4-flash-0731-extra'),
+			catalogEntry('mistralai/mistral-large')
+		]]
+
+		when:
+		List<LlmModel> models = provider.buildModelsFromApiResponse(new LlmIntegration(accountIntegration: narrowed), catalog)
+
+		then: 'a pattern without * matches one id exactly'
+		models*.code as Set == ['openai/gpt-5.5', 'google/gemini-3.5-flash-lite', 'deepseek/deepseek-v4-flash-0731'] as Set
+	}
+
+	def "an allow list never brings back a model the other rules leave out"() {
+		given:
+		AccountIntegration narrowed = configured([modelAllowList: 'anthropic/*, openai/*'])
+		Map catalog = [data: [catalogEntry('anthropic/claude-sonnet-5'), catalogEntry('openai/gpt-5.5:batch'), catalogEntry('openai/gpt-5.5')]]
+
+		expect:
+		provider.buildModelsFromApiResponse(new LlmIntegration(accountIntegration: narrowed), catalog)*.code == ['openai/gpt-5.5']
+	}
+
+	def "an empty allow list lists everything"() {
+		expect:
+		OpenRouterProvider.parseModelAllowList(value).isEmpty()
+
+		where:
+		value << [null, '', '  ', ' , ']
+	}
+
+	def "the allow list has a label and help text"() {
+		when:
+		OptionType option = provider.optionTypes.find { it.fieldName == 'modelAllowList' }
+
+		then:
+		option.inputType == OptionType.InputType.TEXT
+		option.fieldContext == 'config'
+		!option.required
+		provider.optionTypes*.displayOrder == (0..10).toList()
+	}
+
 	def "an expiry within a year goes into the name, a placeholder date does not"() {
 		given:
 		LocalDate today = LocalDate.of(2026, 9, 14)
