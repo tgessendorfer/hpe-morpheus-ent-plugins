@@ -1,0 +1,24 @@
+# TODOs for Proxmox Plugin
+
+- [X] Add Host SSH Inputs to Options
+- [X] Cleanup sync updates
+- [X] Check agentless provision
+- [X] Refactor ssh code to util class
+- [X] Add resource pool sync
+- [ ] Add resource pool selection to provision (and filter datastores)
+- [ ] Add provision container host
+- [X] Fix powerstate on initial host add
+- [ ] Cleanup logging
+- [ ] Fix Validation display
+- [X] Fix storage tab on instance 
+- [X] Add reconfigure for disks
+- [X] Add reconfigure for nics
+- [ ] Investigate "Starting determineSshRoute with hostList: []" when skipping agent
+- [ ] Fix validation errors not appearing in instance wizard
+- [ ] Improve ssh error tracking
+- [X] Add LICENSE
+- [ ] Populate README
+- [ ] Jar Folder
+- [ ] Snapshot Backup Provider
+- [ ] Scribe resources for Morpheus OS images
+- [ ] Proxy support

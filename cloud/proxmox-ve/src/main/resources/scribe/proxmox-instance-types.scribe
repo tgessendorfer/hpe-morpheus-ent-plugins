@@ -1,0 +1,71 @@
+resource "workload-type" "proxmox-1_0" {
+  code             = "proxmox-1.0"
+  shortName        = "proxmox"
+  name             = "Proxmox VM"
+  ports            = []
+  containerVersion = "1.0"
+  repositoryImage  = ""
+  entryPoint       = ""
+  category         = "proxmox"
+  statTypeCode     = "vm"
+  logTypeCode      = "proxmox"
+  checkTypeCode    = "vmCheck"
+  serverType       = "vm"
+  provisionType = "proxmox-provision-provider"
+  actions = ["generic-remove-node"]
+}
+
+
+resource "workload-type-set" "proxmox-1_0-set" {
+  code          = "proxmox-1.0-set"
+  workloadType = workload-type.proxmox-1_0
+  priorityOrder  = 0
+  dynamicCount   = true
+  containerCount = 1
+}
+
+resource "instance-type" "proxmox-provision-provider" {
+  name                    = "Proxmox"
+  code                    = "proxmox-provision-provider"
+  category                = "cloud"
+  active                  = true
+  enabled                 = true
+  hasConfig               = false
+  hasSettings             = false
+  hasDeployment           = false
+  deploymentService       = "defaultDeployService"
+  versions                = ["1.0"]
+  hasAutoScale            = false
+  description             = "Spin up a VM in your Proxmox Cloud "
+  deploymentService       = "defaultDeployService"
+  provisionService        = "xenContainerService"
+  provisionTypeDefault    = true
+  environmentPrefix       = "PROXMOX"
+  provisionSelectType     = "zone"
+  provisionType           = "proxmox-provision-provider"
+  pluginIconPath          = "proxmox-full-lockup-color.svg"
+  pluginIconHidpiPath     = "proxmox-logo-stacked-color.svg"
+  pluginIconDarkPath      = "proxmox-full-lockup-inverted-color.svg"
+  pluginIconDarkHidpiPath = "proxmox-logo-stacked-inverted-color.svg"
+  optionTypes             = ["instanceType.proxmox.image", "instanceType.proxmox.node"]
+}
+
+
+resource "instance-type-layout" "proxmox-1.0-vm" {
+  code                    = "proxmox-1.0-vm"
+  name                    = "Proxmox VM"
+  sortOrder               = 0
+  instanceVersion         = "1.0"
+  description             = "This will provision a single VM"
+  instanceType            = instance-type.proxmox-provision-provider
+  serverCount             = 1
+  portCount               = 1
+  enabled                 = true
+  creatable               = true
+  containers              = [workload-type-set.proxmox-1_0-set]
+  actions                 = ["generic-add-node"]
+  optionTypes             = []
+  provisionType           = "proxmox-provision-provider"
+}
+
+

@@ -1,0 +1,160 @@
+buildscript {
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        maven { url "https://plugins.gradle.org/m2/" }
+    }
+    dependencies {
+        classpath "com.github.johnrengelman:shadow:8.1.1"
+        classpath "com.morpheusdata:morpheus-plugin-gradle:$morpheusApiVersion"
+        classpath "com.bertramlabs.plugins:asset-pipeline-gradle:$assetPipelineVersion"
+    }
+}
+
+
+apply plugin: 'java'
+apply plugin: 'groovy'
+apply plugin: 'codenarc'
+apply plugin: 'idea'
+apply plugin: 'com.github.johnrengelman.shadow'
+apply plugin: 'asset-pipeline'
+apply plugin: 'com.morpheusdata.morpheus-plugin-gradle'
+
+
+group = 'com.morpheus.proxmox.ve'
+ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
+
+java {
+	sourceCompatibility = JavaVersion.toVersion('1.11')
+    targetCompatibility = JavaVersion.toVersion('1.11')
+}
+
+repositories {
+	mavenLocal()
+	mavenCentral()
+}
+
+configurations {
+	provided
+}
+
+dependencies {
+	provided "com.morpheusdata:morpheus-plugin-api:$morpheusApiVersion"
+	
+	provided "org.codehaus.groovy:groovy-all:$groovyVersion"
+	implementation 'commons-beanutils:commons-beanutils:1.11.0'
+	implementation "org.slf4j:slf4j-api:$slf4jVersion"
+	implementation "org.slf4j:slf4j-parent:$slf4jVersion"
+	implementation 'commons-net:commons-net:3.6'
+	implementation 'com.jcraft:jsch:0.1.55'
+
+	// Include morpheus-core and it's dependencies
+	testImplementation 'io.reactivex.rxjava3:rxjava:3.1.7'
+	testImplementation "com.morpheusdata:morpheus-plugin-api:$morpheusApiVersion"
+	testImplementation 'org.apache.httpcomponents:httpclient:4.5.3'
+	testImplementation 'org.apache.httpcomponents:httpcore:4.4.5'
+	testImplementation "org.slf4j:slf4j-parent:$slf4jVersion"
+
+	testImplementation "org.codehaus.groovy:groovy-all:$groovyVersion"
+	testImplementation 'net.bytebuddy:byte-buddy:1.9.3'
+	testImplementation 'org.objenesis:objenesis:2.6'
+	testImplementation platform("org.spockframework:spock-bom:$spockVersion")
+	testImplementation "org.spockframework:spock-core"
+	testImplementation "org.spockframework:spock-junit4"  // you can remove this if your code does not rely on old JUnit 4 rules
+	testImplementation 'cglib:cglib-nodep:3.2.12'
+
+}
+
+
+sourceSets {
+	main {
+		compileClasspath += configurations.provided
+	}
+	test {
+		groovy {
+			srcDirs = ['src/test/groovy']
+		}
+		java {
+			srcDirs = [] // clears default src/test/java so it doesn't look there
+		}
+	}
+}
+
+//Set plugin metadata information here that gets written into the jar
+jar {
+	manifest {
+		attributes(
+				'Plugin-Class': 'com.morpheusdata.proxmox.ve.ProxmoxVePlugin',
+				'Plugin-Version': version,
+				'Morpheus-Name': 'Proxmox VE',
+				'Morpheus-Organization': 'morpheus',
+				'Morpheus-Code': 'proxmox-ve',
+				'Morpheus-Description': 'Proxmox VE 8/9 cloud: syncs nodes, VMs, networks, datastores, pools and templates, and provisions VMs.',
+				'Morpheus-Logo': 'assets/morpheus.svg',
+				'Morpheus-Logo-Dark': 'assets/morpheus.svg',
+				'Morpheus-Labels': 'Plugin, Cloud, Proxmox',
+				'Morpheus-Repo': 'https://github.com/HewlettPackard/morpheus-proxmox-ve-plugin',
+				'Morpheus-Min-Appliance-Version': "6.3.0"
+		)
+	}
+}
+
+assets {
+	packagePlugin = false //leave this false for plugins
+}
+
+
+task(console, dependsOn: 'classes', type: JavaExec) {
+	main = 'groovy.ui.Console'
+	classpath = sourceSets.main.compileClasspath + sourceSets.main.runtimeClasspath
+}
+
+test {
+	useJUnitPlatform()
+	testLogging {
+		events "passed", "failed", "skipped", "standardOut", "standardError"
+		showStandardStreams = true
+		exceptionFormat = 'full'
+	}
+
+	afterTest { desc, result ->
+		println ">>> ${result.resultType}: ${desc.className} > ${desc.name}"
+	}
+
+	classpath = classpath.filter { !it.path.endsWith('classes/java/test') }
+	doFirst {
+		def testJavaDir = file("$buildDir/classes/java/test")
+		if (!testJavaDir.exists()) {
+			testJavaDir.mkdirs()
+		}
+	}
+}
+tasks.assemble.dependsOn tasks.shadowJar
+
+// CodeNarc configuration for Groovy code quality checks
+codenarc {
+	toolVersion = '3.5.0'
+	configFile = file('config/codenarc/rules.groovy')
+	reportFormat = 'html'
+	ignoreFailures = true  // Don't fail build on violations
+}
+
+// Configure CodeNarc for main source set
+codenarcMain {
+	source = 'src/main/groovy'
+	reports {
+		html.required = true
+		html.outputLocation = file("${buildDir}/reports/codenarc/main.html")
+		xml.required = true
+		xml.outputLocation = file("${buildDir}/reports/codenarc/main.xml")
+		text.required = false
+	}
+}
+
+// Disable codenarcTest task (automatically created for test source set)
+tasks.named('codenarcTest').configure {
+	enabled = false
+}
+
+// Run CodeNarc as part of the check task
+check.dependsOn codenarcMain
