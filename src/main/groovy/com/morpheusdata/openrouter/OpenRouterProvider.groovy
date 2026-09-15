@@ -272,7 +272,10 @@ class OpenRouterProvider implements LlmProvider {
 			inputType: OptionType.InputType.TEXT,
 			displayOrder: 9,
 			required: false,
-			helpText: 'Optional comma-separated model ids, with * as a wildcard, for example: openai/gpt-5*, google/gemini-3*, mistralai/*. Only matching models are listed, which keeps the model tab and the agent form short. Leave empty to list every model that supports tool calling. The two checkboxes above still apply. A model that drops out of the list is removed when the list is refreshed, which saving does, unless an agent still uses it.'
+			// Not empty by default: Morpheus 9.0.1 does not save a text field that is emptied on
+			// edit, so an allow list, once set, could never be removed again.
+			defaultValue: '*',
+			helpText: 'Comma-separated model ids, * as wildcard, e.g. openai/gpt-5*, google/gemini-3*. * alone lists every model that supports tool calling; use it instead of an empty field, which Morpheus 9.0.1 does not save. The checkboxes above still apply. A model that drops out is removed on save unless an agent uses it.'
 		)
 
 		optionTypes << new OptionType(
@@ -321,7 +324,7 @@ class OpenRouterProvider implements LlmProvider {
 					// OpenRouter answers a token in any other format with "Missing Authentication
 					// header", although the header was sent. A format check is not made a hard
 					// rule, in case OpenRouter changes its key format.
-					message = "${message.endsWith('.') ? message : message + '.'} OpenRouter keys start with ${API_KEY_PREFIX}; check that the whole key was pasted."
+					message = "${message.endsWith('.') ? message : message + '.'} OpenRouter keys start with \"${API_KEY_PREFIX}\". Check that the whole key was pasted."
 				}
 				return validationError(message)
 			}
@@ -780,7 +783,7 @@ class OpenRouterProvider implements LlmProvider {
 	 * Which catalog entries become Morpheus models.
 	 *
 	 *  - Agents work through MCP tools, so a model has to list {@code tools}.
-	 *  - Text output only.
+	 *  - Text output only, no image or audio output.
 	 *  - No {@code openrouter/*} routers, which choose the model per request, and no
 	 *    {@code ~vendor/...-latest} aliases, which switch models under a running agent.
 	 *  - No variants but {@code :free}, and that one only when ticked. {@code :batch}
@@ -798,8 +801,10 @@ class OpenRouterProvider implements LlmProvider {
 		if (!supportedParameters(entry).contains('tools')) {
 			return false
 		}
+		// Text only: an agent answers in text, and a model that also generates images or audio
+		// ("Nano Banana Pro") costs more for nothing an agent uses.
 		List<String> outputs = modalities(entry, 'output_modalities')
-		if (outputs && !outputs.contains('text')) {
+		if (outputs && outputs.toSet() != ['text'] as Set) {
 			return false
 		}
 		if (id.startsWith('openrouter/') || id.startsWith('~')) {

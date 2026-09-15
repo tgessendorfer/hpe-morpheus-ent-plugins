@@ -1,0 +1,80 @@
+# Morpheus 9.0.1: editing a plugin LLM integration ignores a credential switch and an emptied field
+
+## Summary
+
+Two changes made in the *Edit Integration* dialog of a plugin LLM integration are not saved, although
+Morpheus reports *Update Successful*:
+
+1. **Switching *Credentials* from a stored credential to *Local Credentials*.** The integration keeps
+   the stored credential. The key typed into the local field is neither saved nor validated.
+2. **Emptying a text field defined by the plugin.** The integration keeps the previous value.
+
+In both cases the dialog shows the old value again when it is reopened. Neither problem shows up in
+the log.
+
+A related limitation, known from earlier plugins: the network proxy select renders no empty entry, so
+a chosen proxy cannot be unselected either.
+
+## Environment
+
+| | |
+|---|---|
+| Appliance | HPE Morpheus Enterprise 9.0.1 |
+| Plugin API | `morpheus-plugin-api` 1.4.1 |
+| Integration | a plugin `LlmProvider` (OpenRouter) |
+
+The credential option is declared exactly like in HPE's own `morpheus-copilot-plugin`:
+
+```groovy
+new OptionType(code: 'openrouter.credential', inputType: OptionType.InputType.CREDENTIAL,
+    fieldName: 'type', fieldContext: 'credential', optionSource: 'credentials',
+    defaultValue: 'local', config: '{"credentialTypes":["api-key"]}')
+new OptionType(code: 'openrouter.servicePassword', inputType: OptionType.InputType.PASSWORD,
+    fieldName: 'servicePassword', fieldContext: 'domain', localCredential: true)
+```
+
+## Issue 1: the credential switch is not applied
+
+### Steps to reproduce
+
+1. Create an *API Key* credential under *Infrastructure > Trust > Credentials*.
+2. Create a plugin LLM integration and select that credential.
+3. Edit the integration, change *Credentials* to *Local Credentials* and enter a different key.
+4. Save.
+
+**Expected:** the integration uses the local key; the plugin's `validate()` receives it.
+
+**Actual:** *Update Successful*. `GET /api/integrations/<id>` still names the stored credential
+(`credential.type: api-key`), the dialog shows it again, and `validate()` received the stored key.
+A deliberately invalid local key (`sk-or-v1-0000000000`) was accepted, which it would not have been if
+it had reached the plugin: the same key is rejected with `401 User not found.` when a new
+integration is created with it.
+
+### Workarounds
+
+- Change the key inside the stored credential.
+- Create a new integration with *Local Credentials* and point the agents at it.
+
+## Issue 2: an emptied text field keeps its old value
+
+### Steps to reproduce
+
+1. Edit a plugin LLM integration and enter a value into an optional text field of type
+   `OptionType.InputType.TEXT` with `fieldContext: 'config'`. Save; the value is stored.
+2. Edit again, clear the field completely, save.
+
+**Expected:** the config value is empty.
+
+**Actual:** no error, and `GET /api/integrations/<id>` still returns the previous value in `config`.
+Saving a different, non-empty value works.
+
+### Workaround
+
+The plugin defaults the field to `*` (every model) and tells the user to enter `*` instead of
+clearing it.
+
+## Suggested fix
+
+- Send and apply the credential selection and the local credential fields on update, as on create.
+- Save an emptied config field as empty instead of keeping the previous value.
+- Render an empty entry in optional selects (`noBlank: false`, `noSelection`) in integration forms.

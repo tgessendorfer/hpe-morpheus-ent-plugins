@@ -257,9 +257,11 @@ class LlmModelsSync {
 				existingModel.maxOutputTokens = freshModel.maxOutputTokens
 				changed = true
 			}
+			// Morpheus 9.0.1 hands stored models back without their metadata, so comparing
+			// against it saved every model on every refresh ("247 updated" with nothing changed).
 			Map existingMetadata = existingModel.metadata ?: [:]
 			Map freshMetadata = freshModel.metadata ?: [:]
-			if (existingMetadata != freshMetadata) {
+			if (existingMetadata && existingMetadata != freshMetadata) {
 				existingModel.metadata = freshMetadata
 				changed = true
 			}

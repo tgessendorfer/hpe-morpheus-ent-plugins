@@ -146,7 +146,7 @@ class OpenRouterProviderSpec extends Specification {
 		then:
 		!response.success
 		response.msg == 'OpenRouter did not accept the API key at https://openrouter.ai/api/v1/key: API returned 401: ' +
-			'Missing Authentication header. OpenRouter keys start with sk-or-; check that the whole key was pasted.'
+			'Missing Authentication header. OpenRouter keys start with "sk-or-". Check that the whole key was pasted.'
 	}
 
 	def "a base URL that answers with a web page fails validation"() {
@@ -553,6 +553,8 @@ class OpenRouterProviderSpec extends Specification {
 			catalogEntry('openai/gpt-5.5:batch'),
 			catalogEntry('mistralai/no-tools', [supported_parameters: ['max_tokens', 'temperature']]),
 			catalogEntry('google/image-maker', [architecture: [input_modalities: ['text'], output_modalities: ['image']]]),
+			catalogEntry('google/gemini-3-pro-image-preview', [architecture: [input_modalities: ['text', 'image'], output_modalities: ['image', 'text']]]),
+			catalogEntry('openai/gpt-audio', [architecture: [input_modalities: ['text', 'audio'], output_modalities: ['text', 'audio']]]),
 			catalogEntry('openrouter/auto'),
 			catalogEntry('~openai/gpt-mini-latest'),
 			catalogEntry('anthropic/claude-sonnet-5'),
@@ -646,10 +648,15 @@ class OpenRouterProviderSpec extends Specification {
 		when:
 		OptionType option = provider.optionTypes.find { it.fieldName == 'modelAllowList' }
 
-		then:
+		then: 'it starts at *, since Morpheus 9.0.1 does not save the field once it is emptied'
 		option.inputType == OptionType.InputType.TEXT
 		option.fieldContext == 'config'
+		option.defaultValue == '*'
 		!option.required
+
+		and: '* on its own lets every model through'
+		OpenRouterProvider.isListedModel(catalogEntry('mistralai/mistral-large'), false, false, LocalDate.of(2026, 9, 15),
+			OpenRouterProvider.parseModelAllowList('*'))
 		provider.optionTypes*.displayOrder == (0..10).toList()
 	}
 

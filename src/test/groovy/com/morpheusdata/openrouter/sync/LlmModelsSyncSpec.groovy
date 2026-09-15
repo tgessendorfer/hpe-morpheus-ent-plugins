@@ -110,6 +110,36 @@ class LlmModelsSyncSpec extends Specification {
 		sync.updatedCount == 0
 	}
 
+	def "a stored model that comes back without metadata is not saved again"() {
+		given: 'what Morpheus hands back for a model the plugin stored with metadata'
+		LlmModel stored = model(1L, 'openai/gpt-5.5')
+		stored.metadata = null
+		LlmModel fresh = model(null, 'openai/gpt-5.5')
+		fresh.metadata = [supportsToolUse: true, apiFormat: 'openai-chat-completions']
+		LlmModelsSync sync = syncOver([stored])
+
+		when:
+		sync.execute([fresh])
+
+		then:
+		saved.isEmpty()
+		sync.updatedCount == 0
+	}
+
+	def "a changed name is still saved"() {
+		given:
+		LlmModelsSync sync = syncOver([model(1L, 'dots-studio/dots-3-note-preview')])
+		LlmModel fresh = model(null, 'dots-studio/dots-3-note-preview')
+		fresh.name = 'Dots 3 (expires 2026-09-30)'
+
+		when:
+		sync.execute([fresh])
+
+		then:
+		saved*.name == ['Dots 3 (expires 2026-09-30)']
+		sync.updatedCount == 1
+	}
+
 	def "stored copies of one model collapse to the enabled one and the leftover is removed"() {
 		given: 'what two concurrent refreshes can leave behind'
 		LlmModelsSync sync = syncOver([model(16L, 'openai/gpt-5.5', false), model(37L, 'openai/gpt-5.5')])
