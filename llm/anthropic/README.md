@@ -128,11 +128,11 @@ verified that path.
 ### 2. Download the plugin JAR
 
 Grab `morpheus-anthropic-plugin-<version>-all.jar` from the
-[latest release](../../releases/latest) — it is the shaded (`-all`) JAR, which bundles the
+[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/anthropic-v1.5.0) — it is the shaded (`-all`) JAR, which bundles the
 dependencies. The plain `.jar` is not what you want.
 
 ```bash
-gh release download --repo tgessendorfer/morpheus-anthropic-plugin -p '*-all.jar'
+gh release download anthropic-v1.5.0 --repo tgessendorfer/hpe-morpheus-ent-plugins -p '*-all.jar'
 ```
 
 Or [build it from source](#build-from-source).
@@ -591,7 +591,7 @@ API can fail at class-load time. If the versions differ and the plugin will not 
 
 ## Build from source
 
-Requires JDK 11–17 (**not 21** — Groovy 3.0.9) and the bundled Gradle wrapper.
+Requires JDK 11–17 (**not 21** — Groovy 3.0.9) and the bundled Gradle wrapper. Run it in `llm/anthropic`.
 
 ```bash
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
@@ -600,7 +600,7 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ```
 
 `./gradlew test` runs the Spock suite. CI builds every push and attaches the shaded JAR to tagged
-releases (`.github/workflows/`).
+releases (`.github/workflows/` at the repository root).
 
 ---
 
@@ -634,7 +634,7 @@ plugins are complementary, not competing:
 | Ollama on your own VM | `local-llm-plugin` → `ollama` |
 | vLLM, LM Studio, llama.cpp or LiteLLM on your own network | `local-llm-plugin` → `openai-compatible` |
 | Claude with caching, thinking and native tool use — direct or through OpenRouter | this plugin |
-| Other OpenRouter models | [morpheus-openrouter-plugin](https://github.com/tgessendorfer/morpheus-openrouter-plugin) (in development) |
+| Other OpenRouter models | [OpenRouter plugin](../openrouter/README.md) |
 
 Install both and you can switch an Agent between a local model and Claude by changing its LLM
 integration, with no other configuration changes.
@@ -644,7 +644,7 @@ integration, with no other configuration changes.
 (SNI) from the TLS handshake. Endpoints behind Cloudflare abort such a handshake, and the integration
 form only says *Failed to create integration*. This plugin sets `ignoreSSL: false` and is not
 affected. The full analysis is in
-[docs/hpe-bug-report-local-llm-sni.md](https://github.com/tgessendorfer/morpheus-openrouter-plugin/blob/main/docs/hpe-bug-report-local-llm-sni.md).
+[docs/hpe/hpe-bug-report-local-llm-sni.md](../../docs/hpe/hpe-bug-report-local-llm-sni.md).
 
 ## Companion project: hpe-kb-mcp
 

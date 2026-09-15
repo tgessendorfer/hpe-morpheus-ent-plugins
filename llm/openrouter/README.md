@@ -8,12 +8,12 @@ OpenRouter's OpenAI-compatible API.
 > **Independent community project.** Not an official OpenRouter, Anthropic or HPE product, and
 > neither endorsed by nor affiliated with any of them. See [Trademarks](#trademarks).
 
-- **Claude models:** use [morpheus-anthropic-plugin](https://github.com/tgessendorfer/morpheus-anthropic-plugin).
+- **Claude models:** use [Anthropic Claude plugin](../anthropic/README.md).
   It talks to OpenRouter's Anthropic-compatible endpoint and keeps prompt caching of the MCP tool
   catalog and Anthropic's server tools. This plugin hides Anthropic models by default.
 - **Why not the Local LLM plugin's "OpenAI Compatible" integration?** Version 1.0.0 cannot connect
   to OpenRouter or `api.openai.com`: it sends no SNI in the TLS handshake. See
-  [docs/hpe-bug-report-local-llm-sni.md](docs/hpe-bug-report-local-llm-sni.md).
+  [docs/hpe/hpe-bug-report-local-llm-sni.md](../../docs/hpe/hpe-bug-report-local-llm-sni.md).
 
 ## What it does
 
@@ -49,7 +49,7 @@ OpenRouter's OpenAI-compatible API.
 ### 1. Install the plugin
 
 Download `morpheus-openrouter-plugin-<version>-all.jar` from the
-[latest release](../../releases/latest) and upload it under *Administration > Integrations >
+[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openrouter-v0.1.1) and upload it under *Administration > Integrations >
 Plugins > Add*. The plugin registers two providers: `LLM OpenRouter` and `OPTION OpenRouter Options`.
 
 ### 2. Create the integration
@@ -268,7 +268,7 @@ and stop sequences unchanged; OpenRouter drops the parameters a model does not s
 | Switching from a stored credential to *Local Credentials* is not saved | Morpheus 9.0.1 keeps the stored credential on edit. Change the key inside that credential under *Infrastructure > Trust > Credentials*, or create a new integration and point the agents at it. |
 | The log says `Only List These Models '...' matches none of N models and is ignored` | A typo in the allow list. The list stays complete until it is fixed. |
 | An agent fails after the model list was narrowed | Its model is disabled because it is no longer listed. The log names it. List it again, or give the agent another model. |
-| The model tab has no search | Not available to plugins on 9.0.1. Use the allow list. Reported to HPE: [docs/hpe-feature-request-llm-model-search.md](docs/hpe-feature-request-llm-model-search.md). |
+| The model tab has no search | Not available to plugins on 9.0.1. Use the allow list. Reported to HPE: [docs/hpe/hpe-feature-request-llm-model-search.md](../../docs/hpe/hpe-feature-request-llm-model-search.md). |
 | An agent answers **"0"** or "none" although the objects exist | Some models fill every optional parameter of an MCP tool with an empty value, and the built-in Morpheus MCP tools take `""` and `0` as filters: `list_servers` with `status: ""` or `zoneId: 0` finds nothing, while `list_servers` without arguments lists every server. Seen with `openai/gpt-5.4-nano`. The log shows the tool call, but the next request's input grows by only a few dozen tokens. The plugin forwards tool arguments unchanged; use another model for the agent. |
 | The chat says **"An error occurred while processing your request"** and the conversation is gone | Morpheus' text for a failed question, with **Show OpenRouter Errors in Chat** unticked or before 0.1.1. Look for `429` in the log: OpenRouter limits new accounts to 20 requests per minute per model (`new-account-rpm`), and one question with many tool rounds can exceed that. Wait a minute and ask again. |
 | The chat shows **"OpenRouter error 429"** | The rate limit above lasted through both waits. Wait a minute and ask again, or ask a narrower question that needs fewer tool rounds. |
@@ -279,7 +279,7 @@ and stop sequences unchanged; OpenRouter drops the parameters a model does not s
 | The Polish dialog title reads *Edytuj {0} Integrację* | Morpheus' own Polish text; it affects every integration. |
 
 The problems of Morpheus' own integration form are described for HPE in
-[docs/hpe-bug-report-integration-edit.md](docs/hpe-bug-report-integration-edit.md).
+[docs/hpe/hpe-bug-report-integration-edit.md](../../docs/hpe/hpe-bug-report-integration-edit.md).
 
 ## Version compatibility
 
@@ -291,7 +291,7 @@ The problems of Morpheus' own integration form are described for HPE in
 
 ## Build from source
 
-Requires JDK 17 (**not 21** — Groovy 3.0.9) and the bundled Gradle wrapper.
+Requires JDK 17 (**not 21** — Groovy 3.0.9) and the bundled Gradle wrapper. Run it in `llm/openrouter`.
 
 ```bash
 ./gradlew clean test shadowJar
@@ -303,7 +303,7 @@ Requires JDK 17 (**not 21** — Groovy 3.0.9) and the bundled Gradle wrapper.
 
 | Use case | Plugin |
 |---|---|
-| Claude, with prompt caching and Anthropic's web search — direct or through OpenRouter | [morpheus-anthropic-plugin](https://github.com/tgessendorfer/morpheus-anthropic-plugin) |
+| Claude, with prompt caching and Anthropic's web search — direct or through OpenRouter | [Anthropic Claude plugin](../anthropic/README.md) |
 | Every other OpenRouter model | this plugin |
 | Ollama, vLLM, LM Studio or llama.cpp on your own network | HPE's Local LLM plugin |
 

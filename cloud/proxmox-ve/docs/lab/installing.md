@@ -1,7 +1,7 @@
 # Installing a lab build
 
 Lab jars are attached to this repository's
-[GitHub Releases](https://github.com/tgessendorfer/morpheus-proxmox-ve-plugin/releases),
+[GitHub Releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases) tagged `proxmox-ve-v<version>-lab`,
 each with a `SHA256SUMS` file. Verify before uploading:
 
 ```bash

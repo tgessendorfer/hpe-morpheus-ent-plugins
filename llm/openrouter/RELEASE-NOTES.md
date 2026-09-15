@@ -1,7 +1,7 @@
 # OpenRouter plugin — release notes
 
 One section per version, newest first. The same text is the body of the matching
-[GitHub release](https://github.com/tgessendorfer/morpheus-openrouter-plugin/releases), where the
+[GitHub release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases) tagged `openrouter-v<version>`, where the
 shaded `-all.jar` is attached.
 
 ---
@@ -55,7 +55,7 @@ failed that way after 22 requests, with the real cause, a `429` for new accounts
   non-streaming request.
 - The language fix on the appliance.
 
-**Full Changelog**: https://github.com/tgessendorfer/morpheus-openrouter-plugin/compare/v0.1.0...v0.1.1
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.1.0...openrouter-v0.1.1
 
 ---
 
@@ -149,4 +149,4 @@ Reported to HPE in `docs/`:
   minute per model) answered `429`. Morpheus shows that as *An error occurred while processing your
   request* and discards the conversation. Narrower questions work.
 
-**Full Changelog**: https://github.com/tgessendorfer/morpheus-openrouter-plugin/commits/v0.1.0
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/openrouter-v0.1.0

@@ -5,7 +5,7 @@
 > ### About this fork
 >
 > A lab build, verified on **HPE Morpheus Enterprise 9.0.1** with **Proxmox VE
-> 9.2.10**. `main` is upstream `main`, plus
+> 9.2.10**. This folder is upstream `main`, plus
 > [ThePoshArchitect's Proxmox VE 9 commit](https://github.com/ThePoshArchitect/morpheus-proxmox-ve-plugin/commit/5841b29),
 > plus these changes:
 >
@@ -18,7 +18,8 @@
 > - Every cloud form field has help text and a placeholder.
 >
 > Prebuilt jars are under
-> [Releases](https://github.com/tgessendorfer/morpheus-proxmox-ve-plugin/releases).
+> [Releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.15-lab),
+> tagged `proxmox-ve-v<version>-lab`.
 > Changes per version are in [`RELEASE-NOTES.md`](RELEASE-NOTES.md), and
 > installing is covered in [`docs/lab/installing.md`](docs/lab/installing.md).
 > What breaks on Proxmox VE 9 and how the fixes were found is in
@@ -26,6 +27,16 @@
 >
 > The same terms as upstream apply: community code, no support, Apache 2.0.
 > The commit history records every change made to the upstream files.
+>
+> The plugin used to be a GitHub fork of HPE's repository. It moved into this
+> repository with its full history, so the fork link is gone and upstream
+> changes are merged by hand, from the repository root:
+>
+> ```bash
+> git remote add upstream https://github.com/HewlettPackard/morpheus-proxmox-ve-plugin.git
+> git fetch upstream
+> git merge -X subtree=cloud/proxmox-ve upstream/main
+> ```
 
 The Proxmox Plugin is a Morpheus Cloud Plugin that synchronizes VMs, templates, datastores, networks, resource pools and hypervisor hosts,
 then exposes VM Instance provisioning functionality. 

@@ -1,8 +1,9 @@
 # Proxmox VE plugin — release notes
 
-Lab builds of the Proxmox VE cloud plugin. The source is `main` in this
-repository: HPE upstream `main`, then `ThePoshArchitect/morpheus-proxmox-ve-plugin`
-commit `5841b29`, then the lab commits. Jars are attached to GitHub Releases.
+Lab builds of the Proxmox VE cloud plugin. The source is
+`cloud/proxmox-ve` in this repository: HPE upstream `main`, then `ThePoshArchitect/morpheus-proxmox-ve-plugin`
+commit `5841b29`, then the lab commits. Jars are attached to GitHub Releases
+tagged `proxmox-ve-v<version>-lab`.
 
 Build with `./gradlew shadowJar`. Every version below is a
 `Plugin-Version` in the jar's manifest, which is the only thing the appliance

@@ -1,7 +1,7 @@
 # Anthropic Claude plugin — release notes
 
 One section per version, newest first. The same text is the body of the matching
-[GitHub release](https://github.com/tgessendorfer/morpheus-anthropic-plugin/releases), where the
+[GitHub release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases) tagged `anthropic-v<version>`, where the
 shaded `-all.jar` is attached. Notes for 1.4.1 and earlier exist only there.
 
 ---
@@ -112,7 +112,7 @@ Not yet verified through OpenRouter: web search and fetch, and the 1M context be
 **Worth knowing:** OpenRouter's model list is public and answers `200` to any key. A successful
 save therefore proves the appliance reached OpenRouter, not that the key is valid — the first chat
 is the real test. See
-[Going through OpenRouter](https://github.com/tgessendorfer/morpheus-anthropic-plugin#going-through-openrouter).
+[Going through OpenRouter](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/llm/anthropic#going-through-openrouter).
 
 Integrations against `api.anthropic.com` behave as before, apart from the encoding fix above.
 
@@ -128,4 +128,4 @@ chat widget loads its agent list with the page, so an agent created afterwards s
 earlier turns or from examples in the MCP tool descriptions instead of calling the tool, which the
 new tool-call log makes visible.
 
-**Full Changelog**: https://github.com/tgessendorfer/morpheus-anthropic-plugin/compare/v1.4.1...v1.5.0
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.4.1...anthropic-v1.5.0
