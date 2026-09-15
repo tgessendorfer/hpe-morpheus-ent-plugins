@@ -49,7 +49,7 @@ OpenRouter's OpenAI-compatible API.
 ### 1. Install the plugin
 
 Download `morpheus-openrouter-plugin-<version>-all.jar` from the
-[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openrouter-v0.1.1) and upload it under *Administration > Integrations >
+[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openrouter-v0.1.2) and upload it under *Administration > Integrations >
 Plugins > Add*. The plugin registers two providers: `LLM OpenRouter` and `OPTION OpenRouter Options`.
 
 ### 2. Create the integration

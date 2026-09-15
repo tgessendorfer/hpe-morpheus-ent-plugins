@@ -128,11 +128,11 @@ verified that path.
 ### 2. Download the plugin JAR
 
 Grab `morpheus-anthropic-plugin-<version>-all.jar` from the
-[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/anthropic-v1.5.0) — it is the shaded (`-all`) JAR, which bundles the
+[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/anthropic-v1.5.1) — it is the shaded (`-all`) JAR, which bundles the
 dependencies. The plain `.jar` is not what you want.
 
 ```bash
-gh release download anthropic-v1.5.0 --repo tgessendorfer/hpe-morpheus-ent-plugins -p '*-all.jar'
+gh release download anthropic-v1.5.1 --repo tgessendorfer/hpe-morpheus-ent-plugins -p '*-all.jar'
 ```
 
 Or [build it from source](#build-from-source).

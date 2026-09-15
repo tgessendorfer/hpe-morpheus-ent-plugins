@@ -6,6 +6,28 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 0.1.2
+
+**The plugin list links to the plugin's new home.** The plugin moved, with its full history, into
+[tgessendorfer/hpe-morpheus-ent-plugins](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/llm/openrouter),
+next to the Anthropic Claude and Proxmox VE plugins, and the old `morpheus-openrouter-plugin`
+repository was deleted. The website link in the plugin list and `Morpheus-Repo` in the jar's
+manifest still named the old repository; both now lead to `llm/openrouter` in the new one.
+
+Nothing else changed from 0.1.1. The plugin code stays `morpheus-openrouter-plugin`, so the jar
+upgrades an installed 0.1.1. Releases are now tagged `openrouter-v<version>`; the tags of the earlier
+releases were renamed the same way and point at the same commits.
+
+Upgrading: upload the new jar under *Administration > Integrations > Plugins*. No configuration
+changes are required.
+
+Verified: the test suite passes with plugin API 1.4.2, the HTTP client tests with 1.4.1, and the
+jar's manifest names the new repository. Not verified on an appliance.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.1.1...openrouter-v0.1.2
+
+---
+
 ## 0.1.1
 
 **OpenRouter's error messages reach the chat, and rate limits are waited out.** Morpheus replaces

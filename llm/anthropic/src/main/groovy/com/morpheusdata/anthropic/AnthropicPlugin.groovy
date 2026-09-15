@@ -45,7 +45,7 @@ class AnthropicPlugin extends Plugin {
 		// Shown in the plugin list; the manifest's Morpheus-Description is not read there.
 		this.setDescription(DESCRIPTION)
 		this.setAuthor('Thomas Gessendorfer')
-		this.setWebsiteUrl('https://github.com/tgessendorfer/morpheus-anthropic-plugin')
+		this.setWebsiteUrl('https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/llm/anthropic')
 		AnthropicProvider anthropicProvider = new AnthropicProvider(this, morpheus)
 		this.pluginProviders.put(anthropicProvider.code, anthropicProvider)
 	}

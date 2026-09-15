@@ -74,7 +74,7 @@ jar {
 			'Morpheus-Logo-Dark': 'assets/anthropic-mark-white.svg',
 			'Morpheus-Color': '#D97757',
 			'Morpheus-Labels': 'Plugin, LLM, AI, Anthropic, Claude',
-			'Morpheus-Repo': 'https://github.com/tgessendorfer/morpheus-anthropic-plugin',
+			'Morpheus-Repo': 'https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/llm/anthropic',
 			'Morpheus-Min-Appliance-Version': morpheusMinApplianceVersion
 		)
 	}

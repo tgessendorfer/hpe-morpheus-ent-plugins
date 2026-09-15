@@ -74,7 +74,7 @@ jar {
 			'Morpheus-Logo-Dark': 'assets/router-mark-white.svg',
 			'Morpheus-Color': '#12A594',
 			'Morpheus-Labels': 'Plugin, LLM, AI, OpenRouter',
-			'Morpheus-Repo': 'https://github.com/tgessendorfer/morpheus-openrouter-plugin',
+			'Morpheus-Repo': 'https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/llm/openrouter',
 			'Morpheus-Min-Appliance-Version': morpheusMinApplianceVersion
 		)
 	}

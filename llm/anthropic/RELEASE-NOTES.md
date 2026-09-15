@@ -6,6 +6,28 @@ shaded `-all.jar` is attached. Notes for 1.4.1 and earlier exist only there.
 
 ---
 
+## 1.5.1
+
+**The plugin list links to the plugin's new home.** The plugin moved, with its full history, into
+[tgessendorfer/hpe-morpheus-ent-plugins](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/llm/anthropic),
+next to the OpenRouter and Proxmox VE plugins, and the old `morpheus-anthropic-plugin` repository
+was deleted. The website link in the plugin list and `Morpheus-Repo` in the jar's manifest still
+named the old repository; both now lead to `llm/anthropic` in the new one.
+
+Nothing else changed from 1.5.0. The plugin code stays `morpheus-anthropic-plugin`, so the jar
+upgrades an installed 1.5.0. Releases are now tagged `anthropic-v<version>`; the tags of the earlier
+releases were renamed the same way and point at the same commits.
+
+Upgrading: upload the new jar under *Administration > Integrations > Plugins*. No configuration
+changes are required.
+
+Verified: the test suite passes, and the jar's manifest names the new repository. Not verified on an
+appliance.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.5.0...anthropic-v1.5.1
+
+---
+
 ## 1.5.0
 
 Makes the integration work against **OpenRouter**. Its Anthropic-compatible Messages endpoint

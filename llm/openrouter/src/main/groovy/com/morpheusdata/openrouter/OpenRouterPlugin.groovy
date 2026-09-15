@@ -45,7 +45,7 @@ class OpenRouterPlugin extends Plugin {
 		// Shown in the plugin list; the manifest's Morpheus-Description is not read there.
 		this.setDescription(DESCRIPTION)
 		this.setAuthor('Thomas Gessendorfer')
-		this.setWebsiteUrl('https://github.com/tgessendorfer/morpheus-openrouter-plugin')
+		this.setWebsiteUrl('https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/llm/openrouter')
 		OpenRouterProvider openRouterProvider = new OpenRouterProvider(this, morpheus)
 		this.pluginProviders.put(openRouterProvider.code, openRouterProvider)
 		this.registerProvider(new OpenRouterOptionSourceProvider(this, morpheus))
