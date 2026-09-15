@@ -39,8 +39,9 @@ failed that way after 22 requests, with the real cause, a `429` for new accounts
 
 - On HPE Morpheus Enterprise 9.0.1 with 0.1.1-rc.1: a real `429` for new accounts, provoked with a
   burst of `max_tokens: 1` requests to the same model, was waited out for 10 and then 20 seconds and
-  then shown in the chat as the error answer. Morpheus kept the conversation. Normal answers with
-  the cost footer before and after.
+  then shown in the chat as the error answer. Morpheus kept the conversation: the next question in
+  it was answered normally, with `input=8204` tokens against `8200` for a fresh question, so the
+  error answer was not replayed to the model. Normal answers with the cost footer before and after.
 - 127 Spock tests with plugin API 1.4.2, and the HTTP client tests with 1.4.1: retry waits, error
   answers in three languages, the cost until the failure, the option's default, streams with and
   without text before the error, error answers removed from replayed history, and the language of
@@ -52,7 +53,7 @@ failed that way after 22 requests, with the real cause, a `429` for new accounts
   recorded messages.
 - The streaming path on the appliance: Morpheus 9.0.1 sent every chat in these tests as a
   non-streaming request.
-- The language fix on the appliance, and error answers left out of replayed history there.
+- The language fix on the appliance.
 
 **Full Changelog**: https://github.com/tgessendorfer/morpheus-openrouter-plugin/compare/v0.1.0...v0.1.1
 
