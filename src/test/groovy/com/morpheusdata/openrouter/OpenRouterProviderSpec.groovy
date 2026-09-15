@@ -106,6 +106,9 @@ class OpenRouterProviderSpec extends Specification {
 		'https://openrouter.ai/api/v1/chat/completions'  || 'https://openrouter.ai/api/v1'
 		'https://openrouter.ai/api'                      || 'https://openrouter.ai/api/v1'
 		'https://openrouter.ai'                          || 'https://openrouter.ai/api/v1'
+		'https://eu.openrouter.ai'                       || 'https://eu.openrouter.ai/api/v1'
+		'https://us.openrouter.ai/api'                   || 'https://us.openrouter.ai/api/v1'
+		'https://eu.openrouter.ai/api/v1/models'         || 'https://eu.openrouter.ai/api/v1'
 		'https://gateway.example.com/openai/v1'          || 'https://gateway.example.com/openai/v1'
 	}
 

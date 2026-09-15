@@ -148,7 +148,7 @@ class OpenRouterProvider implements LlmProvider {
 			displayOrder: 0,
 			required: true,
 			defaultValue: DEFAULT_API_URL,
-			helpText: 'OpenRouter\'s OpenAI-compatible API, https://openrouter.ai/api/v1. The plugin appends /chat/completions, /models and /key. A URL that ends in /api, the base URL of OpenRouter\'s Anthropic-compatible API, gets /v1 added.'
+			helpText: 'OpenRouter\'s OpenAI-compatible API, https://openrouter.ai/api/v1. For in-region routing, a Business plan feature, use https://eu.openrouter.ai/api/v1 or https://us.openrouter.ai/api/v1; only models available in that region are then listed. The plugin appends /chat/completions, /models and /key, and adds /api/v1 or /v1 when the URL stops short of it.'
 		)
 
 		optionTypes << new OptionType(
@@ -1014,7 +1014,8 @@ class OpenRouterProvider implements LlmProvider {
 		if (url.endsWith('/api')) {
 			return url + '/v1'
 		}
-		if (url ==~ /(?i)https?:\/\/(www\.)?openrouter\.ai/) {
+		// The main domain and the in-region domains eu. and us., entered without a path.
+		if (url ==~ /(?i)https?:\/\/((www|eu|us)\.)?openrouter\.ai/) {
 			return url + '/api/v1'
 		}
 		return url
