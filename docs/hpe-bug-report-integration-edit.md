@@ -85,6 +85,21 @@ empty one. The same probably applies to other plugin `TEXT` options; plugin API 
 The plugin defaults the field to `*` (every model) and tells the user to enter `*` instead of
 clearing it.
 
+## Issue 3: the REST API update hands the provider the request instead of the credential
+
+`PUT /api/integrations/<id>` with only `{"integration":{"refresh":false,"config":{...}}}` calls the
+provider's `validate()` with an `AccountIntegration` whose `credentialData` holds the request's own
+top-level keys (`config`, `refresh`) and whose `credentialLoaded` is `true`. The stored credential's
+data is missing, so a provider that reads the key from `credentialData` falls back to the local
+`servicePassword`. A config-only change of an integration with a stored credential then fails
+validation (`401` from the upstream API).
+
+The plugin now loads the credential itself through
+`morpheusContext.services.accountCredential.loadCredentials(accountIntegration)`, which finds it.
+
+A related observation: a text field emptied through the REST API (`""`, stored and returned as `''`)
+is written back by the edit dialog as the two characters `""` on the next save.
+
 ## Suggested fix
 
 - Send and apply the credential selection and the local credential fields on update, as on create.

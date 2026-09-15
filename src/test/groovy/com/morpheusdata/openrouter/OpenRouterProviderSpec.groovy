@@ -706,8 +706,29 @@ class OpenRouterProviderSpec extends Specification {
 		expect:
 		OpenRouterProvider.parseModelAllowList(value).isEmpty()
 
-		where:
-		value << [null, '', '  ', ' , ']
+		where: '"" is what the edit form wrote back after the value was emptied through the REST API'
+		value << [null, '', '  ', ' , ', '""', "''", '"", ""']
+	}
+
+	def "quotes around an allow list entry are ignored"() {
+		given:
+		AccountIntegration quoted = configured([modelAllowList: '"openai/gpt-5*"'])
+
+		expect:
+		provider.buildModelsFromApiResponse(new LlmIntegration(accountIntegration: quoted),
+			[data: [catalogEntry('openai/gpt-5.5'), catalogEntry('mistralai/mistral-large')]])*.code == ['openai/gpt-5.5']
+	}
+
+	def "an allow list that matches no model is ignored instead of emptying the list"() {
+		given: 'a typo in the vendor'
+		AccountIntegration typo = configured([modelAllowList: 'opnai/gpt-5*'])
+
+		when:
+		List<LlmModel> models = provider.buildModelsFromApiResponse(new LlmIntegration(id: 4L, accountIntegration: typo),
+			[data: [catalogEntry('openai/gpt-5.5'), catalogEntry('mistralai/mistral-large')]])
+
+		then:
+		models*.code as Set == ['openai/gpt-5.5', 'mistralai/mistral-large'] as Set
 	}
 
 	def "the allow list has a label and help text"() {

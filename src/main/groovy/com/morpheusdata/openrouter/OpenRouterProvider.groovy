@@ -738,43 +738,45 @@ class OpenRouterProvider implements LlmProvider {
 		AccountIntegration accountIntegration = llmIntegration?.accountIntegration
 		boolean includeAnthropic = isIncludeAnthropicModels(accountIntegration)
 		boolean includeFree = isIncludeFreeModels(accountIntegration)
-		List<Pattern> allowList = parseModelAllowList(accountIntegration?.getConfigProperty('modelAllowList')?.toString())
+		String configuredAllowList = accountIntegration?.getConfigProperty('modelAllowList')?.toString()
+		List<Pattern> allowList = parseModelAllowList(configuredAllowList)
 		LocalDate today = LocalDate.now(ZoneOffset.UTC)
+		List<Map> candidates = apiResponse?.data instanceof List ? (apiResponse.data as List).findAll { entry ->
+			entry instanceof Map && isListedModel(entry as Map, includeAnthropic, includeFree, today)
+		} as List<Map> : []
+		List<Map> selected = candidates.findAll { Map entry -> matchesAllowList(entry.id?.toString()?.trim(), allowList) }
+		if (allowList && !selected && candidates) {
+			// Applied, an allow list that matches nothing removes every model of the
+			// integration - which a typo, or a value the edit form mangled, once did.
+			log.warn("OpenRouter integration ${llmIntegration?.id}: Only List These Models '${configuredAllowList}' matches none of " +
+				"${candidates.size()} models and is ignored, so the model list is not emptied")
+			selected = candidates
+		}
 		List<LlmModel> models = []
-		def modelData = apiResponse?.data
-		if (modelData instanceof List) {
-			(modelData as List).each { entry ->
-				if (!(entry instanceof Map)) {
-					return
-				}
-				Map entryMap = entry as Map
-				if (!isListedModel(entryMap, includeAnthropic, includeFree, today, allowList)) {
-					return
-				}
-				String modelId = entryMap.id.toString().trim()
-				Map topProvider = entryMap.top_provider instanceof Map ? entryMap.top_provider as Map : [:]
-				LlmModel model = new LlmModel()
-				// Kept exactly as listed: that is the spelling the endpoint expects back.
-				model.code = modelId
-				model.externalId = modelId
-				// The vendor prefix OpenRouter puts in the name stays: in a multi-vendor
-				// list it is what tells two "Flash" models apart.
-				model.name = displayName(entryMap, today)
-				model.providerCode = PROVIDER_CODE
-				model.modelType = 'chat'
-				model.contextWindow = toLong(entryMap.context_length) ?: toLong(topProvider.context_length)
-				model.maxOutputTokens = toLong(topProvider.max_completion_tokens)
-				model.llmIntegration = llmIntegration
-				model.enabled = true
-				model.metadata = [
-					supportsToolUse  : true,
-					supportsStreaming: true,
-					supportsReasoning: supportedParameters(entryMap).contains('reasoning'),
-					supportsVision   : modalities(entryMap, 'input_modalities').contains('image'),
-					apiFormat        : 'openai-chat-completions'
-				]
-				models << model
-			}
+		selected.each { Map entryMap ->
+			String modelId = entryMap.id.toString().trim()
+			Map topProvider = entryMap.top_provider instanceof Map ? entryMap.top_provider as Map : [:]
+			LlmModel model = new LlmModel()
+			// Kept exactly as listed: that is the spelling the endpoint expects back.
+			model.code = modelId
+			model.externalId = modelId
+			// The vendor prefix OpenRouter puts in the name stays: in a multi-vendor
+			// list it is what tells two "Flash" models apart.
+			model.name = displayName(entryMap, today)
+			model.providerCode = PROVIDER_CODE
+			model.modelType = 'chat'
+			model.contextWindow = toLong(entryMap.context_length) ?: toLong(topProvider.context_length)
+			model.maxOutputTokens = toLong(topProvider.max_completion_tokens)
+			model.llmIntegration = llmIntegration
+			model.enabled = true
+			model.metadata = [
+				supportsToolUse  : true,
+				supportsStreaming: true,
+				supportsReasoning: supportedParameters(entryMap).contains('reasoning'),
+				supportsVision   : modalities(entryMap, 'input_modalities').contains('image'),
+				apiFormat        : 'openai-chat-completions'
+			]
+			models << model
 		}
 		models.sort { LlmModel a, LlmModel b -> (a.name ?: '').compareToIgnoreCase(b.name ?: '') }
 		return models
@@ -822,18 +824,23 @@ class OpenRouterProvider implements LlmProvider {
 		if (expires != null && expires.isBefore(today)) {
 			return false
 		}
-		return !allowList || allowList.any { Pattern pattern -> pattern.matcher(id).matches() }
+		return matchesAllowList(id, allowList)
+	}
+
+	protected static boolean matchesAllowList(String id, List<Pattern> allowList) {
+		return !allowList || (id && allowList.any { Pattern pattern -> pattern.matcher(id).matches() })
 	}
 
 	/**
 	 * The allow list as case-insensitive patterns matching a whole model id, with * as
-	 * the only wildcard. Empty when nothing is configured.
+	 * the only wildcard. Empty when nothing is configured. Quotes around an entry are
+	 * dropped: a value emptied through the REST API comes back from the edit form as "".
 	 */
 	protected static List<Pattern> parseModelAllowList(String configured) {
 		if (!configured?.trim()) {
 			return []
 		}
-		return configured.split(/[,\s]+/).findAll { it }.collect { String glob ->
+		return configured.split(/[,\s]+/).collect { String token -> token.replaceAll(/^["']+|["']+$/, '') }.findAll { it }.collect { String glob ->
 			Pattern.compile(glob.split(/\*/, -1).collect { String part -> Pattern.quote(part) }.join('.*'), Pattern.CASE_INSENSITIVE)
 		}
 	}
