@@ -50,6 +50,11 @@ A deliberately invalid local key (`sk-or-v1-0000000000`) was accepted, which it 
 it had reached the plugin: the same key is rejected with `401 User not found.` when a new
 integration is created with it.
 
+**What the dialog sends:** the save request body carries `credential.type: "local"` and the new key
+in `accountIntegration.servicePassword`, but it still includes the previously selected credential's
+`credential.id`. The server keeps that stored credential. Either the dialog should drop
+`credential.id` when *Local Credentials* is chosen, or the server should let `type: "local"` win.
+
 ### Workarounds
 
 - Change the key inside the stored credential.
@@ -67,6 +72,13 @@ integration is created with it.
 
 **Actual:** no error, and `GET /api/integrations/<id>` still returns the previous value in `config`.
 Saving a different, non-empty value works.
+
+**Cause, as far as it shows in the browser:** the dialog's controlled input falls back to the stored
+value the moment it is empty. Setting the input `config.modelAllowList` to `""` (native value setter
+plus an `input` event) made it display the stored `*` again immediately, while `" "` and `x` stayed
+as entered. The request body sent on save carried the stored value, so the server never received an
+empty one. The same probably applies to other plugin `TEXT` options; plugin API 1.4.2 offers no
+`OptionType` attribute that changes it.
 
 ### Workaround
 
