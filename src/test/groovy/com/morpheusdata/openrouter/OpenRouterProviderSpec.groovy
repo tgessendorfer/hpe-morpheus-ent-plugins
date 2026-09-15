@@ -1,5 +1,6 @@
 package com.morpheusdata.openrouter
 
+import com.morpheusdata.model.AccountCredential
 import com.morpheusdata.model.AccountIntegration
 import com.morpheusdata.model.NetworkProxy
 import com.morpheusdata.model.OptionType
@@ -115,6 +116,57 @@ class OpenRouterProviderSpec extends Specification {
 	// ------------------------------------------------------------------
 	// Validation
 	// ------------------------------------------------------------------
+
+	def "the stored credential is loaded when Morpheus did not hand it over, and wins over a stale local key"() {
+		given: 'an update through the REST API: no credentialData, and an old value in the hidden local field'
+		int lookups = 0
+		OpenRouterProvider withLookup = new OpenRouterProvider(null, null) {
+			@Override
+			protected AccountCredential loadAccountCredential(AccountIntegration accountIntegration) {
+				lookups++
+				return new AccountCredential(data: [password: 'sk-or-v1-stored'])
+			}
+		}
+		AccountIntegration ai = new AccountIntegration(id: 4L, servicePassword: 'sk-or-v1-0000000000')
+
+		expect:
+		withLookup.resolveApiKey(ai) == 'sk-or-v1-stored'
+		withLookup.resolveApiKey(ai) == 'sk-or-v1-stored'
+
+		and: 'looked up once, then remembered on the integration'
+		lookups == 1
+		ai.credentialLoaded
+	}
+
+	def "a handed-over credential is used as it is, and Local Credentials fall back to the local field"() {
+		given:
+		OpenRouterProvider withLookup = new OpenRouterProvider(null, null) {
+			@Override
+			protected AccountCredential loadAccountCredential(AccountIntegration accountIntegration) {
+				if (accountIntegration.id == 99L) {
+					throw new IllegalStateException('lookup must not run when the credential is already there')
+				}
+				return null
+			}
+		}
+
+		expect:
+		withLookup.resolveApiKey(new AccountIntegration(id: 99L, credentialData: [password: 'sk-or-v1-stored'], servicePassword: 'stale')) == 'sk-or-v1-stored'
+		withLookup.resolveApiKey(new AccountIntegration(id: 5L, servicePassword: 'sk-or-v1-local')) == 'sk-or-v1-local'
+	}
+
+	def "a failing credential lookup does not take the chat down"() {
+		given:
+		OpenRouterProvider failing = new OpenRouterProvider(null, null) {
+			@Override
+			protected AccountCredential loadAccountCredential(AccountIntegration accountIntegration) {
+				throw new RuntimeException('database unavailable')
+			}
+		}
+
+		expect:
+		failing.resolveApiKey(new AccountIntegration(id: 6L, servicePassword: 'sk-or-v1-local')) == 'sk-or-v1-local'
+	}
 
 	def "saving checks the key itself, since the model list answers any key"() {
 		given:

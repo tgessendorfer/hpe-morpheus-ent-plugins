@@ -20,6 +20,7 @@ package com.morpheusdata.openrouter
 import com.morpheusdata.core.MorpheusContext
 import com.morpheusdata.core.Plugin
 import com.morpheusdata.core.providers.LlmProvider
+import com.morpheusdata.model.AccountCredential
 import com.morpheusdata.model.AccountIntegration
 import com.morpheusdata.model.Icon
 import com.morpheusdata.model.NetworkProxy
@@ -1039,8 +1040,31 @@ class OpenRouterProvider implements LlmProvider {
 	// Helpers
 	// ------------------------------------------------------------------
 
+	/**
+	 * The key of the stored credential when the integration has one, else the local field.
+	 *
+	 * Morpheus does not always hand the stored credential over. An update through
+	 * PUT /api/integrations/<id> arrives with credentialData unloaded, and the local
+	 * servicePassword - whatever was once typed into the hidden local field - won
+	 * (verified on 9.0.1). The credential is then loaded explicitly, the way cloud
+	 * plugins load theirs.
+	 */
 	protected String resolveApiKey(AccountIntegration accountIntegration) {
+		if (accountIntegration.credentialData == null && accountIntegration.credentialLoaded != true) {
+			try {
+				AccountCredential credential = loadAccountCredential(accountIntegration)
+				accountIntegration.credentialLoaded = true
+				accountIntegration.credentialData = credential?.data
+			} catch (Exception e) {
+				log.warn("Could not load the stored credential of integration ${accountIntegration.id}: ${e.message}")
+			}
+		}
 		return accountIntegration.credentialData?.password ?: accountIntegration.serviceToken ?: accountIntegration.servicePassword
+	}
+
+	/** The appliance lookup, on its own so tests can answer it. Null for Local Credentials. */
+	protected AccountCredential loadAccountCredential(AccountIntegration accountIntegration) {
+		return morpheusContext?.services?.accountCredential?.loadCredentials(accountIntegration)
 	}
 
 	/**
