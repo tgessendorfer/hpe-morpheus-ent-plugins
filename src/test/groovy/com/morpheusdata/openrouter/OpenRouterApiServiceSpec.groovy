@@ -25,7 +25,7 @@ class OpenRouterApiServiceSpec extends Specification {
 	}
 
 	/** A local endpoint under /api/v1 that records each request and answers with the given body. */
-	private String serve(String path, String contentType, String responseBody, int status, List<Map> received) {
+	private String serve(String path, String contentType, String responseBody, int status, List<Map> received, Map<String, String> headers = [:]) {
 		server = HttpServer.create(new InetSocketAddress('127.0.0.1', 0), 0)
 		server.createContext("/api/v1${path}", { HttpExchange exchange ->
 			received << [method       : exchange.requestMethod,
@@ -34,6 +34,7 @@ class OpenRouterApiServiceSpec extends Specification {
 						 body         : exchange.requestBody.bytes]
 			byte[] bytes = responseBody.getBytes('UTF-8')
 			exchange.responseHeaders.add('Content-Type', contentType)
+			headers.each { String name, String value -> exchange.responseHeaders.add(name, value) }
 			exchange.sendResponseHeaders(status, bytes.length)
 			exchange.responseBody.withStream { it.write(bytes) }
 		} as HttpHandler)
@@ -255,9 +256,75 @@ class OpenRouterApiServiceSpec extends Specification {
 		service.consumeEventStream(response, null)
 
 		then:
-		RuntimeException e = thrown()
+		OpenRouterApiService.StreamErrorException e = thrown()
 		e.message.contains('Rate limit exceeded')
 		e.message.contains('OpenAI')
+		e.statusCode == 429
+	}
+
+	def "a refused request reports its status; HttpApiClient hands over no headers for it"() {
+		given:
+		String baseUrl = serve('/chat/completions', 'application/json',
+			'{"error":{"message":"Rate limit exceeded","code":429},"user_id":"user_abc123"}', 429, [], ['Retry-After': '7'])
+
+		when:
+		Map result = service.createChatCompletion(baseUrl, 'sk-or-v1-test', [model: 'm', messages: []])
+
+		then:
+		!result.success
+		result.statusCode == 429
+		result.msg.contains('Rate limit exceeded')
+
+		and: 'callJsonApi returns an error without its headers, so the provider falls back to its own waits'
+		result.retryAfter == null
+	}
+
+	def "a refused stream reports its status and how long OpenRouter asks to wait"() {
+		given:
+		String baseUrl = serve('/chat/completions', 'application/json',
+			'{"error":{"message":"Rate limit exceeded","code":429},"user_id":"user_abc123"}', 429, [], ['Retry-After': '7'])
+
+		when:
+		Map result = service.streamChatCompletion(baseUrl, 'sk-or-v1-test', [model: 'm', messages: []], null)
+
+		then:
+		!result.success
+		result.statusCode == 429
+		result.retryAfter == 7
+	}
+
+	def "an error event inside a stream comes back as a failure with its status"() {
+		given:
+		String stream = [
+			'data: {"choices":[{"index":0,"delta":{"content":"Partial"},"finish_reason":null}]}',
+			'',
+			'data: {"error":{"code":502,"message":"Provider returned error"},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}',
+			''
+		].join('\n')
+		String baseUrl = serve('/chat/completions', 'text/event-stream', stream, 200, [])
+		List<String> chunks = []
+
+		when:
+		Map result = service.streamChatCompletion(baseUrl, 'sk-or-v1-test', [model: 'm', messages: []], { String chunk -> chunks << chunk })
+
+		then:
+		chunks == ['Partial']
+		!result.success
+		result.statusCode == 502
+		result.msg == 'OpenRouter stream error: Provider returned error'
+	}
+
+	def "status codes and Retry-After values are read defensively"() {
+		expect:
+		OpenRouterApiService.statusCodeOf(status) == expectedStatus
+		OpenRouterApiService.retryAfterSeconds(retryAfter) == expectedWait
+
+		where:
+		status    | retryAfter                         || expectedStatus | expectedWait
+		'429'     | '7'                                || 429            | 7
+		429       | ['12']                             || 429            | 12
+		'unknown' | 'Wed, 16 Sep 2026 07:28:00 GMT'    || null           | null
+		null      | null                               || null           | null
 	}
 
 	def "the api service applies the proxy to the client and clears it again"() {

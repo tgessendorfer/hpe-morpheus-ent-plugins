@@ -6,6 +6,58 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 0.1.1
+
+**OpenRouter's error messages reach the chat, and rate limits are waited out.** Morpheus replaces
+every provider error with a generic text — *The AI model is no longer available*, *An error
+occurred while processing your request* — and on 2026-09-15 a question on a new OpenRouter account
+failed that way after 22 requests, with the real cause, a `429` for new accounts, only in the log.
+
+### What changed
+
+- **Errors as answers.** A question that fails for good is answered by the plugin with OpenRouter's
+  message under a heading with the HTTP status, and what to do about it, for 400, 401, 402, 403,
+  404, 408, 429 and 5xx — in the language of the question (English, German, Polish). With the cost
+  footer on, the answer ends with what the question cost until it failed. Text a stream had already
+  shown stays above the error.
+- **New option *Show OpenRouter Errors in Chat*, on by default — also for existing integrations.**
+  This is a behaviour change: Morpheus now records a failed question as answered, so the
+  conversation is kept instead of discarded. Untick it for the 0.1.0 behaviour.
+- **Error answers are left out of the history** replayed to the model, like the cost footer.
+- **Rate limits and overloaded providers are retried.** A `429` or `503` is waited out twice, 10 and
+  then 20 seconds, or as long as a stream's `Retry-After` asks, up to 30 seconds each. A stream that
+  has already shown text is not retried. Connection failures are retried as before, and now for
+  streams too. `callJsonApi` hands no headers of an error response to the plugin, so a non-streaming
+  request always uses the plugin's own waits.
+- **Streams report the status of an error event**, so a `429` inside a started stream is told apart
+  from other failures.
+- **Short questions get the right language.** Greetings and question words such as *Hallo, wer bist
+  du?*, *who*, *how many* or *kim jesteś* count now; with 0.1.1-rc.1 that German question got an
+  English error answer.
+
+### Verified
+
+- On HPE Morpheus Enterprise 9.0.1 with 0.1.1-rc.1: a real `429` for new accounts, provoked with a
+  burst of `max_tokens: 1` requests to the same model, was waited out for 10 and then 20 seconds and
+  then shown in the chat as the error answer. Morpheus kept the conversation. Normal answers with
+  the cost footer before and after.
+- 127 Spock tests with plugin API 1.4.2, and the HTTP client tests with 1.4.1: retry waits, error
+  answers in three languages, the cost until the failure, the option's default, streams with and
+  without text before the error, error answers removed from replayed history, and the language of
+  short questions.
+
+### Not verified
+
+- A live `402`, `503` or other 5xx through the plugin; the tests use OpenRouter's documented and
+  recorded messages.
+- The streaming path on the appliance: Morpheus 9.0.1 sent every chat in these tests as a
+  non-streaming request.
+- The language fix on the appliance, and error answers left out of replayed history there.
+
+**Full Changelog**: https://github.com/tgessendorfer/morpheus-openrouter-plugin/compare/v0.1.0...v0.1.1
+
+---
+
 ## 0.1.0
 
 First release. **OpenRouter as an AI integration type for HPE Morpheus Enterprise 9.0**, so

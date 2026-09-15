@@ -9,6 +9,7 @@ import com.morpheusdata.model.llm.LlmChatRequest
 import com.morpheusdata.model.llm.LlmChatResponse
 import com.morpheusdata.model.llm.LlmIntegration
 import com.morpheusdata.model.llm.LlmModel
+import com.morpheusdata.response.LlmStreamingResponseHandler
 import com.morpheusdata.response.ServiceResponse
 import spock.lang.Specification
 
@@ -291,15 +292,230 @@ class OpenRouterProviderSpec extends Specification {
 		api.createChatCompletion(*_) >> [success: false, msg: 'API returned 403: Regional routing not enabled for this account. Please reach out to our enterprise sales team to enable this feature.']
 		provider.apiService = api
 		AccountIntegration ai = new AccountIntegration(serviceUrl: 'https://eu.openrouter.ai/api/v1', servicePassword: 'sk-or-v1-test')
+		ai.setConfigMap(config)
 		LlmChatRequest request = new LlmChatRequest(model: 'mistralai/ministral-8b-2512', messages: [message('user', 'hi')])
 
 		when:
-		ServiceResponse response = provider.generateResponse(new LlmIntegration(accountIntegration: ai), request, [:])
+		ServiceResponse<LlmChatResponse> response = provider.generateResponse(new LlmIntegration(accountIntegration: ai), request, [:])
+		String text = response.success ? response.data.message.content : response.msg
+
+		then:
+		response.success == inChat
+		text.contains('Regional routing not enabled')
+		text.contains('Business or Enterprise plan')
+
+		and: 'no generic 403 hint next to the plan explanation'
+		!text.contains('moderation')
+
+		where:
+		config               || inChat
+		[:]                  || true
+		[chatErrors: false]  || false
+	}
+
+	// ------------------------------------------------------------------
+	// Failures
+	// ------------------------------------------------------------------
+
+	def "a rate limit is waited out for as long as OpenRouter asks, and the answer comes through"() {
+		given:
+		OpenRouterApiService api = Stub()
+		api.createChatCompletion(*_) >>> [
+			[success: false, msg: 'API returned 429: Rate limit exceeded', statusCode: 429, retryAfter: 7],
+			[success: true, data: [choices: [[finish_reason: 'stop', message: [content: 'Es gibt eine Gruppe.']]]]]
+		]
+		provider.apiService = api
+		List<Long> waits = []
+		provider.sleeper = { long millis -> waits << millis }
+		AccountIntegration ai = new AccountIntegration(serviceUrl: OpenRouterProvider.DEFAULT_API_URL, servicePassword: 'sk-or-v1-test')
+
+		when:
+		ServiceResponse<LlmChatResponse> response = provider.generateResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(model: 'google/gemini-3.5-flash', messages: [message('user', 'Wie viele Gruppen gibt es?')]), [:])
+
+		then:
+		waits == [7000L]
+		response.success
+		response.data.message.content == 'Es gibt eine Gruppe.'
+	}
+
+	def "a rate limit that stays ends as an answer with OpenRouter's message, in the language of the question"() {
+		given: 'what OpenRouter answered a new account on 2026-09-15'
+		OpenRouterApiService api = Stub()
+		api.createChatCompletion(*_) >> [success: false, statusCode: 429,
+										 msg    : 'API returned 429: Rate limit exceeded: new-account-rpm/google/gemini-3.5-flash-20260519. Rate limit reached: new accounts are limited to 20 requests per minute for this model. Please retry shortly.']
+		provider.apiService = api
+		List<Long> waits = []
+		provider.sleeper = { long millis -> waits << millis }
+		AccountIntegration ai = new AccountIntegration(serviceUrl: OpenRouterProvider.DEFAULT_API_URL, servicePassword: 'sk-or-v1-test')
+
+		when:
+		ServiceResponse<LlmChatResponse> response = provider.generateResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(model: 'google/gemini-3.5-flash', messages: [message('user', 'Wie viele Server gibt es?')]), [:])
+
+		then: 'two waits, then the failure reaches the chat as an answer Morpheus shows'
+		waits == [10000L, 20000L]
+		response.success
+		response.data.finishReason == 'stop'
+		response.data.message.content == '**OpenRouter-Fehler 429:** Rate limit exceeded: new-account-rpm/google/gemini-3.5-flash-20260519. ' +
+			'Rate limit reached: new accounts are limited to 20 requests per minute for this model. Please retry shortly.\n\n' +
+			'Zu viele Anfragen in kurzer Zeit. Eine Minute warten und erneut fragen.'
+	}
+
+	def "an error answer carries what the question cost until it failed"() {
+		given: 'a billed tool round, then a request refused for missing credits'
+		OpenRouterApiService api = Stub()
+		api.createChatCompletion(*_) >>> [
+			[success: true, data: [choices: [[finish_reason: 'tool_calls', message: [content: null, tool_calls: [[id: 't1', function: [name: 'list_servers', arguments: '{}']]]]]],
+								   usage  : [prompt_tokens: 10, completion_tokens: 5, cost: 0.1408]]],
+			[success: false, statusCode: 402, msg: 'API returned 402: Insufficient credits']
+		]
+		provider.apiService = api
+		AccountIntegration ai = configured([usageFooter: true])
+		ai.servicePassword = 'sk-or-v1-test'
+		LlmIntegration llm = new LlmIntegration(accountIntegration: ai)
+		LlmChatMessage question = message('user', 'How many servers are there?')
+
+		when:
+		provider.generateResponse(llm, new LlmChatRequest(model: 'openai/gpt-5.5', messages: [question]), [:])
+		ServiceResponse<LlmChatResponse> failed = provider.generateResponse(llm, new LlmChatRequest(model: 'openai/gpt-5.5', messages: [
+			question,
+			message('assistant', '', [tool_calls: [[id: 't1', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '[]', [tool_call_id: 't1'])
+		]), [:])
+
+		then:
+		failed.success
+		failed.data.message.content == '**OpenRouter error 402:** Insufficient credits\n\n' +
+			'The OpenRouter account has no credits left, or the key has reached its limit.\n\n*Cost: $0.1408*'
+	}
+
+	def "with the error option unticked, a failure stays an error for Morpheus"() {
+		given:
+		OpenRouterApiService api = Stub()
+		api.createChatCompletion(*_) >> [success: false, statusCode: 402, msg: 'API returned 402: Insufficient credits']
+		provider.apiService = api
+		AccountIntegration ai = configured([chatErrors: false])
+		ai.servicePassword = 'sk-or-v1-test'
+
+		when:
+		ServiceResponse response = provider.generateResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(model: 'm', messages: [message('user', 'hi')]), [:])
 
 		then:
 		!response.success
-		response.msg.startsWith('API returned 403: Regional routing not enabled')
-		response.msg.contains('Business or Enterprise plan')
+		response.msg == 'API returned 402: Insufficient credits'
+	}
+
+	def "the error option is on unless it was unticked"() {
+		expect:
+		provider.isChatErrorsEnabled(configured(config)) == enabled
+
+		where:
+		config              || enabled
+		[:]                 || true
+		[chatErrors: '']    || true
+		[chatErrors: 'on']  || true
+		[chatErrors: true]  || true
+		[chatErrors: false] || false
+		[chatErrors: 'off'] || false
+	}
+
+	def "a stream refused before any text is retried like a request"() {
+		given:
+		OpenRouterApiService api = Stub()
+		api.streamChatCompletion(*_) >>> [
+			[success: false, statusCode: 503, msg: 'OpenRouter API returned 503: No instances available'],
+			[success: true, data: [choices: [[finish_reason: 'stop', message: [content: 'One.']]]]]
+		]
+		provider.apiService = api
+		List<Long> waits = []
+		provider.sleeper = { long millis -> waits << millis }
+		List<LlmChatResponse> completed = []
+		LlmStreamingResponseHandler handler = [onCompleteResponse: { LlmChatResponse response -> completed << response }] as LlmStreamingResponseHandler
+		AccountIntegration ai = new AccountIntegration(serviceUrl: OpenRouterProvider.DEFAULT_API_URL, servicePassword: 'sk-or-v1-test')
+
+		when:
+		provider.streamResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(model: 'openai/gpt-5.5', messages: [message('user', 'How many clouds?')]), handler, [:])
+
+		then:
+		waits == [10000L]
+		completed*.message*.content == ['One.']
+	}
+
+	def "a stream that fails after its first words ends with the error under them, and is not retried"() {
+		given:
+		OpenRouterApiService api = Mock()
+		provider.apiService = api
+		List<Long> waits = []
+		provider.sleeper = { long millis -> waits << millis }
+		List<String> parts = []
+		List<LlmChatResponse> completed = []
+		List<Throwable> errors = []
+		LlmStreamingResponseHandler handler = [
+			onPartialResponse : { String chunk -> parts << chunk },
+			onCompleteResponse: { LlmChatResponse response -> completed << response },
+			onError           : { Throwable t -> errors << t }
+		] as LlmStreamingResponseHandler
+		AccountIntegration ai = new AccountIntegration(serviceUrl: OpenRouterProvider.DEFAULT_API_URL, servicePassword: 'sk-or-v1-test')
+
+		when:
+		provider.streamResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(model: 'openai/gpt-5.5', messages: [message('user', 'Which servers are running?')]), handler, [:])
+
+		then: 'one call only: another try would repeat the words already shown'
+		1 * api.streamChatCompletion(*_) >> { List args ->
+			(args[3] as Closure).call('Two servers run')
+			[success: false, statusCode: 429, msg: 'OpenRouter stream error: Rate limit exceeded (provider: OpenAI)']
+		}
+		waits.isEmpty()
+		parts == ['Two servers run']
+		errors.isEmpty()
+		completed*.message*.content == ['Two servers run\n\n**OpenRouter error 429:** Rate limit exceeded (provider: OpenAI)\n\n' +
+			'Too many requests in a short time. Wait a minute and ask again.']
+	}
+
+	def "error answers are left out of replayed history, and text before one is kept"() {
+		given:
+		LlmChatRequest request = new LlmChatRequest(model: 'openai/gpt-5.5', messages: [
+			message('user', 'Wie viele Server gibt es?'),
+			message('assistant', '**OpenRouter-Fehler 429:** Rate limit exceeded\n\nZu viele Anfragen in kurzer Zeit. Eine Minute warten und erneut fragen.\n\n*Kosten: $0.1408 (22 Anfragen)*'),
+			message('user', 'Which servers run?'),
+			message('assistant', 'Two servers run\n\n**OpenRouter error 502:** Provider returned error'),
+			message('user', 'Und jetzt?')
+		])
+
+		when:
+		Map body = provider.buildChatRequestBody(request, integration, false)
+
+		then:
+		body.messages*.role == ['user', 'user', 'assistant', 'user']
+		body.messages*.content == ['Wie viele Server gibt es?', 'Which servers run?', 'Two servers run', 'Und jetzt?']
+	}
+
+	def "a short question is enough to pick the language of an error answer"() {
+		expect: 'the question the owner asked on the appliance got an English error answer with 0.1.1-rc.1'
+		OpenRouterProvider.answerLanguage(question) == language
+
+		where:
+		question                         || language
+		'Hallo, wer bist du?'            || 'de'
+		'Wie viele Gruppen gibt es?'     || 'de'
+		'Hi, who are you?'               || 'en'
+		'How many servers are there?'    || 'en'
+		'Cześć, kim jesteś?'             || 'pl'
+		'Ile jest serwerów?'             || 'pl'
+	}
+
+	def "every error hint and heading speaks each language of the footer"() {
+		expect:
+		OpenRouterProvider.ERROR_LABELS.keySet() == ['en', 'de', 'pl'] as Set
+		OpenRouterProvider.ERROR_HINTS.every { Integer status, Map<String, String> hints ->
+			hints.keySet() == ['en', 'de', 'pl'] as Set && hints.values().every { it?.trim() }
+		}
+		OpenRouterProvider.errorHint(504, 'Gateway timeout', 'de') == OpenRouterProvider.ERROR_HINTS[502].de
+		OpenRouterProvider.errorHint(null, 'Connection reset', 'en') == null
 	}
 
 	def "a working key and catalog validate"() {
@@ -744,7 +960,7 @@ class OpenRouterProviderSpec extends Specification {
 		and: '* on its own lets every model through'
 		OpenRouterProvider.isListedModel(catalogEntry('mistralai/mistral-large'), false, false, LocalDate.of(2026, 9, 15),
 			OpenRouterProvider.parseModelAllowList('*'))
-		provider.optionTypes*.displayOrder == (0..10).toList()
+		provider.optionTypes*.displayOrder == (0..11).toList()
 	}
 
 	def "an expiry within a year goes into the name, a placeholder date does not"() {

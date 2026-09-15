@@ -24,6 +24,8 @@ OpenRouter's OpenAI-compatible API.
 | Model catalog sync | yes — only models an agent can use, with an optional allow list |
 | Key check on save | yes — `GET /api/v1/key`, since the model list answers any key |
 | Cost visible in chat | yes — optional footer with the cost of the whole question |
+| Errors visible in chat | yes — OpenRouter's message and what to do, instead of Morpheus' generic error |
+| Rate limits | waited out twice before a question fails |
 | Reasoning effort | optional — low, medium or high; reasoning never shown in the answer |
 | In-region routing (EU, US) | yes — with OpenRouter's Business or Enterprise plan |
 | Outbound proxy | yes — select a Morpheus network proxy per integration |
@@ -68,6 +70,7 @@ Plugins > Add*. The plugin registers two providers: `LLM OpenRouter` and `OPTION
 | **List Free Variants** | off; see [Which models are listed](#which-models-are-listed) |
 | **Only List These Models** | `*` lists every model; see [Allow list](#allow-list) |
 | **Append Cost to Answers** | optional; see [Cost footer](#cost-footer) |
+| **Show OpenRouter Errors in Chat** | on; see [Errors in the chat](#errors-in-the-chat) |
 
 **Save.** The plugin checks the key with `GET /api/v1/key`, loads the model list, and on a
 regional domain checks that in-region routing is enabled. A rejected save shows the reason in the
@@ -195,6 +198,29 @@ OpenRouter usage: model=openai/gpt-5.4-nano provider=OpenAI input=10775 cached=9
 
 A question answered without a `tool calls` line did not use MCP data.
 
+## Errors in the chat
+
+Morpheus replaces every error a provider reports with a text of its own — *The AI model is no
+longer available*, *An error occurred while processing your request* — which says nothing about
+the cause. With **Show OpenRouter Errors in Chat** ticked, the default, the plugin answers a failed
+question itself, with OpenRouter's message and what to do about it:
+
+> **OpenRouter-Fehler 429:** Rate limit exceeded: new-account-rpm/google/gemini-3.5-flash-20260519. Rate limit reached: new accounts are limited to 20 requests per minute for this model. Please retry shortly.
+>
+> Zu viele Anfragen in kurzer Zeit. Eine Minute warten und erneut fragen.
+
+- The heading carries the HTTP status; the advice covers 400, 401, 402, 403, 404, 408, 429 and
+  the 5xx errors. Both follow the language of the question (English, German, Polish).
+- With the cost footer on, the answer ends with what the question cost until it failed.
+- Text a stream had already shown stays above the error.
+- Error answers are left out when the conversation is replayed to the model.
+- **Before a question fails, a rate limit (`429`) or an overloaded provider (`503`) is waited out
+  twice**, 10 and then 20 seconds, or as long as a stream's `Retry-After` asks, up to 30 seconds.
+  A stream that has already shown text is not retried, since that would repeat it.
+
+Unticked, the plugin reports the error to Morpheus as before. Every failure is in the log either
+way: `grep 'OpenRouter chat completion failed' /var/log/morpheus/morpheus-ui/current`.
+
 ---
 
 ## In-region routing (EU and US)
@@ -232,7 +258,7 @@ and stop sequences unchanged; OpenRouter drops the parameters a model does not s
 
 | Symptom | Cause and fix |
 |---|---|
-| The chat says **"The AI model is no longer available"** | Morpheus shows most provider errors this way. The real reason is in the appliance log: `grep OpenRouter /var/log/morpheus/morpheus-ui/current`. |
+| The chat says **"The AI model is no longer available"** | Morpheus shows most provider errors this way. Tick **Show OpenRouter Errors in Chat** to see OpenRouter's message instead; the real reason is also in the appliance log: `grep OpenRouter /var/log/morpheus/morpheus-ui/current`. |
 | Save fails with `401: Missing Authentication header. OpenRouter keys start with "sk-or-"` | OpenRouter's answer to a key in the wrong format, although the header was sent. Paste the whole `sk-or-v1-...` key. |
 | Save fails with `401: User not found.` | The key is unknown to OpenRouter: mistyped, revoked or deleted. |
 | Chat fails with `402` | The OpenRouter account or the key's limit has no credits left. |
@@ -244,7 +270,8 @@ and stop sequences unchanged; OpenRouter drops the parameters a model does not s
 | An agent fails after the model list was narrowed | Its model is disabled because it is no longer listed. The log names it. List it again, or give the agent another model. |
 | The model tab has no search | Not available to plugins on 9.0.1. Use the allow list. Reported to HPE: [docs/hpe-feature-request-llm-model-search.md](docs/hpe-feature-request-llm-model-search.md). |
 | An agent answers **"0"** or "none" although the objects exist | Some models fill every optional parameter of an MCP tool with an empty value, and the built-in Morpheus MCP tools take `""` and `0` as filters: `list_servers` with `status: ""` or `zoneId: 0` finds nothing, while `list_servers` without arguments lists every server. Seen with `openai/gpt-5.4-nano`. The log shows the tool call, but the next request's input grows by only a few dozen tokens. The plugin forwards tool arguments unchanged; use another model for the agent. |
-| The chat says **"An error occurred while processing your request"** and the conversation is gone | Look for `429` in the log. OpenRouter limits new accounts to 20 requests per minute per model (`new-account-rpm`), and one question with many tool rounds can exceed that; Morpheus then discards the conversation. Wait a minute and ask again. |
+| The chat says **"An error occurred while processing your request"** and the conversation is gone | Morpheus' text for a failed question, with **Show OpenRouter Errors in Chat** unticked or before 0.1.1. Look for `429` in the log: OpenRouter limits new accounts to 20 requests per minute per model (`new-account-rpm`), and one question with many tool rounds can exceed that. Wait a minute and ask again. |
+| The chat shows **"OpenRouter error 429"** | The rate limit above lasted through both waits. Wait a minute and ask again, or ask a narrower question that needs fewer tool rounds. |
 | An agent calls `get_result_excerpt` over and over | The built-in MCP tools return a large result truncated, as a preview with an artifact id, and a model can page through the artifact piece by piece. Seen with `google/gemini-3.5-flash` on a server list: 19 excerpt calls, 22 requests in 40 seconds, then the rate limit above. Ask a narrower question. |
 | An agent says it cannot count instances: *"Looks like the server threw a gasket"* | Morpheus defect, not the plugin: `GET /api/instances` fails with `duplicate association path: containers.server` when the MCP tool `list_instances` is called with `agentInstalled` together with `serverId` or `hostId`. Each filter alone works. Smaller models pick that combination. |
 | An answer looks invented | Check for `OpenRouter tool calls` in the log. Smaller models sometimes answer from the example values in the MCP tool descriptions (`delegate_to_specialist`) instead of calling a tool. |

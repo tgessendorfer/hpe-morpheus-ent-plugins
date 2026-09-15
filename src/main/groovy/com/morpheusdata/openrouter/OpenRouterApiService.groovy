@@ -61,6 +61,16 @@ class OpenRouterApiService {
 
 	protected final ConcurrentHashMap<String, SessionClientHolder> sessionClients = new ConcurrentHashMap<>()
 
+	/** An error OpenRouter sent inside a stream that had already started, with its code. */
+	static class StreamErrorException extends RuntimeException {
+		final Integer statusCode
+
+		StreamErrorException(String message, Integer statusCode) {
+			super(message)
+			this.statusCode = statusCode
+		}
+	}
+
 	protected static class SessionClientHolder {
 		final HttpApiClient apiClient
 		volatile long lastUsedAt
@@ -115,10 +125,15 @@ class OpenRouterApiService {
 				if (apiResponse?.success != true || response == null) {
 					String statusCode = apiResponse?.errorCode ?: response?.statusLine?.statusCode?.toString() ?: 'unknown'
 					String detail = describeErrorBody(readErrorBody(response)) ?: buildErrorMessage(apiResponse)
-					return [success: false, msg: "OpenRouter API returned ${statusCode}: ${detail}".toString()]
+					return [success   : false, msg: "OpenRouter API returned ${statusCode}: ${detail}".toString(),
+							statusCode: statusCodeOf(statusCode),
+							retryAfter: retryAfterSeconds(response?.getFirstHeader('Retry-After')?.value)]
 				}
 				return [success: true, data: consumeEventStream(response, onText)]
 			}
+		} catch (StreamErrorException e) {
+			log.warn("OpenRouter stream ended with an error: ${e.message}")
+			return [success: false, msg: e.message, statusCode: e.statusCode]
 		} catch (Exception e) {
 			log.error("Error during OpenRouter streaming completion: ${e.message}", e)
 			return [success: false, msg: e.message]
@@ -173,7 +188,8 @@ class OpenRouterApiService {
 					continue
 				}
 				if (event.error instanceof Map) {
-					throw new RuntimeException("OpenRouter stream error: ${describeError(event.error as Map)}")
+					Map error = event.error as Map
+					throw new StreamErrorException("OpenRouter stream error: ${describeError(error)}".toString(), statusCodeOf(error.code))
 				}
 				accumulated.id = accumulated.id ?: event.id
 				accumulated.model = accumulated.model ?: event.model
@@ -294,7 +310,28 @@ class OpenRouterApiService {
 			}
 			return [success: true, data: responseData, headers: apiResponse?.headers]
 		}
-		return [success: false, msg: buildErrorMessage(apiResponse), headers: apiResponse?.headers]
+		// callJsonApi leaves the headers of an error response out (plugin API 1.4.2 in the
+		// spec), so Retry-After is only there on the stream path; the provider waits on its own.
+		return [success   : false, msg: buildErrorMessage(apiResponse), headers: apiResponse?.headers,
+				statusCode: statusCodeOf(apiResponse?.errorCode ?: apiResponse?.statusCode),
+				retryAfter: retryAfterSeconds(headerValue(apiResponse?.headers, 'Retry-After'))]
+	}
+
+	/** A three-digit HTTP status, or null. */
+	protected static Integer statusCodeOf(Object value) {
+		String raw = value?.toString()?.trim()
+		return raw ==~ /\d{3}/ ? Integer.valueOf(raw) : null
+	}
+
+	/** Retry-After in seconds, or null. The HTTP-date form is ignored. */
+	protected static Integer retryAfterSeconds(Object value) {
+		String raw = (value instanceof List ? (value as List)[0] : value)?.toString()?.trim()
+		return raw ==~ /\d{1,6}/ ? Integer.valueOf(raw) : null
+	}
+
+	/** A header from HttpApiClient's header map, whatever the case of its name. */
+	protected static Object headerValue(Map headers, String name) {
+		return headers?.find { key, value -> key?.toString()?.equalsIgnoreCase(name) }?.value
 	}
 
 	protected <T> T withApiClient(Map opts = [:], Closure<T> work) {

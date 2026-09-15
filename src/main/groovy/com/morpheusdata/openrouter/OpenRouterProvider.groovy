@@ -73,6 +73,43 @@ class OpenRouterProvider implements LlmProvider {
 		'choose under Settings > Preferences > Account Type on openrouter.ai. Without it, use https://openrouter.ai/api/v1.'
 	static final String REASONING_EFFORT_DEFAULT = 'default'
 	static final List<String> REASONING_EFFORTS = ['low', 'medium', 'high']
+	// A rate limit or an overloaded provider is worth waiting for: twice, as long as
+	// OpenRouter asks or else 10 and then 20 seconds, never more than 30 seconds at a time.
+	static final Set<Integer> WAIT_AND_RETRY_STATUSES = [429, 503] as Set
+	static final List<Long> RETRY_WAITS_MS = [10000L, 20000L]
+	static final long MAX_RETRY_WAIT_MS = 30000L
+	static final int MAX_CONNECTION_RETRIES = 2
+	// The heading an error answer starts with, per language. Replayed history drops
+	// everything from that heading on, so a model never reads the plugin's error text.
+	static final Map<String, String> ERROR_LABELS = [en: 'OpenRouter error', de: 'OpenRouter-Fehler', pl: 'Błąd OpenRouter']
+	static final String ERROR_ANSWER_PATTERN = '(?s)(?:^|\\n\\n)\\*\\*(?:OpenRouter error|OpenRouter-Fehler|Błąd OpenRouter)(?: \\d{3})?:\\*\\* .*$'
+	// What to do about a failure, by HTTP status, in the languages of the footer.
+	static final Map<Integer, Map<String, String>> ERROR_HINTS = [
+		400: [en: 'OpenRouter rejected the request. Another model may accept it.',
+			  de: 'OpenRouter hat die Anfrage abgelehnt. Ein anderes Modell nimmt sie vielleicht an.',
+			  pl: 'OpenRouter odrzucił zapytanie. Inny model może je przyjąć.'],
+		401: [en: 'OpenRouter did not accept the API key of this integration. Check the key.',
+			  de: 'OpenRouter hat den API-Key dieser Integration nicht angenommen. Bitte den Key prüfen.',
+			  pl: 'OpenRouter nie zaakceptował klucza API tej integracji. Sprawdź klucz.'],
+		402: [en: 'The OpenRouter account has no credits left, or the key has reached its limit.',
+			  de: 'Das OpenRouter-Konto hat kein Guthaben mehr, oder der Key hat sein Limit erreicht.',
+			  pl: 'Na koncie OpenRouter skończyły się środki albo klucz osiągnął swój limit.'],
+		403: [en: 'OpenRouter refused the request, for example through moderation or a guardrail.',
+			  de: 'OpenRouter hat die Anfrage verweigert, etwa durch Moderation oder eine Guardrail.',
+			  pl: 'OpenRouter odmówił wykonania zapytania, na przykład z powodu moderacji lub guardraila.'],
+		404: [en: 'The model is not available at this API endpoint. Pick another model for the agent.',
+			  de: 'Das Modell ist an diesem API-Endpunkt nicht verfügbar. Bitte ein anderes Modell für den Agenten wählen.',
+			  pl: 'Model nie jest dostępny pod tym adresem API. Wybierz inny model dla agenta.'],
+		408: [en: 'The request timed out. Ask again.',
+			  de: 'Die Anfrage hat zu lange gedauert. Bitte erneut fragen.',
+			  pl: 'Zapytanie przekroczyło limit czasu. Zapytaj ponownie.'],
+		429: [en: 'Too many requests in a short time. Wait a minute and ask again.',
+			  de: 'Zu viele Anfragen in kurzer Zeit. Eine Minute warten und erneut fragen.',
+			  pl: 'Zbyt wiele zapytań w krótkim czasie. Odczekaj minutę i zapytaj ponownie.'],
+		502: [en: 'The model\'s provider is not responding right now. Ask again later or pick another model.',
+			  de: 'Der Anbieter des Modells antwortet gerade nicht. Später erneut fragen oder ein anderes Modell wählen.',
+			  pl: 'Dostawca modelu w tej chwili nie odpowiada. Zapytaj później lub wybierz inny model.']
+	]
 	// A model that goes away within this many days says so in its name.
 	static final long EXPIRY_NOTICE_DAYS = 365L
 	// One or more italic usage lines at the very end of an answer.
@@ -81,9 +118,12 @@ class OpenRouterProvider implements LlmProvider {
 	// language are full of its words and next to never contain the others'. Letters
 	// only one of the languages uses count extra.
 	static final Map<String, Set<String>> LANGUAGE_MARKERS = [
-		en: ['the', 'and', 'is', 'are', 'of', 'to', 'with', 'not', 'no', 'for', 'there', 'this', 'that', 'it', 'be', 'on', 'as', 'by', 'has', 'have'] as Set,
-		de: ['der', 'die', 'das', 'den', 'dem', 'und', 'ist', 'sind', 'nicht', 'keine', 'mit', 'auf', 'ein', 'eine', 'gibt', 'es', 'auch', 'wird', 'oder', 'bei', 'zu', 'von', 'im', 'sich', 'wie'] as Set,
-		pl: ['jest', 'są', 'się', 'nie', 'oraz', 'dla', 'czy', 'które', 'który', 'która', 'będzie', 'żadnych', 'działa', 'działają', 'wszystkie', 'w', 'i', 'na'] as Set
+		en: ['the', 'and', 'is', 'are', 'of', 'to', 'with', 'not', 'no', 'for', 'there', 'this', 'that', 'it', 'be', 'on', 'as', 'by', 'has', 'have',
+			 'who', 'what', 'which', 'how', 'many', 'you', 'hello', 'please'] as Set,
+		de: ['der', 'die', 'das', 'den', 'dem', 'und', 'ist', 'sind', 'nicht', 'keine', 'mit', 'auf', 'ein', 'eine', 'gibt', 'es', 'auch', 'wird', 'oder', 'bei', 'zu', 'von', 'im', 'sich', 'wie',
+			 'wer', 'welche', 'viele', 'bist', 'du', 'ich', 'hallo', 'bitte'] as Set,
+		pl: ['jest', 'są', 'się', 'nie', 'oraz', 'dla', 'czy', 'które', 'który', 'która', 'będzie', 'żadnych', 'działa', 'działają', 'wszystkie', 'w', 'i', 'na',
+			 'kim', 'co', 'jak', 'ile', 'jesteś', 'cześć', 'proszę'] as Set
 	]
 	static final Map<String, String> LANGUAGE_LETTERS = [de: '[äß]', pl: '[ąęłńśźż]']
 	// One question is many billed requests once the agent calls tools, and only the
@@ -291,6 +331,19 @@ class OpenRouterProvider implements LlmProvider {
 			helpText: 'Adds an italic line to the end of each final answer with what the whole question cost, summed over all of its requests as OpenRouter reports them. Morpheus shows no usage anywhere in the chat. Tool-call turns are left untouched, and the line is removed before an answer is replayed as history.'
 		)
 
+		optionTypes << new OptionType(
+			code: "${PROVIDER_CODE}.chatErrors",
+			name: 'Errors in Chat',
+			fieldName: 'chatErrors',
+			fieldLabel: 'Show OpenRouter Errors in Chat',
+			fieldContext: 'config',
+			inputType: OptionType.InputType.CHECKBOX,
+			displayOrder: 11,
+			required: false,
+			defaultValue: 'on',
+			helpText: 'On by default. When OpenRouter refuses a question - no credits left, a rate limit, a model that is down - the chat shows OpenRouter\'s message and what to do about it, instead of Morpheus\' generic error. The message is left out when the conversation is replayed to the model. A rate limit or an overloaded provider is waited out twice before that.'
+		)
+
 		// Labels and help texts resolve through the plugin's i18n bundles in
 		// src/main/resources/i18n, in the viewer's language; the literal texts above
 		// stay as the fallback.
@@ -407,38 +460,147 @@ class OpenRouterProvider implements LlmProvider {
 		Map requestBody = buildChatRequestBody(request, accountIntegration, false)
 		Map requestOpts = buildClientOpts(accountIntegration, opts)
 
-		int maxAttempts = 3
-		Map result = null
-		for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-			if (attempt > 1) {
-				log.warn("OpenRouter API retry ${attempt - 1}/${maxAttempts - 1} after connection failure: ${result?.msg}")
-				Thread.sleep(1500L * (attempt - 1))
-			}
-			try {
-				result = apiService.createChatCompletion(baseUrl, apiKey, requestBody, requestOpts)
-			} catch (Exception e) {
-				result = [success: false, msg: e.message]
-			}
-			if (result?.success || !isRetryableError(result?.msg?.toString())) {
-				break
-			}
-		}
+		Map result = callWithRetries { apiService.createChatCompletion(baseUrl, apiKey, requestBody, requestOpts) }
 
 		if (result?.success && result.data instanceof Map) {
 			Map data = result.data as Map
 			if (data.error instanceof Map) {
-				String message = explainError(OpenRouterApiService.describeError(data.error as Map))
-				log.warn("OpenRouter chat completion failed: ${message}")
-				return errorResponse("Chat completion failed: ${message}")
+				Map error = data.error as Map
+				String message = explainError(OpenRouterApiService.describeError(error))
+				return chatFailure(accountIntegration, request, requestBody, OpenRouterApiService.statusCodeOf(error.code),
+					"Chat completion failed: ${message}".toString())
 			}
 			LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(data))
 			return ServiceResponse.success(appendUsageFooter(response, accountIntegration))
 		}
-		// Morpheus shows every chat failure as "The AI model is no longer available",
-		// so the log is the only place the real reason appears.
-		String message = explainError(result?.msg?.toString()) ?: 'Chat completion failed'
+		return chatFailure(accountIntegration, request, requestBody, failureStatus(result),
+			explainError(result?.msg?.toString()) ?: 'Chat completion failed')
+	}
+
+	/**
+	 * A chat request that failed for good. Morpheus replaces any provider error with a
+	 * generic text - "The AI model is no longer available", "An error occurred while
+	 * processing your request" - so unless the integration says otherwise, the failure
+	 * goes back as an answer that shows OpenRouter's message.
+	 */
+	protected ServiceResponse<LlmChatResponse> chatFailure(AccountIntegration accountIntegration, LlmChatRequest request, Map requestBody,
+														   Integer status, String message) {
 		log.warn("OpenRouter chat completion failed: ${message}")
-		return errorResponse(message)
+		if (!isChatErrorsEnabled(accountIntegration)) {
+			return errorResponse(message)
+		}
+		return ServiceResponse.success(buildErrorAnswer(accountIntegration, request, requestBody, status, message, null))
+	}
+
+	/**
+	 * Runs a call until it succeeds or is not worth repeating. A connection failure is
+	 * tried twice more; a rate limit or an overloaded provider twice more after a wait.
+	 * {@code mayRetry} lets a stream stop retrying once text has reached the chat.
+	 */
+	protected Map callWithRetries(Closure<Map> call, Closure<Boolean> mayRetry = { true }) {
+		Map result = null
+		int connectionRetries = 0
+		int waitRetries = 0
+		while (true) {
+			try {
+				result = call.call()
+			} catch (Exception e) {
+				result = [success: false, msg: e.message]
+			}
+			if (result?.success || !mayRetry.call()) {
+				return result
+			}
+			if (isRetryableError(result?.msg?.toString()) && connectionRetries < MAX_CONNECTION_RETRIES) {
+				connectionRetries++
+				log.warn("OpenRouter API retry ${connectionRetries}/${MAX_CONNECTION_RETRIES} after connection failure: ${result?.msg}")
+				sleeper.call(1500L * connectionRetries)
+				continue
+			}
+			Long wait = retryWaitMillis(result, waitRetries)
+			if (wait == null) {
+				return result
+			}
+			waitRetries++
+			log.warn("OpenRouter answered ${failureStatus(result)}, asking again in ${wait.intdiv(1000)} s (${waitRetries}/${RETRY_WAITS_MS.size()}): ${result?.msg}")
+			sleeper.call(wait)
+		}
+	}
+
+	/** Waits between retries; tests replace it. */
+	protected Closure sleeper = { long millis -> Thread.sleep(millis) }
+
+	/** How long to wait before asking again, or null when the failure is not worth another try. */
+	protected static Long retryWaitMillis(Map result, int retriesSoFar) {
+		if (retriesSoFar >= RETRY_WAITS_MS.size() || !(failureStatus(result) in WAIT_AND_RETRY_STATUSES)) {
+			return null
+		}
+		Integer retryAfter = toInteger(result?.retryAfter)
+		long wait = retryAfter != null ? retryAfter * 1000L : RETRY_WAITS_MS[retriesSoFar]
+		return Math.min(Math.max(wait, 0L), MAX_RETRY_WAIT_MS)
+	}
+
+	/** The HTTP status of a failed call: as the api service reports it, else from the message. */
+	protected static Integer failureStatus(Map result) {
+		if (result?.statusCode instanceof Number) {
+			return ((Number) result.statusCode).intValue()
+		}
+		def matcher = (result?.msg?.toString() ?: '') =~ /returned (\d{3})\b/
+		return matcher.find() ? Integer.valueOf(matcher.group(1)) : null
+	}
+
+	/**
+	 * The answer that stands in for a failed request: OpenRouter's message under a heading
+	 * with the status, what to do about it, and - with the footer on - what the question
+	 * cost until then. In the language of the question, the only text there is to go by.
+	 */
+	protected LlmChatResponse buildErrorAnswer(AccountIntegration accountIntegration, LlmChatRequest request, Map requestBody,
+											   Integer status, String message, String streamedText) {
+		String language = answerLanguage(lastUserMessage(request))
+		StringBuilder content = new StringBuilder()
+		if (streamedText?.trim()) {
+			content.append(streamedText.trim()).append('\n\n')
+		}
+		content.append("**${ERROR_LABELS[language]}${status ? ' ' + status : ''}:** ${displayMessage(message)}")
+		String hint = errorHint(status, message, language)
+		if (hint) {
+			content.append('\n\n').append(hint)
+		}
+
+		LlmChatMessage chatMessage = new LlmChatMessage()
+		chatMessage.role = 'assistant'
+		chatMessage.content = content.toString()
+		LlmChatResponse response = new LlmChatResponse()
+		response.message = chatMessage
+		response.finishReason = 'stop'
+		response.metadata = [error: true, error_status: status, answer_language: language]
+
+		// The failed request ends the question, so its cost tally closes here.
+		Map tally = requestBody != null ? QUESTION_COSTS.remove(questionKey(requestBody)) : null
+		if (tally) {
+			response.metadata.put('question_cost', tally.total)
+			response.metadata.put('question_requests', tally.requests)
+		}
+		return appendUsageFooter(response, accountIntegration)
+	}
+
+	protected static String lastUserMessage(LlmChatRequest request) {
+		LlmChatMessage last = request?.messages?.reverse()?.find { LlmChatMessage msg -> msg?.role?.toLowerCase() == 'user' }
+		return last?.content?.toString() ?: ''
+	}
+
+	/** OpenRouter's message without the prefixes the heading already says. */
+	protected static String displayMessage(String message) {
+		String stripped = (message ?: '').replaceFirst(/^(?:(?:Chat completion failed|OpenRouter stream error): )?(?:OpenRouter )?(?:API returned \d{3}:? ?)?/, '').trim()
+		return stripped ?: message
+	}
+
+	/** Null without a status, and for the regional 403, whose message carries its own explanation. */
+	protected static String errorHint(Integer status, String message, String language) {
+		if (status == null || message?.contains(REGIONAL_ROUTING_DENIED)) {
+			return null
+		}
+		Map<String, String> hints = ERROR_HINTS[status] ?: (status >= 500 ? ERROR_HINTS[502] : null)
+		return hints ? (hints[language] ?: hints.en) : null
 	}
 
 	/**
@@ -459,32 +621,49 @@ class OpenRouterProvider implements LlmProvider {
 
 	@Override
 	void streamResponse(LlmIntegration llmIntegration, LlmChatRequest request, LlmStreamingResponseHandler handler, Map opts) {
+		AccountIntegration accountIntegration = llmIntegration?.accountIntegration
+		Map requestBody = null
+		StringBuilder streamed = new StringBuilder()
 		try {
-			AccountIntegration accountIntegration = llmIntegration?.accountIntegration
 			if (!accountIntegration) {
 				handler?.onError(new IllegalArgumentException('Account integration is required for the OpenRouter integration'))
 				return
 			}
 			String apiKey = resolveApiKey(accountIntegration)
 			String baseUrl = resolveBaseUrl(accountIntegration)
-			Map requestBody = buildChatRequestBody(request, accountIntegration, true)
+			requestBody = buildChatRequestBody(request, accountIntegration, true)
+			Map clientOpts = buildClientOpts(accountIntegration, opts)
 
-			Map result = apiService.streamChatCompletion(baseUrl, apiKey, requestBody, { String chunk ->
-				handler?.onPartialResponse(chunk)
-			}, buildClientOpts(accountIntegration, opts))
+			// Once text has reached the chat, another try would repeat it.
+			Map result = callWithRetries({
+				apiService.streamChatCompletion(baseUrl, apiKey, requestBody, { String chunk ->
+					streamed.append(chunk)
+					handler?.onPartialResponse(chunk)
+				}, clientOpts)
+			}, { streamed.length() == 0 })
 
 			if (result?.success && result.data instanceof Map) {
 				LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(result.data as Map))
 				handler?.onCompleteResponse(appendUsageFooter(response, accountIntegration))
-			} else {
-				String message = explainError(result?.msg?.toString()) ?: 'Streaming chat completion failed'
-				log.warn("OpenRouter streaming chat failed: ${message}")
-				handler?.onError(new RuntimeException(message))
+				return
 			}
+			String message = explainError(result?.msg?.toString()) ?: 'Streaming chat completion failed'
+			log.warn("OpenRouter streaming chat failed: ${message}")
+			streamFailure(accountIntegration, request, requestBody, handler, failureStatus(result), message, streamed.toString(), null)
 		} catch (Exception e) {
 			log.error("Error during OpenRouter streaming chat: ${e.message}", e)
-			handler?.onError(e)
+			streamFailure(accountIntegration, request, requestBody, handler, null, e.message ?: e.class.simpleName, streamed.toString(), e)
 		}
+	}
+
+	/** Like chatFailure, for a stream: an answer after the text that already arrived, or the error. */
+	protected void streamFailure(AccountIntegration accountIntegration, LlmChatRequest request, Map requestBody, LlmStreamingResponseHandler handler,
+								 Integer status, String message, String streamedText, Exception cause) {
+		if (accountIntegration == null || !isChatErrorsEnabled(accountIntegration)) {
+			handler?.onError(cause ?: new RuntimeException(message))
+			return
+		}
+		handler?.onCompleteResponse(buildErrorAnswer(accountIntegration, request, requestBody, status, message, streamedText))
 	}
 
 	// ------------------------------------------------------------------
@@ -511,9 +690,14 @@ class OpenRouterProvider implements LlmProvider {
 			}
 			if (role == 'assistant') {
 				// A final answer comes back as history on the next question. Left in, its
-				// usage footer teaches the model to write one itself, with invented numbers.
-				Map assistant = [role: 'assistant', content: stripUsageFooter(content)]
+				// usage footer teaches the model to write one itself, with invented numbers,
+				// and an error answer is the plugin speaking, not the model.
+				String replayed = stripErrorAnswer(stripUsageFooter(content))
 				List<Map> toolCalls = normalizeToolCalls(metadata.tool_calls)
+				if (content.trim() && !replayed.trim() && !toolCalls) {
+					return
+				}
+				Map assistant = [role: 'assistant', content: replayed]
 				if (toolCalls) {
 					assistant.tool_calls = toolCalls
 				}
@@ -899,7 +1083,7 @@ class OpenRouterProvider implements LlmProvider {
 		if (questionCost instanceof BigDecimal) {
 			int requests = toInteger(response.metadata.get('question_requests')) ?: 1
 			// In the language of the answer it sits under.
-			String language = answerLanguage(response.message.content.toString())
+			String language = response.metadata?.get('answer_language')?.toString() ?: answerLanguage(response.message.content.toString())
 			String count = requests > 1 ? " (${requestCount(requests, language)})" : ''
 			response.message.content = "${response.message.content}\n\n*${costLabel(language)}: ${formatCost(questionCost)}${count}*".toString()
 			return response
@@ -929,6 +1113,11 @@ class OpenRouterProvider implements LlmProvider {
 	 */
 	protected static String stripUsageFooter(String content) {
 		return content?.replaceFirst(USAGE_FOOTER_PATTERN, '')
+	}
+
+	/** Removes an error answer, and everything after its heading, from a replayed answer. */
+	protected static String stripErrorAnswer(String content) {
+		return content?.replaceFirst(ERROR_ANSWER_PATTERN, '')
 	}
 
 	/**
@@ -1154,6 +1343,11 @@ class OpenRouterProvider implements LlmProvider {
 
 	protected boolean isUsageFooterEnabled(AccountIntegration accountIntegration) {
 		return toBoolean(accountIntegration?.getConfigProperty('usageFooter'), false)
+	}
+
+	/** On unless unticked: integrations saved before the option existed have no value for it. */
+	protected boolean isChatErrorsEnabled(AccountIntegration accountIntegration) {
+		return toBoolean(accountIntegration?.getConfigProperty('chatErrors'), true)
 	}
 
 	protected boolean isNetworkProxyEnabled(AccountIntegration accountIntegration) {
