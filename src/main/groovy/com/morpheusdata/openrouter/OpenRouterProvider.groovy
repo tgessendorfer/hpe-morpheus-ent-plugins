@@ -64,6 +64,12 @@ class OpenRouterProvider implements LlmProvider {
 	static final String PROVIDER_NAME = 'OpenRouter'
 	static final String DEFAULT_API_URL = 'https://openrouter.ai/api/v1'
 	static final String API_KEY_PREFIX = 'sk-or-'
+	// OpenRouter's 403 on eu.openrouter.ai or us.openrouter.ai for an account without in-region routing.
+	static final String REGIONAL_ROUTING_DENIED = 'Regional routing not enabled'
+	static final String REGIONAL_PROBE_MODEL = 'openrouter/regional-routing-check'
+	static final String REGIONAL_ROUTING_HINT = 'In-region routing is not enabled for this OpenRouter account: ' +
+		'eu.openrouter.ai and us.openrouter.ai need the Business or Enterprise plan, which an organization admin can ' +
+		'choose under Settings > Preferences > Account Type on openrouter.ai. Without it, use https://openrouter.ai/api/v1.'
 	static final String REASONING_EFFORT_DEFAULT = 'default'
 	static final List<String> REASONING_EFFORTS = ['low', 'medium', 'high']
 	// A model that goes away within this many days says so in its name.
@@ -328,6 +334,20 @@ class OpenRouterProvider implements LlmProvider {
 				return validationError("${baseUrl}${OpenRouterApiService.MODELS_PATH} returned no model list. " +
 					"Check the API Endpoint: OpenRouter's OpenAI-compatible API is ${DEFAULT_API_URL}.")
 			}
+			if (isRegionalDomain(baseUrl)) {
+				// A regional domain answers /key and /models for any account and refuses only
+				// chat without the plan. The plan is checked before the model: a request for a
+				// model that cannot exist comes back 403 without the plan (verified) and is never
+				// run, so this check costs nothing.
+				Map probe = apiService.createChatCompletion(baseUrl, apiKey, [
+					model     : REGIONAL_PROBE_MODEL,
+					max_tokens: 1,
+					messages  : [[role: 'user', content: '.']]
+				], clientOpts) ?: [:]
+				if (probe.success != true && probe.msg?.toString()?.contains(REGIONAL_ROUTING_DENIED)) {
+					return validationError(explainError("OpenRouter refused chat requests at ${baseUrl}: ${probe.msg}"))
+				}
+			}
 			return ServiceResponse.success(llmIntegration)
 		} catch (Exception e) {
 			log.error("Error verifying OpenRouter integration: ${e.message}", e)
@@ -403,7 +423,7 @@ class OpenRouterProvider implements LlmProvider {
 		if (result?.success && result.data instanceof Map) {
 			Map data = result.data as Map
 			if (data.error instanceof Map) {
-				String message = OpenRouterApiService.describeError(data.error as Map)
+				String message = explainError(OpenRouterApiService.describeError(data.error as Map))
 				log.warn("OpenRouter chat completion failed: ${message}")
 				return errorResponse("Chat completion failed: ${message}")
 			}
@@ -412,8 +432,25 @@ class OpenRouterProvider implements LlmProvider {
 		}
 		// Morpheus shows every chat failure as "The AI model is no longer available",
 		// so the log is the only place the real reason appears.
-		log.warn("OpenRouter chat completion failed: ${result?.msg}")
-		return errorResponse(result?.msg?.toString() ?: 'Chat completion failed')
+		String message = explainError(result?.msg?.toString()) ?: 'Chat completion failed'
+		log.warn("OpenRouter chat completion failed: ${message}")
+		return errorResponse(message)
+	}
+
+	/**
+	 * Adds what OpenRouter's own message leaves out. Its 403 for a regional domain points at
+	 * enterprise sales, while the self-serve Business plan is enough.
+	 */
+	/** eu.openrouter.ai or us.openrouter.ai, OpenRouter's in-region domains. */
+	protected static boolean isRegionalDomain(String baseUrl) {
+		return baseUrl ==~ /(?i)https?:\/\/(eu|us)\.openrouter\.ai(\/.*)?/
+	}
+
+	protected static String explainError(String message) {
+		if (message?.contains(REGIONAL_ROUTING_DENIED)) {
+			return "${message} ${REGIONAL_ROUTING_HINT}".toString()
+		}
+		return message
 	}
 
 	@Override
@@ -436,8 +473,9 @@ class OpenRouterProvider implements LlmProvider {
 				LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(result.data as Map))
 				handler?.onCompleteResponse(appendUsageFooter(response, accountIntegration))
 			} else {
-				log.warn("OpenRouter streaming chat failed: ${result?.msg}")
-				handler?.onError(new RuntimeException(result?.msg?.toString() ?: 'Streaming chat completion failed'))
+				String message = explainError(result?.msg?.toString()) ?: 'Streaming chat completion failed'
+				log.warn("OpenRouter streaming chat failed: ${message}")
+				handler?.onError(new RuntimeException(message))
 			}
 		} catch (Exception e) {
 			log.error("Error during OpenRouter streaming chat: ${e.message}", e)

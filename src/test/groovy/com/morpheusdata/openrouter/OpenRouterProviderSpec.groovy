@@ -165,6 +165,77 @@ class OpenRouterProviderSpec extends Specification {
 		response.msg.contains('returned no model list')
 	}
 
+	def "a regional domain is refused on save when the account lacks in-region routing"() {
+		given: 'what eu.openrouter.ai answered on 2026-09-15 to an account without the Business plan'
+		OpenRouterApiService api = Mock()
+		provider.apiService = api
+		AccountIntegration ai = new AccountIntegration(serviceUrl: 'https://eu.openrouter.ai', servicePassword: 'sk-or-v1-test')
+
+		when:
+		ServiceResponse response = provider.validate(new LlmIntegration(accountIntegration: ai), [:])
+
+		then: '/key and /models answer as usual on a regional domain'
+		1 * api.getKey('https://eu.openrouter.ai/api/v1', 'sk-or-v1-test', _) >> [success: true, data: [data: [limit: null]]]
+		1 * api.listModels(*_) >> [success: true, data: [data: [catalogEntry('mistralai/ministral-8b-2512')]]]
+
+		and: 'the plan check asks for a model that cannot exist, so it never runs one'
+		1 * api.createChatCompletion('https://eu.openrouter.ai/api/v1', 'sk-or-v1-test', { Map body ->
+			body.model == OpenRouterProvider.REGIONAL_PROBE_MODEL && body.max_tokens == 1
+		}, _) >> [success: false, msg: 'API returned 403: Regional routing not enabled for this account. Please reach out to our enterprise sales team to enable this feature.']
+
+		and:
+		!response.success
+		response.msg.contains('Regional routing not enabled')
+		response.msg.contains('Business or Enterprise plan')
+		response.msg.contains('Settings > Preferences > Account Type')
+	}
+
+	def "a regional domain with the plan validates, since the made-up model only fails as an invalid model"() {
+		given:
+		OpenRouterApiService api = Stub()
+		api.getKey(*_) >> [success: true, data: [data: [limit: null]]]
+		api.listModels(*_) >> [success: true, data: [data: [catalogEntry('mistralai/ministral-8b-2512')]]]
+		api.createChatCompletion(*_) >> [success: false, msg: 'API returned 400: openrouter/regional-routing-check is not a valid model ID']
+		provider.apiService = api
+		AccountIntegration ai = new AccountIntegration(serviceUrl: 'https://us.openrouter.ai/api/v1', servicePassword: 'sk-or-v1-test')
+
+		expect:
+		provider.validate(new LlmIntegration(accountIntegration: ai), [:]).success
+	}
+
+	def "the main domain gets no plan check"() {
+		given:
+		OpenRouterApiService api = Mock()
+		provider.apiService = api
+		AccountIntegration ai = new AccountIntegration(serviceUrl: OpenRouterProvider.DEFAULT_API_URL, servicePassword: 'sk-or-v1-test')
+
+		when:
+		ServiceResponse response = provider.validate(new LlmIntegration(accountIntegration: ai), [:])
+
+		then:
+		1 * api.getKey(*_) >> [success: true, data: [data: [limit: null]]]
+		1 * api.listModels(*_) >> [success: true, data: [data: [catalogEntry('openai/gpt-5.5')]]]
+		0 * api.createChatCompletion(*_)
+		response.success
+	}
+
+	def "a chat refused for missing in-region routing says which plan it needs"() {
+		given:
+		OpenRouterApiService api = Stub()
+		api.createChatCompletion(*_) >> [success: false, msg: 'API returned 403: Regional routing not enabled for this account. Please reach out to our enterprise sales team to enable this feature.']
+		provider.apiService = api
+		AccountIntegration ai = new AccountIntegration(serviceUrl: 'https://eu.openrouter.ai/api/v1', servicePassword: 'sk-or-v1-test')
+		LlmChatRequest request = new LlmChatRequest(model: 'mistralai/ministral-8b-2512', messages: [message('user', 'hi')])
+
+		when:
+		ServiceResponse response = provider.generateResponse(new LlmIntegration(accountIntegration: ai), request, [:])
+
+		then:
+		!response.success
+		response.msg.startsWith('API returned 403: Regional routing not enabled')
+		response.msg.contains('Business or Enterprise plan')
+	}
+
 	def "a working key and catalog validate"() {
 		given:
 		OpenRouterApiService api = Stub()
