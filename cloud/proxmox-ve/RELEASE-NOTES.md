@@ -13,6 +13,29 @@ new number, and why the digests are recorded.
 
 ---
 
+## 0.1.16
+
+**The plugin list links to the plugin's source.** The plugin moved, with its full
+history, from the GitHub fork `tgessendorfer/morpheus-proxmox-ve-plugin` into
+`cloud/proxmox-ve` of
+[tgessendorfer/hpe-morpheus-ent-plugins](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/cloud/proxmox-ve).
+The plugin list showed no website for this plugin; it now links there.
+`Morpheus-Repo` in the jar's manifest names that folder too, instead of HPE's
+upstream repository, because this build is made from it. Nothing else changed
+from 0.1.15.
+
+The plugin code stays `proxmox-ve`, so the jar upgrades an installed 0.1.15 or
+earlier. An appliance still on 0.1.14 also gets the 0.1.15 change below.
+
+This is the first lab build made by the release workflow, with JDK 17, from
+exactly the source at tag `proxmox-ve-v0.1.16-lab`. Its digest is in the
+release's `SHA256SUMS`.
+
+Verified: the test suite passes, and the jar's manifest and plugin class name
+the new repository. Not yet verified on an appliance.
+
+---
+
 ## 0.1.15
 
 **No lab address in the plugin.** The help text under *Proxmox API URL* used a

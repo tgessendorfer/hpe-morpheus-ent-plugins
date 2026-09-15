@@ -93,7 +93,7 @@ jar {
 				'Morpheus-Logo': 'assets/morpheus.svg',
 				'Morpheus-Logo-Dark': 'assets/morpheus.svg',
 				'Morpheus-Labels': 'Plugin, Cloud, Proxmox',
-				'Morpheus-Repo': 'https://github.com/HewlettPackard/morpheus-proxmox-ve-plugin',
+				'Morpheus-Repo': 'https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/cloud/proxmox-ve',
 				'Morpheus-Min-Appliance-Version': "6.3.0"
 		)
 	}

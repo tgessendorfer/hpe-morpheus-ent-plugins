@@ -27,6 +27,8 @@ class ProxmoxVePlugin extends Plugin {
         // Keep this short: plugin_instance.description is a bounded column and an
         // over-long value fails the upload with a DataIntegrityViolationException.
         this.setDescription("Proxmox VE 8/9 cloud: syncs nodes, VMs, networks, datastores, pools and templates, and provisions VMs.")
+        // Shown in the plugin list; the manifest's Morpheus-Repo is not read there.
+        this.setWebsiteUrl('https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/cloud/proxmox-ve')
         this.registerProvider(new ProxmoxVeCloudProvider(this, this.morpheus))
         this.registerProvider(new ProxmoxVeProvisionProvider(this, this.morpheus))
         this.registerProvider(new ProxmoxVeOptionSourceProvider(this, this.morpheus))
