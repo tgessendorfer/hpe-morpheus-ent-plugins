@@ -155,6 +155,20 @@ class OpenRouterProviderSpec extends Specification {
 		withLookup.resolveApiKey(new AccountIntegration(id: 5L, servicePassword: 'sk-or-v1-local')) == 'sk-or-v1-local'
 	}
 
+	def "credential data without a key, or marked as loaded, still gets the lookup"() {
+		given: 'shapes Morpheus might hand over on the REST API update path'
+		OpenRouterProvider withLookup = new OpenRouterProvider(null, null) {
+			@Override
+			protected AccountCredential loadAccountCredential(AccountIntegration accountIntegration) {
+				return new AccountCredential(data: [password: 'sk-or-v1-stored'])
+			}
+		}
+
+		expect:
+		withLookup.resolveApiKey(new AccountIntegration(id: 7L, credentialData: [:], servicePassword: 'stale')) == 'sk-or-v1-stored'
+		withLookup.resolveApiKey(new AccountIntegration(id: 8L, credentialLoaded: true, servicePassword: 'stale')) == 'sk-or-v1-stored'
+	}
+
 	def "a failing credential lookup does not take the chat down"() {
 		given:
 		OpenRouterProvider failing = new OpenRouterProvider(null, null) {

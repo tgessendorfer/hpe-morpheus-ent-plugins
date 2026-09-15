@@ -1050,16 +1050,39 @@ class OpenRouterProvider implements LlmProvider {
 	 * plugins load theirs.
 	 */
 	protected String resolveApiKey(AccountIntegration accountIntegration) {
-		if (accountIntegration.credentialData == null && accountIntegration.credentialLoaded != true) {
+		Map handedOver = accountIntegration.credentialData
+		if (!handedOver?.password) {
+			// Not only when credentialData is null: 0.1.0-rc.3 checked for exactly that and
+			// the REST API update still failed, so the check is on the key itself.
+			AccountCredential credential = null
+			String lookup
 			try {
-				AccountCredential credential = loadAccountCredential(accountIntegration)
-				accountIntegration.credentialLoaded = true
-				accountIntegration.credentialData = credential?.data
+				credential = loadAccountCredential(accountIntegration)
+				lookup = credential?.data?.password ? 'stored credential found' : (credential ? 'stored credential without a password' : 'no stored credential')
 			} catch (Exception e) {
-				log.warn("Could not load the stored credential of integration ${accountIntegration.id}: ${e.message}")
+				lookup = "lookup failed: ${e.message}"
 			}
+			if (credential?.data?.password) {
+				accountIntegration.credentialData = credential.data
+				accountIntegration.credentialLoaded = true
+			}
+			logCredentialDiagnosis(accountIntegration, handedOver, lookup)
 		}
 		return accountIntegration.credentialData?.password ?: accountIntegration.serviceToken ?: accountIntegration.servicePassword
+	}
+
+	// Integrations whose credential handover has been logged, so a Local Credentials
+	// integration does not write the line on every chat request.
+	protected static final Set<String> CREDENTIAL_DIAGNOSED = ConcurrentHashMap.newKeySet()
+
+	/** What Morpheus handed over and what the lookup found - never a key. Once per integration and outcome. */
+	protected void logCredentialDiagnosis(AccountIntegration accountIntegration, Map handedOver, String lookup) {
+		String data = handedOver == null ? 'null' : (handedOver.isEmpty() ? 'empty' : "keys ${handedOver.keySet().sort()}")
+		String line = "OpenRouter integration ${accountIntegration.id}: credentialData ${data}, credentialLoaded ${accountIntegration.credentialLoaded}, " +
+			"${lookup}, local key ${accountIntegration.servicePassword ? 'set' : 'empty'}"
+		if (CREDENTIAL_DIAGNOSED.add("${accountIntegration.id}|${line}".toString())) {
+			log.info(line)
+		}
 	}
 
 	/** The appliance lookup, on its own so tests can answer it. Null for Local Credentials. */
