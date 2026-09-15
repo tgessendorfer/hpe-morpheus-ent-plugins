@@ -1,0 +1,70 @@
+HPE Morpheus Enterprise plugins
+Copyright 2026 Thomas Gessendorfer
+
+This product is licensed under the Apache License, Version 2.0 (the "License").
+You may obtain a copy of the License in the accompanying LICENSE file or at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+This repository holds three plugins. Each plugin folder keeps its own LICENSE
+file, and its own NOTICE file where it has one; those files ship with that
+plugin.
+
+--------------------------------------------------------------------------------
+Derived work
+--------------------------------------------------------------------------------
+
+llm/anthropic and llm/openrouter
+
+    Portions are derived from HewlettPackard/morpheus-copilot-plugin
+    https://github.com/HewlettPackard/morpheus-copilot-plugin
+    Licensed under the Apache License, Version 2.0
+
+    Specifically its project structure, Gradle build setup, and the
+    session-scoped HTTP client pattern. That project does not ship a NOTICE
+    file, so no upstream attribution notices are carried forward here.
+
+cloud/proxmox-ve
+
+    A modified version of HewlettPackard/morpheus-proxmox-ve-plugin
+    https://github.com/HewlettPackard/morpheus-proxmox-ve-plugin
+    Copyright 2025 Hewlett Packard Enterprise Development LP
+    Licensed under the Apache License, Version 2.0
+
+    It includes the Proxmox VE 9 changes of
+    ThePoshArchitect/morpheus-proxmox-ve-plugin, commit 5841b29
+    https://github.com/ThePoshArchitect/morpheus-proxmox-ve-plugin
+    Licensed under the Apache License, Version 2.0
+
+    The upstream project does not ship a NOTICE file. The commit history of
+    cloud/proxmox-ve records every change made to the upstream files.
+
+--------------------------------------------------------------------------------
+Trademarks
+--------------------------------------------------------------------------------
+
+These are independent, community-built plugins. They are not official
+Hewlett Packard Enterprise, Anthropic, OpenRouter or Proxmox products, and they
+are neither endorsed by nor affiliated with any of those companies.
+
+"HPE", "Hewlett Packard Enterprise" and "Morpheus" are trademarks of
+Hewlett Packard Enterprise Development LP.
+"Anthropic" and "Claude" are trademarks of Anthropic PBC.
+"OpenRouter" is a trademark of its owner.
+"Proxmox" is a trademark of Proxmox Server Solutions GmbH.
+Other model and vendor names are trademarks of their respective owners.
+
+These names are used solely to identify the services the plugins integrate
+with. The Apache License, Version 2.0 does not grant permission to use the
+trade names, trademarks, service marks, or product names of any contributor or
+third party (Section 6).
+
+--------------------------------------------------------------------------------
+Bundled icons
+--------------------------------------------------------------------------------
+
+The icons in llm/anthropic/src/assets/images/ and
+llm/openrouter/src/assets/images/ are original artwork created for these
+plugins and are covered by this repository's Apache License, Version 2.0. They
+are not Anthropic or OpenRouter brand assets. The icons in
+cloud/proxmox-ve/src/assets/images/ come from the upstream Proxmox VE plugin.
