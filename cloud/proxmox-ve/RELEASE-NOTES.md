@@ -34,6 +34,8 @@ release's `SHA256SUMS`.
 Verified: the test suite passes, and the jar's manifest and plugin class name
 the new repository. Not yet verified on an appliance.
 
+sha256 `1c8e3aadac1b6258712b89ced2c182ff2e6b548b3f88ec91718a45829a3c7cf1`
+
 ---
 
 ## 0.1.15
