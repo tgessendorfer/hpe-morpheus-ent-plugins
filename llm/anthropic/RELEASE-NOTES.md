@@ -21,8 +21,9 @@ releases were renamed the same way and point at the same commits.
 Upgrading: upload the new jar under *Administration > Integrations > Plugins*. No configuration
 changes are required.
 
-Verified: the test suite passes, and the jar's manifest names the new repository. Not verified on an
-appliance.
+Verified on HPE Morpheus Enterprise 9.0.1, upgraded from 1.5.0: the plugin loads, the plugin list
+links to the new repository, and both integrations, direct and through OpenRouter, refreshed with
+status `ok`. The test suite passes, and the jar's manifest names the new repository.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.5.0...anthropic-v1.5.1
 

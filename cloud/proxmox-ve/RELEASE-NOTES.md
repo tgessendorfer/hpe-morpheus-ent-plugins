@@ -31,8 +31,11 @@ This is the first lab build made by the release workflow, with JDK 17, from
 exactly the source at tag `proxmox-ve-v0.1.16-lab`. Its digest is in the
 release's `SHA256SUMS`.
 
-Verified: the test suite passes, and the jar's manifest and plugin class name
-the new repository. Not yet verified on an appliance.
+Verified on HPE Morpheus Enterprise 9.0.1 with Proxmox VE 9.2.10, upgraded
+from 0.1.14: the plugin loads, the plugin list links to the new repository, and
+the cloud synced with status `ok`, with its node, VMs and LXC containers. The
+test suite passes, and the jar's manifest and plugin class name the new
+repository.
 
 sha256 `1c8e3aadac1b6258712b89ced2c182ff2e6b548b3f88ec91718a45829a3c7cf1`
 
