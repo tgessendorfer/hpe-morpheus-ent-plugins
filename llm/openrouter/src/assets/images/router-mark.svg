@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="OpenRouter">
+  <g fill="none" stroke="#12A594" stroke-width="3.2" stroke-linecap="round">
+    <path d="M9 24 H19"/>
+    <path d="M19 24 C26 24 25 12 32 12"/>
+    <path d="M19 24 H32"/>
+    <path d="M19 24 C26 24 25 36 32 36"/>
+  </g>
+  <g fill="#12A594">
+    <circle cx="8" cy="24" r="5"/>
+    <circle cx="37" cy="12" r="4.5"/>
+    <circle cx="37" cy="24" r="4.5"/>
+    <circle cx="37" cy="36" r="4.5"/>
+  </g>
+</svg>
