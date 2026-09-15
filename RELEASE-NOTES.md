@@ -60,12 +60,12 @@ caching of the MCP tool catalog.
 - An agent on `openai/gpt-5.4-nano` with the built-in Morpheus MCP server: parallel tool calls,
   streaming, reasoning effort *Low*, OpenAI's automatic prompt caching (`cached_tokens`), the cost
   footer in German and switched off.
+- An agent on `google/gemini-3.5-flash`: tool calls and a correct answer with the cost footer.
 - Changing the integration through `PUT /api/integrations/<id>`.
 
 ### Not verified
 
-- A chat with models of other vendors inside Morpheus. Gemini's tool round trip, with and without
-  `reasoning_details`, was tested against OpenRouter directly.
+- Chats with models of vendors other than OpenAI and Google inside Morpheus.
 - Routing through a network proxy.
 - In-region routing with an account that has the plan, and `us.openrouter.ai` beyond its model list.
 - `:free` variants in a chat, an expiring model's name on the appliance, and a `402` for missing
@@ -90,5 +90,10 @@ Reported to HPE in `docs/`:
   built-in Morpheus MCP tools treat `""` and `0` as filters, so the agent answers "0" for servers,
   clouds or groups that exist. The plugin forwards tool arguments unchanged; use another model for
   the agent. Other models were not checked for this.
+- **`google/gemini-3.5-flash` pages through large MCP results.** The built-in MCP tools return a
+  large result as a truncated preview; asked for a server list, Gemini called `get_result_excerpt`
+  19 times, 22 requests in 40 seconds, until OpenRouter's limit for new accounts (20 requests per
+  minute per model) answered `429`. Morpheus shows that as *An error occurred while processing your
+  request* and discards the conversation. Narrower questions work.
 
 **Full Changelog**: https://github.com/tgessendorfer/morpheus-openrouter-plugin/commits/v0.1.0

@@ -175,9 +175,6 @@ never learns to write its own.
 
 ![Agent chat with the cost footer](docs/images/10-agent-chat.png)
 
-The footer is right, the answer is not: the appliance had servers, clouds and groups. See
-*An agent answers "0"* in [Troubleshooting](#troubleshooting).
-
 ### Prompt caching
 
 The plugin sets no cache breakpoints. Providers that cache on their own still do: with OpenAI
@@ -235,7 +232,7 @@ and stop sequences unchanged; OpenRouter drops the parameters a model does not s
 
 | Symptom | Cause and fix |
 |---|---|
-| The chat says **"The AI model is no longer available"** | Morpheus shows every provider error this way. The real reason is in the appliance log: `grep OpenRouter /var/log/morpheus/morpheus-ui/current`. |
+| The chat says **"The AI model is no longer available"** | Morpheus shows most provider errors this way. The real reason is in the appliance log: `grep OpenRouter /var/log/morpheus/morpheus-ui/current`. |
 | Save fails with `401: Missing Authentication header. OpenRouter keys start with "sk-or-"` | OpenRouter's answer to a key in the wrong format, although the header was sent. Paste the whole `sk-or-v1-...` key. |
 | Save fails with `401: User not found.` | The key is unknown to OpenRouter: mistyped, revoked or deleted. |
 | Chat fails with `402` | The OpenRouter account or the key's limit has no credits left. |
@@ -247,6 +244,8 @@ and stop sequences unchanged; OpenRouter drops the parameters a model does not s
 | An agent fails after the model list was narrowed | Its model is disabled because it is no longer listed. The log names it. List it again, or give the agent another model. |
 | The model tab has no search | Not available to plugins on 9.0.1. Use the allow list. Reported to HPE: [docs/hpe-feature-request-llm-model-search.md](docs/hpe-feature-request-llm-model-search.md). |
 | An agent answers **"0"** or "none" although the objects exist | Some models fill every optional parameter of an MCP tool with an empty value, and the built-in Morpheus MCP tools take `""` and `0` as filters: `list_servers` with `status: ""` or `zoneId: 0` finds nothing, while `list_servers` without arguments lists every server. Seen with `openai/gpt-5.4-nano`. The log shows the tool call, but the next request's input grows by only a few dozen tokens. The plugin forwards tool arguments unchanged; use another model for the agent. |
+| The chat says **"An error occurred while processing your request"** and the conversation is gone | Look for `429` in the log. OpenRouter limits new accounts to 20 requests per minute per model (`new-account-rpm`), and one question with many tool rounds can exceed that; Morpheus then discards the conversation. Wait a minute and ask again. |
+| An agent calls `get_result_excerpt` over and over | The built-in MCP tools return a large result truncated, as a preview with an artifact id, and a model can page through the artifact piece by piece. Seen with `google/gemini-3.5-flash` on a server list: 19 excerpt calls, 22 requests in 40 seconds, then the rate limit above. Ask a narrower question. |
 | An agent says it cannot count instances: *"Looks like the server threw a gasket"* | Morpheus defect, not the plugin: `GET /api/instances` fails with `duplicate association path: containers.server` when the MCP tool `list_instances` is called with `agentInstalled` together with `serverId` or `hostId`. Each filter alone works. Smaller models pick that combination. |
 | An answer looks invented | Check for `OpenRouter tool calls` in the log. Smaller models sometimes answer from the example values in the MCP tool descriptions (`delegate_to_specialist`) instead of calling a tool. |
 | A new agent is missing from the chat's agent picker | The picker loads its list with the page. Reload the page. |
