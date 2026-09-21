@@ -55,7 +55,9 @@ and the disk on the running VM and kept the NIC's MAC address; provisioning
 `running` with its address. The test suite passes (31 tests, two new).
 0.1.23 was a lab iteration of this build, uploaded to the appliance only.
 
-sha256 pending
+Built by the release workflow from the source at tag `proxmox-ve-v0.1.24-lab`.
+
+sha256 `4f32a19b132e5068c7f3a4bdf349dac64270e73c763c709f7e832ecd7c646f81`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.22-lab...proxmox-ve-v0.1.24-lab
 
