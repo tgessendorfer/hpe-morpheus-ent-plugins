@@ -13,6 +13,43 @@ new number, and why the digests are recorded.
 
 ---
 
+## 0.1.22
+
+**The cloud's API proxy reaches Proxmox, and the upstream TODO list is
+worked through.** Nothing in 0.1.21's provisioning path changed.
+
+- **Proxy support.** The cloud's *API Proxy* setting was ignored: no request
+  to Proxmox carried it. `getAuthConfig` now hands the proxy to every call,
+  and every request goes through one helper that applies it. Verified only
+  that a cloud without a proxy behaves as before; no proxy was available in
+  the lab.
+- **No password hashes in the log.** `runWorkload` and `validateWorkload`
+  logged the whole workload, its options and the cloud-init user-data at
+  debug level, and `destroyVM` its request headers with the session cookie.
+  The user-data holds the password hashes of the created users. Those lines
+  are gone; the run is still traceable through the info lines added in
+  0.1.21.
+- **Upstream TODOs checked in the lab** (see `TODO.md`): the instance wizard
+  shows the plugin's validation errors under the network and image fields,
+  and lets a request through without a node when the cloud has one; a synced
+  resource pool is selectable and the VM is created in it; a provision with
+  `noAgentInstall` reaches `running` with its address, and Morpheus's
+  `determineSshRoute` sees that address instead of an empty host list. The
+  README states the provisioning requirements (root SSH, template with guest
+  agent and virtio NIC, network through `ipconfigN`).
+
+Verified on HPE Morpheus Enterprise 9.0.2 with Proxmox VE 9.2.20 with this
+build: provisioning into a resource pool and provisioning with
+`noAgentInstall`, both reaching `running` with an address within a minute;
+instance deletion removed VM, server record and snippets. The test suite
+passes (29 tests).
+
+sha256 pending
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.21-lab...proxmox-ve-v0.1.22-lab
+
+---
+
 ## 0.1.21
 
 **Provisioning checks the node's SSH login before it clones, and a provisioned

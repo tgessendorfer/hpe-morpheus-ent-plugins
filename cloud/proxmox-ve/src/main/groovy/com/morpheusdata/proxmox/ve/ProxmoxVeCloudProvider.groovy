@@ -461,9 +461,9 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 
 			// Setup token get using util class
 			log.debug("Cloud Validation: Attempting authentication to populate access token and csrf token.")
-			def tokenTest = ProxmoxApiComputeUtil.getApiV2Token([username: username, password: password, apiUrl: baseUrl, v2basePath: ProxmoxVePlugin.V2_BASE_PATH])
+			Map authConfig = [username: username, password: password, apiUrl: baseUrl, v2basePath: ProxmoxVePlugin.V2_BASE_PATH, networkProxy: cloudInfo.apiProxy]
+			def tokenTest = ProxmoxApiComputeUtil.getApiV2Token(authConfig)
 			if (tokenTest.success) {
-				Map authConfig = [username: username, password: password, apiUrl: baseUrl, v2basePath: ProxmoxVePlugin.V2_BASE_PATH]
 				ServiceResponse versionResponse = ProxmoxApiComputeUtil.getProxmoxVersion(new HttpApiClient(), authConfig)
 				Map parsedVersion = ProxmoxApiComputeUtil.parseProxmoxVersion(versionResponse?.data?.version?.toString())
 				if (!versionResponse.success || !parsedVersion.major) {

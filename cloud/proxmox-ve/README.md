@@ -4,11 +4,16 @@
 
 > ### About this fork
 >
-> A lab build, verified on **HPE Morpheus Enterprise 9.0.1** with **Proxmox VE
-> 9.2.10**. This folder is upstream `main`, plus
+> A lab build, verified on **HPE Morpheus Enterprise 9.0.2** with **Proxmox VE
+> 9.2.20**. This folder is upstream `main`, plus
 > [ThePoshArchitect's Proxmox VE 9 commit](https://github.com/ThePoshArchitect/morpheus-proxmox-ve-plugin/commit/5841b29),
 > plus these changes:
 >
+> - **Provisioning works end to end** (since 0.1.21): SSH preflight before the
+>   clone, the template's virtio NIC is kept, the network is set through
+>   Proxmox's `ipconfigN`, the guest agent's address is stored, and a failed
+>   listing no longer deletes the cloud's records. See
+>   [Provisioning the image](#provisioning-the-image).
 > - **LXC containers are discovered** (read-only). Upstream syncs QEMU guests only.
 > - **Each guest's OS is read from Proxmox** instead of reporting Unknown.
 > - **The host detail page no longer returns 403.** The cause was a null
@@ -18,7 +23,7 @@
 > - Every cloud form field has help text and a placeholder.
 >
 > Prebuilt jars are under
-> [Releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.21-lab),
+> [Releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.22-lab),
 > tagged `proxmox-ve-v<version>-lab`.
 > Changes per version are in [`RELEASE-NOTES.md`](RELEASE-NOTES.md), and
 > installing is covered in [`docs/lab/installing.md`](docs/lab/installing.md).
@@ -160,6 +165,23 @@ Change the filter to **"User"** to view your upload:
 ![Uploaded](docs/image_uploaded.png)
 
 ## Provisioning the image
+
+Requirements, verified with Morpheus 9.0.2 and Proxmox VE 9.2 (lab build 0.1.21 and later):
+
+- **Node SSH account:** the cloud's *Node SSH Username/Password* must be root on every node. The
+  plugin runs `qm` and `pvesm` and writes cloud-init snippets to `/var/lib/vz/snippets` over that
+  login, without sudo. A failed login is reported before anything is created on the node. The
+  storage `local` needs the `snippets` content type; the plugin adds it when it is missing.
+- **Template:** cloud-init, the QEMU guest agent installed and enabled (`agent: 1`), and a
+  `virtio` NIC. The NIC keeps the template's model and MAC address; Debian's cloud kernel has no
+  driver for `e1000e`.
+- **Network:** the plugin configures the guest through Proxmox's `ipconfigN` (DHCP, or the
+  address, prefix and gateway of the Morpheus network) and passes Morpheus's cloud-init
+  user-data through `cicustom`. The guest agent's IPv4 address is stored on the server as soon
+  as it appears, so provisioning without the Morpheus agent works too.
+- **Proxmox node:** optional when the cloud has exactly one active node.
+- **Resource pool:** selectable in the wizard once pools are synced; the VM is created in it.
+- **API proxy:** the cloud's *API Proxy* setting is applied to every request to Proxmox.
 
 The below provisioning assumes that your datastores and networks have been configured appropriately e.g., DHCP and gateway.
 

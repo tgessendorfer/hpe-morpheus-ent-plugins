@@ -48,10 +48,12 @@ class ProxmoxVePlugin extends Plugin {
     def getAuthConfig(Cloud cloud) {
         log.debug "getAuthConfig: ${cloud}"
         def rtn = [
-                apiUrl    : cloud.serviceUrl,
-                v2basePath: V2_BASE_PATH,
-                username  : null,
-                password  : null
+                apiUrl      : cloud.serviceUrl,
+                v2basePath  : V2_BASE_PATH,
+                username    : null,
+                password    : null,
+                // The cloud's "API Proxy"; ProxmoxApiComputeUtil.withProxy applies it to every request
+                networkProxy: cloud.apiProxy
         ]
 
         if(!cloud.accountCredentialLoaded) {

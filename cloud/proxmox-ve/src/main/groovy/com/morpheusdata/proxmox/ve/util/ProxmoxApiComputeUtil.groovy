@@ -21,6 +21,18 @@ class ProxmoxApiComputeUtil {
     //static final String API_BASE_PATH = "/api2/json"
     static final Long API_CHECK_WAIT_INTERVAL = 2000
 
+    /**
+     * Gives the client the cloud's API proxy (authConfig.networkProxy, from the cloud's
+     * "API Proxy" setting) unless it already has one. Every request to Proxmox goes through
+     * here, so a cloud behind a proxy works without each caller remembering it.
+     */
+    static HttpApiClient withProxy(HttpApiClient client, Map authConfig) {
+        if (client && authConfig?.networkProxy && !client.networkProxy) {
+            client.networkProxy = authConfig.networkProxy
+        }
+        return client
+    }
+
 
     static addVMNics(HttpApiClient client, Map authConfig, List<ComputeServerInterface> newNics, String node, String vmId, String nicModel = NIC_MODEL_LINUX) {
         try {
@@ -40,7 +52,7 @@ class ProxmoxApiComputeUtil {
                 diskAddOpts.body["$nic.externalId"] = buildNicConfig(null, nic.network.externalId, nicModel)
             }
 
-            def results = client.callJsonApi(
+            def results = withProxy(client, authConfig).callJsonApi(
                     (String) authConfig.apiUrl,
                     "${authConfig.v2basePath}/nodes/$node/qemu/$vmId/config",
                     null, null,
@@ -320,7 +332,7 @@ class ProxmoxApiComputeUtil {
             def errorMsg = ""
             deletedNics.each { ComputeServerInterface nic ->
                 nicRemoveOpts.body.delete = nic.externalId
-                def nicRemoveResults = client.callJsonApi(
+                def nicRemoveResults = withProxy(client, authConfig).callJsonApi(
                         (String) authConfig.apiUrl,
                         "${authConfig.v2basePath}/nodes/$node/qemu/$vmId/config",
                         null, null,
@@ -356,7 +368,7 @@ class ProxmoxApiComputeUtil {
                 ignoreSSL: true
         ]
 
-        def results = client.callJsonApi(
+        def results = withProxy(client, authConfig).callJsonApi(
                 (String) authConfig.apiUrl,
                 "${authConfig.v2basePath}/nodes/$node/qemu/$vmId/resize",
                 null, null,
@@ -389,7 +401,7 @@ class ProxmoxApiComputeUtil {
                 diskAddOpts.body["$vol.deviceName"] = "${vol.datastore.externalId}:$size,size=${size}G"
             }
 
-            def results = client.callJsonApi(
+            def results = withProxy(client, authConfig).callJsonApi(
                     (String) authConfig.apiUrl,
                     "${authConfig.v2basePath}/nodes/$node/qemu/$vmId/config",
                     null, null,
@@ -428,7 +440,7 @@ class ProxmoxApiComputeUtil {
                 diskRemoveOpts.body.delete = diskId
                 log.debug("Delete request path: \n${authConfig.v2basePath}/nodes/$node/qemu/$vmId/config")
                 log.debug("Delete request body: \n$diskRemoveOpts")
-                def diskRemoveResults = client.callJsonApi(
+                def diskRemoveResults = withProxy(client, authConfig).callJsonApi(
                         (String) authConfig.apiUrl,
                         "${authConfig.v2basePath}/nodes/$node/qemu/$vmId/config",
                         null, null,
@@ -482,7 +494,7 @@ class ProxmoxApiComputeUtil {
                 ignoreSSL: true
             ]
 
-            def resizeResults = client.callJsonApi(
+            def resizeResults = withProxy(client, authConfig).callJsonApi(
                     (String) authConfig.apiUrl,
                     "${authConfig.v2basePath}/nodes/$node/qemu/$vmId/resize",
                     null, null,
@@ -521,7 +533,7 @@ class ProxmoxApiComputeUtil {
             }
 
             log.debug("Setting VM Compute Size $vmId on node $node...")
-            def results = client.callJsonApi(
+            def results = withProxy(client, authConfig).callJsonApi(
                 (String) authConfig.apiUrl,
                 "${authConfig.v2basePath}/nodes/$node/qemu/$vmId/config",
                 null, null,
@@ -617,7 +629,7 @@ class ProxmoxApiComputeUtil {
             log.debug("Cloning template $templateId from node $templateNode to VM $name($nextId) on node $nodeId")
             
             // Clone from the node where template actually resides
-            def results = client.callJsonApi(
+            def results = withProxy(client, authConfig).callJsonApi(
                     (String) authConfig.apiUrl,
                     "${authConfig.v2basePath}/nodes/$templateNode/qemu/$templateId/clone",
                     null, null,
@@ -926,7 +938,7 @@ class ProxmoxApiComputeUtil {
                 ]
 
                 log.debug("Post path is: $authConfig.apiUrl${authConfig.v2basePath}/nodes/$nodeId/qemu/$vmId/status/$action/ (attempt ${retryCount + 1}/$maxRetries)")
-                def results = client.callJsonApi(
+                def results = withProxy(client, authConfig).callJsonApi(
                         (String) authConfig.apiUrl,
                         "${authConfig.v2basePath}/nodes/$nodeId/qemu/$vmId/status/$action/",
                         null, null,
@@ -985,10 +997,9 @@ class ProxmoxApiComputeUtil {
                     contentType: ContentType.APPLICATION_JSON,
             ]
 
-            log.debug("Delete Opts: $opts")
             log.debug("Delete path is: $authConfig.apiUrl${authConfig.v2basePath}/nodes/$nodeId/qemu/$vmId/")
 
-            def results = client.callJsonApi(
+            def results = withProxy(client, authConfig).callJsonApi(
                     (String) authConfig.apiUrl,
                     "${authConfig.v2basePath}/nodes/$nodeId/qemu/$vmId/",
                     new HttpApiClient.RequestOptions(opts),
@@ -1035,7 +1046,7 @@ class ProxmoxApiComputeUtil {
 
             log.debug("Creating blank template for attaching qcow2...")
             log.debug("Path is: $authConfig.apiUrl${authConfig.v2basePath}/nodes/$nodeId/qemu/")
-            def results = client.callJsonApi(
+            def results = withProxy(client, authConfig).callJsonApi(
                     (String) authConfig.apiUrl,
                     "${authConfig.v2basePath}/nodes/$nodeId/qemu/",
                     null, null,
@@ -1082,7 +1093,7 @@ class ProxmoxApiComputeUtil {
 
             while (duration < timeout) {
                 log.debug("Checking VM $vmId status on node $nodeId")
-                def results = client.callJsonApi(
+                def results = withProxy(client, authConfig).callJsonApi(
                         (String) authConfig.apiUrl,
                         "${authConfig.v2basePath}/nodes/$nodeId/qemu/$vmId/config",
                         null, null,
@@ -1140,7 +1151,7 @@ class ProxmoxApiComputeUtil {
             // Poll task status
             while (duration < timeout) {
                 log.debug("Checking task $taskUPID status on node $nodeId")
-                def results = client.callJsonApi(
+                def results = withProxy(client, authConfig).callJsonApi(
                         (String) authConfig.apiUrl,
                         "${authConfig.v2basePath}/nodes/$nodeId/tasks/$taskUPID/status",
                         null, null,
@@ -1776,8 +1787,8 @@ class ProxmoxApiComputeUtil {
             
             // Use 6-parameter version if we have a query string, otherwise use 4-parameter version
             def results = queryString ? 
-                client.callJsonApi(authConfig.apiUrl, actualPath, queryString, null, opts, 'GET') :
-                client.callJsonApi(authConfig.apiUrl, actualPath, null, null, opts, 'GET')
+                withProxy(client, authConfig).callJsonApi(authConfig.apiUrl, actualPath, queryString, null, opts, 'GET') :
+                withProxy(client, authConfig).callJsonApi(authConfig.apiUrl, actualPath, null, null, opts, 'GET')
             
             // The client hands a body it did not parse over as byte[]; read it as JSON before
             // unwrapping, instead of failing with "No signature of method: [B.getAt()".
@@ -1808,7 +1819,7 @@ class ProxmoxApiComputeUtil {
     static ServiceResponse getApiV2Token(Map authConfig) {
         def path = "access/ticket"
         //log.debug("getApiV2Token: path: ${path}")
-        HttpApiClient client = new HttpApiClient()
+        HttpApiClient client = withProxy(new HttpApiClient(), authConfig)
 
         def rtn = new ServiceResponse(success: false)
         try {
@@ -1823,7 +1834,7 @@ class ProxmoxApiComputeUtil {
                     contentType: ContentType.APPLICATION_FORM_URLENCODED,
                     ignoreSSL: true
             )
-            def results = client.callJsonApi(authConfig.apiUrl,"${authConfig.v2basePath}/${path}", opts, 'POST')
+            def results = withProxy(client, authConfig).callJsonApi(authConfig.apiUrl,"${authConfig.v2basePath}/${path}", opts, 'POST')
 
             //log.debug("getApiV2Token API request results: ${results.toMap()}")
             if(results?.success && !results?.hasErrors()) {

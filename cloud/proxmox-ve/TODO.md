@@ -5,20 +5,20 @@
 - [X] Check agentless provision
 - [X] Refactor ssh code to util class
 - [X] Add resource pool sync
-- [ ] Add resource pool selection to provision (and filter datastores)
+- [X] Add resource pool selection to provision (verified 2026-09-21: the wizard offers synced pools and the VM lands in the selected one; datastore filtering by pool is still open)
 - [ ] Add provision container host
 - [X] Fix powerstate on initial host add
-- [ ] Cleanup logging
-- [ ] Fix Validation display
+- [X] Cleanup logging (debug dumps of the workload, its options and the cloud-init user-data are gone, they carried password hashes)
+- [X] Fix Validation display (verified 2026-09-21: the wizard shows the plugin's errors under the network and image fields)
 - [X] Fix storage tab on instance 
 - [X] Add reconfigure for disks
 - [X] Add reconfigure for nics
-- [ ] Investigate "Starting determineSshRoute with hostList: []" when skipping agent
-- [ ] Fix validation errors not appearing in instance wizard
+- [X] Investigate "Starting determineSshRoute with hostList: []" when skipping agent (the plugin returns the guest agent's address since 0.1.21; verified with `noAgentInstall`, the host list carries the address)
+- [X] Fix validation errors not appearing in instance wizard (see Validation display)
 - [X] Improve ssh error tracking
 - [X] Add LICENSE
-- [ ] Populate README
-- [ ] Jar Folder
+- [X] Populate README
+- [X] Jar Folder (superseded by GitHub Releases)
 - [ ] Snapshot Backup Provider
 - [ ] Scribe resources for Morpheus OS images
-- [ ] Proxy support
+- [X] Proxy support (the cloud's API Proxy applies to every request to Proxmox; not tested against a real proxy)
