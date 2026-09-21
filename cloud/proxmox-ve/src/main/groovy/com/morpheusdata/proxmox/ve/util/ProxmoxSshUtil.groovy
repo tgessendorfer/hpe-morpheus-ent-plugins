@@ -115,6 +115,29 @@ class ProxmoxSshUtil {
     }
 
     /**
+     * Downloads a system image (virtual-image resource with a remotePath) on the node itself, into
+     * REMOTE_IMAGE_DIR, and returns the file's path there. The node pulls the file, not the
+     * appliance: the images are 0.8 to 1.5 GB and the node keeps them for later templates.
+     * A partial download is removed so the next provision starts over.
+     */
+    public static String downloadImage(MorpheusContext context, ComputeServer hvNode, String remoteUrl) {
+        String fileName = remoteUrl.substring(remoteUrl.lastIndexOf('/') + 1).replaceAll(/[?#].*$/, '')
+        if (!fileName) {
+            throw new Exception("Cannot derive a file name from the image URL $remoteUrl")
+        }
+        String target = "$REMOTE_IMAGE_DIR/$fileName"
+        log.info("Downloading image $remoteUrl to $target on node ${hvNode.externalId}")
+        String partial = "${target}.part"
+        String cmd = "mkdir -p $REMOTE_IMAGE_DIR && (wget -q -O '$partial' '$remoteUrl' || (rm -f '$partial'; exit 1)) && mv -f '$partial' '$target'"
+        TaskResult result = context.executeSshCommand(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, cmd, "", "", "", false, LogLevel.info, true, null, false).blockingGet()
+        if (!result.success) {
+            log.error("SSH FAILED on ${hvNode.sshHost}: image download | Exit Code: ${result.exitCode} | Output: ${result.output} | Error: ${result.error}")
+            throw new Exception("Downloading $remoteUrl on node ${hvNode.externalId} failed: ${result.error ?: result.output ?: 'exit code ' + result.exitCode}")
+        }
+        return target
+    }
+
+    /**
      * Upload image file to Proxmox node (does not create template)
      */
     public static String uploadImage(MorpheusContext context, ComputeServer hvNode, String imageFile) {

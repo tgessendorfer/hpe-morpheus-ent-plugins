@@ -1,0 +1,202 @@
+// System-provided virtual images for the Proxmox VE cloud: the qcow2 images HPE builds for
+// Morpheus, with cloud-init and the agent prerequisites baked in. They appear under
+// Library > Virtual Images (filter "System") and in the provisioning wizard's Image list.
+// On the first provision the plugin downloads the image on the node into
+// /var/lib/vz/template/qemu and creates a template from it; later provisions clone that
+// template. Only images with an HTTP 200 on 2026-09-21 are listed; sizes are 0.8 to 1.5 GB.
+
+resource "virtual-image" "proxmox-image-morpheus-debian-12-20260203" {
+  code         = "proxmox.image.morpheus.debian.12.20260203"
+  category     = "proxmox.image.morpheus.debian"
+  name         = "Morpheus Debian 12 20260203"
+  imageType    = "qcow2"
+  remotePath   = "https://morpheus-images.s3.amazonaws.com/qemu/20260203/debian-12/morpheus-debian-12-amd64-20260203.qcow2"
+  imagePath    = "qemu/20260203/debian-12"
+  isCloudInit  = true
+  systemImage  = true
+  installAgent = true
+  osType {
+    code  = "debian.12.64"
+    owner = null
+  }
+  zoneType = "proxmox-ve.cloud"
+}
+
+resource "os-type-image" "proxmox-image-morpheus-debian-12" {
+  code          = "proxmox.image.morpheus.debian.12"
+  provisionType = "proxmox-provision-provider"
+  virtualImage  = virtual-image.proxmox-image-morpheus-debian-12-20260203
+  account       = null
+  osType = {
+    code  = "debian.12.64"
+    owner = null
+  }
+}
+
+resource "virtual-image" "proxmox-image-morpheus-debian-13-20260310" {
+  code         = "proxmox.image.morpheus.debian.13.20260310"
+  category     = "proxmox.image.morpheus.debian"
+  name         = "Morpheus Debian 13 20260310"
+  imageType    = "qcow2"
+  remotePath   = "https://morpheus-images.s3.amazonaws.com/qemu/20260310/debian-13/morpheus-debian-13-amd64-20260310.qcow2"
+  imagePath    = "qemu/20260310/debian-13"
+  isCloudInit  = true
+  systemImage  = true
+  installAgent = true
+  osType {
+    code  = "debian.13.64"
+    owner = null
+  }
+  zoneType = "proxmox-ve.cloud"
+}
+
+resource "os-type-image" "proxmox-image-morpheus-debian-13" {
+  code          = "proxmox.image.morpheus.debian.13"
+  provisionType = "proxmox-provision-provider"
+  virtualImage  = virtual-image.proxmox-image-morpheus-debian-13-20260310
+  account       = null
+  osType = {
+    code  = "debian.13.64"
+    owner = null
+  }
+}
+
+resource "virtual-image" "proxmox-image-morpheus-ubuntu-22_04-20260203" {
+  code         = "proxmox.image.morpheus.ubuntu.22.04.20260203"
+  category     = "proxmox.image.morpheus.ubuntu"
+  name         = "Morpheus Ubuntu 22.04 20260203"
+  imageType    = "qcow2"
+  remotePath   = "https://morpheus-images.s3.amazonaws.com/qemu/20260203/ubuntu-22/morpheus-ubuntu-22_04-amd64-20260203.qcow2"
+  imagePath    = "qemu/20260203/ubuntu-22"
+  isCloudInit  = true
+  systemImage  = true
+  installAgent = true
+  osType {
+    code  = "ubuntu.22.04.64"
+    owner = null
+  }
+  zoneType = "proxmox-ve.cloud"
+}
+
+resource "os-type-image" "proxmox-image-morpheus-ubuntu-22_04" {
+  code          = "proxmox.image.morpheus.ubuntu.22.04"
+  provisionType = "proxmox-provision-provider"
+  virtualImage  = virtual-image.proxmox-image-morpheus-ubuntu-22_04-20260203
+  account       = null
+  osType = {
+    code  = "ubuntu.22.04.64"
+    owner = null
+  }
+}
+
+resource "virtual-image" "proxmox-image-morpheus-ubuntu-24_04-20260203" {
+  code         = "proxmox.image.morpheus.ubuntu.24.04.20260203"
+  category     = "proxmox.image.morpheus.ubuntu"
+  name         = "Morpheus Ubuntu 24.04 20260203"
+  imageType    = "qcow2"
+  remotePath   = "https://morpheus-images.s3.amazonaws.com/qemu/20260203/ubuntu-24/morpheus-ubuntu-24_04-amd64-20260203.qcow2"
+  imagePath    = "qemu/20260203/ubuntu-24"
+  isCloudInit  = true
+  systemImage  = true
+  installAgent = true
+  osType {
+    code  = "ubuntu.24.04.64"
+    owner = null
+  }
+  zoneType = "proxmox-ve.cloud"
+}
+
+resource "os-type-image" "proxmox-image-morpheus-ubuntu-24_04" {
+  code          = "proxmox.image.morpheus.ubuntu.24.04"
+  provisionType = "proxmox-provision-provider"
+  virtualImage  = virtual-image.proxmox-image-morpheus-ubuntu-24_04-20260203
+  account       = null
+  osType = {
+    code  = "ubuntu.24.04.64"
+    owner = null
+  }
+}
+
+resource "virtual-image" "proxmox-image-morpheus-rocky-9-20250218" {
+  code         = "proxmox.image.morpheus.rocky.9.20250218"
+  category     = "proxmox.image.morpheus.rocky"
+  name         = "Morpheus Rocky 9 20250218"
+  imageType    = "qcow2"
+  remotePath   = "https://s3-us-west-1.amazonaws.com/morpheus-images/qemu/20250218/rocky-9/morpheus-rocky-9-x86_64-20250218.qcow2"
+  imagePath    = "qemu/20250218/rocky-9"
+  isCloudInit  = true
+  systemImage  = true
+  installAgent = true
+  osType {
+    code  = "rocky.9.64"
+    owner = null
+  }
+  zoneType = "proxmox-ve.cloud"
+}
+
+resource "os-type-image" "proxmox-image-morpheus-rocky-9" {
+  code          = "proxmox.image.morpheus.rocky.9"
+  provisionType = "proxmox-provision-provider"
+  virtualImage  = virtual-image.proxmox-image-morpheus-rocky-9-20250218
+  account       = null
+  osType = {
+    code  = "rocky.9.64"
+    owner = null
+  }
+}
+
+resource "virtual-image" "proxmox-image-morpheus-rocky-10-20260126" {
+  code         = "proxmox.image.morpheus.rocky.10.20260126"
+  category     = "proxmox.image.morpheus.rocky"
+  name         = "Morpheus Rocky 10 20260126"
+  imageType    = "qcow2"
+  remotePath   = "https://morpheus-images.s3.amazonaws.com/qemu/20260126/rocky-10/morpheus-rocky-10-x86_64-20260126.qcow2"
+  imagePath    = "qemu/20260126/rocky-10"
+  isCloudInit  = true
+  systemImage  = true
+  installAgent = true
+  osType {
+    code  = "rocky.10.64"
+    owner = null
+  }
+  zoneType = "proxmox-ve.cloud"
+}
+
+resource "os-type-image" "proxmox-image-morpheus-rocky-10" {
+  code          = "proxmox.image.morpheus.rocky.10"
+  provisionType = "proxmox-provision-provider"
+  virtualImage  = virtual-image.proxmox-image-morpheus-rocky-10-20260126
+  account       = null
+  osType = {
+    code  = "rocky.10.64"
+    owner = null
+  }
+}
+
+resource "virtual-image" "proxmox-image-morpheus-almalinux-10-20260120" {
+  code         = "proxmox.image.morpheus.almalinux.10.20260120"
+  category     = "proxmox.image.morpheus.almalinux"
+  name         = "Morpheus AlmaLinux 10 20260120"
+  imageType    = "qcow2"
+  remotePath   = "https://morpheus-images.s3.amazonaws.com/qemu/20260120/almalinux-10/morpheus-almalinux-10-x86_64-20260120.qcow2"
+  imagePath    = "qemu/20260120/almalinux-10"
+  isCloudInit  = true
+  systemImage  = true
+  installAgent = true
+  osType {
+    code  = "almalinux.10.64"
+    owner = null
+  }
+  zoneType = "proxmox-ve.cloud"
+}
+
+resource "os-type-image" "proxmox-image-morpheus-almalinux-10" {
+  code          = "proxmox.image.morpheus.almalinux.10"
+  provisionType = "proxmox-provision-provider"
+  virtualImage  = virtual-image.proxmox-image-morpheus-almalinux-10-20260120
+  account       = null
+  osType = {
+    code  = "almalinux.10.64"
+    owner = null
+  }
+}

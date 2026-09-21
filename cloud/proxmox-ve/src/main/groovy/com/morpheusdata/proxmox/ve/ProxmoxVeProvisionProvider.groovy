@@ -925,14 +925,21 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 					cloudFile.name.toLowerCase().endsWith(".raw")
 			}
 			
-			if (!imageFile) {
+			// A system image (a virtual-image resource with a remotePath) has no file in Morpheus,
+			// although getVirtualImageFiles still lists one built from imagePath; the node downloads
+			// it on first use.
+			String remoteUrl = (virtualImage.remotePath?.startsWith('http') && !virtualImage.userUploaded) ? virtualImage.remotePath : null
+			if (remoteUrl) {
+				imageFile = null
+			}
+			if (!imageFile && !remoteUrl) {
 				// No image file in Morpheus - this is a synced template from Proxmox
 				log.warn("No image file found in Morpheus storage for ${virtualImage.name}. This appears to be a synced Proxmox template.")
 				log.warn("Template should exist on Proxmox cluster. If not found, please upload the image to Morpheus or create template on Proxmox manually.")
 				throw new Exception("No valid image file found for virtual image ${virtualImage.name}. Please upload the image file to Morpheus.")
 			}
-			
-			String fileName = new File(imageFile).getName()
+
+			String fileName = imageFile ? new File(imageFile).getName() : remoteUrl.substring(remoteUrl.lastIndexOf('/') + 1).replaceAll(/[?#].*$/, '')
 			String remoteImagePath = "${ProxmoxSshUtil.REMOTE_IMAGE_DIR}/$fileName"
 			
 			def checkFileCmd = "test -f $remoteImagePath && echo 'EXISTS' || echo 'NOT_EXISTS'"
@@ -944,9 +951,14 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 			boolean imageExistsOnNode = fileCheckResult.output?.contains('EXISTS')
 			
 			if (!imageExistsOnNode) {
-				// Scenario 1: New image on new host - upload image and create template
-				log.debug("Uploading image and creating template")
-				remoteImagePath = ProxmoxSshUtil.uploadImage(context, hvNode, imageFile)
+				// Scenario 1: New image on new host - upload (or download) the image and create the template
+				if (remoteUrl) {
+					log.info("System image ${virtualImage.name} is not on node ${hvNode.externalId} yet; downloading it there")
+					remoteImagePath = ProxmoxSshUtil.downloadImage(context, hvNode, remoteUrl)
+				} else {
+					log.debug("Uploading image and creating template")
+					remoteImagePath = ProxmoxSshUtil.uploadImage(context, hvNode, imageFile)
+				}
 				imageExternalId = ProxmoxSshUtil.createTemplateFromImage(context, client, authConfig, virtualImage, hvNode, targetDS, remoteImagePath)
 			} else {
 				// Scenario 2: Old image on new host - create template from existing image file

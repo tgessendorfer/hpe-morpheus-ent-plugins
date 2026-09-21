@@ -23,7 +23,7 @@
 > - Every cloud form field has help text and a placeholder.
 >
 > Prebuilt jars are under
-> [Releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.24-lab),
+> [Releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.27-lab),
 > tagged `proxmox-ve-v<version>-lab`.
 > Changes per version are in [`RELEASE-NOTES.md`](RELEASE-NOTES.md), and
 > installing is covered in [`docs/lab/installing.md`](docs/lab/installing.md).
@@ -144,6 +144,16 @@ Once the cloud connects successfully, various artifacts are synchronized under `
 ### Templates (Virtual images - `Library > Virtual Images > Synced`):
 
 ![SyncPool](docs/sync_virtualimage.png)
+
+## System images (nothing to upload)
+
+Since lab build 0.1.27 the plugin declares HPE's Morpheus OS images for this cloud: Debian 12 and
+13, Ubuntu 22.04 and 24.04, Rocky 9 and 10, AlmaLinux 10 (qcow2, cloud-init and the agent
+prerequisites included). Find them under `Library > Virtual Images` with the filter set to
+**System**, and in the provisioning wizard's **Image** list as `<name> (Download on first use)`.
+On the first provision the node downloads the image (0.8 to 1.5 GB) into
+`/var/lib/vz/template/qemu` and the plugin creates a template from it; later provisions clone
+that template. The node needs internet access for the download.
 
 ## Upload image for provisioning
 

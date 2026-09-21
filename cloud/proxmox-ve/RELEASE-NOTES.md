@@ -13,6 +13,51 @@ new number, and why the digests are recorded.
 
 ---
 
+## 0.1.27
+
+**HPE's Morpheus OS images are offered for provisioning, with nothing to
+upload.** The plugin now declares seven system images through scribe
+resources (`src/main/resources/scribe/proxmox-virtual-images.scribe`):
+Morpheus Debian 12 and 13, Ubuntu 22.04 and 24.04, Rocky 9 and 10,
+AlmaLinux 10, the qcow2 builds HPE publishes for KVM-type clouds with
+cloud-init and the agent prerequisites baked in. They appear under
+*Library › Virtual Images* with the filter *System*, and in the provisioning
+wizard's *Image* list as `<name> (Download on first use)`.
+
+- **First use downloads on the node.** A system image has a `remotePath`
+  and no file in Morpheus. On the first provision the node itself fetches the
+  qcow2 with `wget` into `/var/lib/vz/template/qemu` (0.8 to 1.5 GB, so the
+  node needs internet access; the cloud's API proxy does not apply to it),
+  the plugin imports the disk into a new template named after the image
+  (`MorpheusDebian1220260203`) and records the template as the image's
+  location. Every later provision clones that template. A partial download
+  is removed so the next attempt starts over.
+- **The image list distinguishes the three kinds:** synced Proxmox templates
+  by name, uploaded qcow2 files as `(To Be Uploaded)`, system images as
+  `(Download on first use)`; once a system image has its template, it is
+  listed by name like a synced template.
+- Only images that answered HTTP 200 on 2026-09-21 are declared. AlmaLinux 9,
+  Debian 11, Ubuntu 20.04 and Rocky 8 were left out (404, or superseded).
+  HPE may move or retire these files; a dead link fails at the first
+  provision with the download error in the instance's status.
+
+Verified on HPE Morpheus Enterprise 9.0.2 with Proxmox VE 9.2.20: after the
+plugin load the seven images exist (`ScribeService - import resource new`),
+the wizard's image list shows them; a provision from *Morpheus Debian 12
+20260203* downloaded the image in 62 seconds, created template 100, cloned
+VM 102 and reached `running` with its address and the agent 3.3.0 after
+**2 minutes 16 seconds**; a second provision from the same image reused the
+template and reached `running` after 65 seconds. The test suite passes
+(31 tests). 0.1.25 and 0.1.26 were lab iterations of this build, uploaded to
+the appliance only. Not verified: the other six images, and what
+`VirtualImageLocationSync` makes of a template it did not create itself.
+
+sha256 pending
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.24-lab...proxmox-ve-v0.1.27-lab
+
+---
+
 ## 0.1.24
 
 **Datastores follow the resource pool, the network provider registers its

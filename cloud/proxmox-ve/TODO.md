@@ -20,5 +20,5 @@
 - [X] Populate README
 - [X] Jar Folder (superseded by GitHub Releases)
 - [ ] Snapshot Backup Provider
-- [ ] Scribe resources for Morpheus OS images
+- [X] Scribe resources for Morpheus OS images (0.1.27: seven HPE qcow2 images as system virtual images, downloaded on the node at first use)
 - [X] Proxy support (the cloud's API Proxy applies to every request to Proxmox; not tested against a real proxy)

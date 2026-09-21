@@ -6,6 +6,7 @@ import com.morpheusdata.core.Plugin
 import com.morpheusdata.core.data.DataFilter
 import com.morpheusdata.core.data.DataQuery
 import com.morpheusdata.model.ImageType
+import com.morpheusdata.model.VirtualImage
 import com.morpheusdata.model.projection.ComputeServerIdentityProjection
 import groovy.util.logging.Slf4j
 
@@ -15,6 +16,14 @@ import groovy.util.logging.Slf4j
 
 @Slf4j
 class ProxmoxVeOptionSourceProvider extends AbstractOptionSourceProvider {
+
+    // Categories of the system images in src/main/resources/scribe/proxmox-virtual-images.scribe
+    static final List<String> SYSTEM_IMAGE_CATEGORIES = [
+            'proxmox.image.morpheus.debian',
+            'proxmox.image.morpheus.ubuntu',
+            'proxmox.image.morpheus.rocky',
+            'proxmox.image.morpheus.almalinux'
+    ]
 
     ProxmoxVePlugin plugin
     MorpheusContext morpheusContext
@@ -117,6 +126,18 @@ class ProxmoxVeOptionSourceProvider extends AbstractOptionSourceProvider {
                     log.debug("Uploaded External ID found: $it.externalId ($it.name)")
                     options << [name: "$it.name (To Be Uploaded)", value: it.id]
                 }
+            }
+        }
+
+        // System images declared by the plugin's scribe resources (proxmox-virtual-images.scribe):
+        // no file in Morpheus, a remotePath the node downloads on first use.
+        Set<Object> listed = options.collect { it.value } as Set
+        morpheusContext.async.virtualImage.list(new DataQuery().withFilters([
+                new DataFilter('deleted', false),
+                new DataFilter('category', 'in', SYSTEM_IMAGE_CATEGORIES)
+        ])).blockingSubscribe { VirtualImage image ->
+            if (image.remotePath && !(image.id in listed) && !(image.externalId && image.externalId in locationExternalIds)) {
+                options << [name: "$image.name (Download on first use)", value: image.id]
             }
         }
 
