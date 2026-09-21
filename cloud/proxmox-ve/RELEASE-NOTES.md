@@ -52,7 +52,9 @@ template and reached `running` after 65 seconds. The test suite passes
 the appliance only. Not verified: the other six images, and what
 `VirtualImageLocationSync` makes of a template it did not create itself.
 
-sha256 pending
+Built by the release workflow from the source at tag `proxmox-ve-v0.1.27-lab`.
+
+sha256 `ea9f79d8415a23b0bfd82090353cc803735b420ef625d0ed60ff94cf4b0cae38`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.24-lab...proxmox-ve-v0.1.27-lab
 
