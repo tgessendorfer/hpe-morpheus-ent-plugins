@@ -44,7 +44,9 @@ build: provisioning into a resource pool and provisioning with
 instance deletion removed VM, server record and snippets. The test suite
 passes (29 tests).
 
-sha256 pending
+Built by the release workflow from the source at tag `proxmox-ve-v0.1.22-lab`.
+
+sha256 `c88e77033eb9d1604d99fb4da4233df6d407313ac684183a8844cad938b4faac`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.21-lab...proxmox-ve-v0.1.22-lab
 
