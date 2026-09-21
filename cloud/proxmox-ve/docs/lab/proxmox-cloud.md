@@ -606,3 +606,65 @@ build of any image is much slower than the rest.
 Windows images need cloudbase-init rather than cloud-init, plus virtio drivers
 installed before Proxmox will recognise the disk — see
 [`prepare_windows_image.md`](../prepare_windows_image.md).
+
+## Provisioning — verified 2026-09-21 on Morpheus 9.0.2 with PVE 9.2.20
+
+Up to 0.1.16 no instance had been provisioned through this cloud. The first
+attempts ended in `Provisioning failed: com.jcraft.jsch.JSchException: session
+is down`, and fixing that uncovered three more defects in turn. 0.1.21 is the
+first build that provisions end to end: `POST /api/instances` → `running` with
+an address, Morpheus agent checked in, console working, no manual step.
+
+**What the node must offer.** Root over SSH: the plugin runs `qm`, `pvesm` and
+writes snippets under `/var/lib/vz/snippets` with the host's SSH credentials
+and no sudo. The cloud form's *Node SSH Username/Password* is what to set;
+since 0.1.21 every sync copies it to the host record (up to 0.1.16 the host
+record was written once, on creation, and kept whatever it held). The storage
+`local` needs the `snippets` content type; the plugin adds it, and there is no
+API upload for snippets in PVE 9.2, so SSH stays a requirement. A failed login
+now fails within seconds, before the clone, with
+`SSH to Proxmox node '<node>' as <user>@<host> failed: ...`.
+
+**What the template must offer.** Cloud-init, `agent: 1` with the guest agent
+installed, and a `virtio` NIC. Debian's cloud kernel (`6.1.0-*-cloud-amd64`)
+ships no e1000e driver: 0.1.16 rewrote every NIC as `model=e1000e` after the
+clone, the guest booted, its agent answered, and it listed `lo` as its only
+interface. The NIC now keeps the template's model and MAC address.
+
+**How the VM is configured.** Morpheus's cloud-init user-data (users, hostname,
+agent install) goes to the node as `<vmid>-cloud-init-user-data.yml` and is
+attached with `cicustom user=local:snippets/...`. The network is not taken
+from Morpheus's network snippet, which names the interface `eth0` while the
+guest has `ens18`; the plugin sets Proxmox's `ipconfigN` per interface
+(`ip=dhcp`, or address, prefix and gateway from the network) and Proxmox
+generates a network-config that matches the NIC by MAC address. The VM's
+created users are the *Cloud-Init User* from the provisioning settings and,
+with `createUser`, the requesting Morpheus user's Linux account; the console
+logs in with the latter when its profile holds a Linux password.
+
+**What a run looks like.** Clone (seconds on the thin pool), snippet and
+`qm set` over SSH, start, then the plugin polls the guest agent for an IPv4
+address (up to 10 minutes; the lab guest answered after 13 seconds) and stores
+it on the server, then Morpheus waits for the agent, which checked in about
+30 seconds later. `config.proxmoxNode` may be left out when the cloud has one
+active node. Deleting the instance destroys the VM and removes the server
+record and the snippets, in about 8 seconds.
+
+**Failure modes and their log lines** (`/var/log/morpheus/morpheus-ui/current`):
+
+- `RpcService - Unable to log in via username/password. Host: … User: …` right
+  before `session is down`: the host record's SSH account; the exception names
+  neither.
+- `QEMU guest agent is not running` for minutes: the guest has no network or no
+  agent; with 0.1.16's e1000e NIC the agent came up after seven minutes and
+  reported only `lo`.
+- `Please select a network` on a request that worked before: a sync deleted
+  the cloud's networks. One transient `[B.getAt()` failure of the network
+  listing made `NetworkSync` remove `vmbr0`; the re-sync created it with a new
+  id. Fixed in 0.1.21 for every listing, but a network id from before that
+  sync is gone.
+- `Cannot get property 'name' on null object` when deleting a failed instance:
+  the server never got a parent node (fixed).
+
+Not verified: a static address from a Morpheus IP pool, a Windows guest, a
+multi-node cluster, a resize.
