@@ -235,9 +235,6 @@ class HostSync {
                         name        : cloudItem.node,
                         resourcePool: null,
                         uniqueId    : "${cloud.id}.${cloudItem.node}",
-                        //sshHost     : cloudItem.ipAddress,
-                        //sshUsername : hostUID,
-                        //sshPassword : hostPWD,
                         hostname    : cloudItem.hostName ?: cloudItem.node,
                         externalIp  : cloudItem.ipAddress,
                         platformVersion: getClusterVersion(),
@@ -259,6 +256,20 @@ class HostSync {
                         usedCpu     : usedCpuPercent.toLong(),
                         powerState  : (cloudItem.status == 'online') ? ComputeServer.PowerState.on : ComputeServer.PowerState.off
                 ]
+                // The cloud form's node SSH account is what provisioning uses on every node, so
+                // it wins over whatever the host record holds. A host created by an earlier build,
+                // or edited by hand, is repaired on the next sync; an empty cloud value changes
+                // nothing.
+                if (hostUID && hostPWD) {
+                    if (existingItem.sshUsername != hostUID) {
+                        log.info("Host ${cloudItem.node}: SSH user '${existingItem.sshUsername}' replaced by the cloud's node SSH user '${hostUID}'")
+                    }
+                    serverFieldValueMap.sshUsername = hostUID
+                    serverFieldValueMap.sshPassword = hostPWD
+                }
+                if (cloudItem.ipAddress && !existingItem.sshHost) {
+                    serverFieldValueMap.sshHost = cloudItem.ipAddress
+                }
 
                 Map capacityFieldValueMap = [
                         maxCores   : maxCpu.toLong(),

@@ -49,7 +49,13 @@ class VirtualImageLocationSync {
     def execute() {
         try {
             log.debug "Execute VirtualImageLocationSync STARTED: ${cloud.id}"
-            def cloudItems = ProxmoxApiComputeUtil.listTemplates(apiClient, authConfig).data
+            def listResults = ProxmoxApiComputeUtil.listTemplates(apiClient, authConfig)
+            // Never sync against a failed listing: an empty result would remove every image location
+            if (!listResults?.success || !(listResults.data instanceof Collection)) {
+                log.warn("VirtualImageLocationSync skipped for cloud ${cloud.id}: ${listResults?.msg ?: 'template listing failed'}")
+                return
+            }
+            def cloudItems = listResults.data
             log.debug("Proxmox templates found: $cloudItems")
 
             Observable domainRecords = context.async.virtualImage.location.listIdentityProjections(new DataQuery().withFilters([

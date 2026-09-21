@@ -22,7 +22,7 @@ class ProxmoxApiComputeUtil {
     static final Long API_CHECK_WAIT_INTERVAL = 2000
 
 
-    static addVMNics(HttpApiClient client, Map authConfig, List<ComputeServerInterface> newNics, String node, String vmId) {
+    static addVMNics(HttpApiClient client, Map authConfig, List<ComputeServerInterface> newNics, String node, String vmId, String nicModel = NIC_MODEL_LINUX) {
         try {
             def tokenCfg = getApiV2Token(authConfig).data
             def diskAddOpts = [
@@ -37,7 +37,7 @@ class ProxmoxApiComputeUtil {
             ]
 
             newNics.each { nic ->
-                diskAddOpts.body["$nic.externalId"] = "bridge=$nic.network.externalId,model=e1000e"
+                diskAddOpts.body["$nic.externalId"] = buildNicConfig(null, nic.network.externalId, nicModel)
             }
 
             def results = client.callJsonApi(
@@ -108,6 +108,194 @@ class ProxmoxApiComputeUtil {
         return storageContent?.find { item ->
             item?.volid?.toString()?.contains(expectedName)
         }?.volid?.toString()
+    }
+
+    /**
+     * The content types a storage offers on a node, as Proxmox lists them ("iso,vztmpl,backup").
+     * Null when the storage is not attached to the node or the listing fails.
+     */
+    static String getStorageContent(HttpApiClient client, Map authConfig, String nodeId, String storageId) {
+        ServiceResponse resp = callListApiV2(client, "nodes/$nodeId/storage", authConfig)
+        if (!resp?.success || !(resp.data instanceof Collection)) {
+            return null
+        }
+        return resp.data.find { it?.storage?.toString() == storageId }?.content?.toString()
+    }
+
+    /**
+     * Proxmox's own cloud-init network settings for the VM's interfaces, as arguments for
+     * qm set: [ipconfig0: 'ip=dhcp', ipconfig1: 'ip=10.0.0.5/24,gw=10.0.0.1', nameserver: '...',
+     * searchdomain: '...']. Proxmox then generates a network-config that matches each NIC by
+     * MAC address. A Morpheus network snippet names the interface (eth0) instead, which a
+     * Debian guest does not have, so the guest stayed without an address.
+     */
+    static Map<String, String> buildCloudInitNetworkSettings(Collection<ComputeServerInterface> interfaces) {
+        Map<String, String> rtn = [:]
+        List<String> nameservers = []
+        String searchDomain = null
+        interfaces?.eachWithIndex { ComputeServerInterface iface, int idx ->
+            String key = iface.externalId ==~ /net\d+/ ? iface.externalId.replace('net', 'ipconfig') : "ipconfig$idx"
+            def net = iface.subnet ?: iface.network
+            boolean useDhcp = !iface.ipAddress || iface.dhcp == true || iface.ipMode == 'dhcp'
+            if (useDhcp) {
+                rtn[key] = 'ip=dhcp'
+                return
+            }
+            Integer prefix = prefixLengthOf(net)
+            String config = "ip=${iface.ipAddress}/${prefix ?: 24}"
+            if (net?.gateway) {
+                config += ",gw=${net.gateway}"
+            }
+            rtn[key] = config
+            [net?.dnsPrimary, net?.dnsSecondary].each { String dns ->
+                if (dns && !nameservers.contains(dns)) {
+                    nameservers << dns
+                }
+            }
+            searchDomain = searchDomain ?: (iface.networkDomain?.name ?: net?.networkDomain?.name)
+        }
+        if (nameservers) {
+            rtn.nameserver = nameservers.join(' ')
+        }
+        if (searchDomain) {
+            rtn.searchdomain = searchDomain
+        }
+        return rtn
+    }
+
+    /**
+     * The prefix length of a network or subnet, from prefixLength, cidr or netmask.
+     */
+    static Integer prefixLengthOf(def net) {
+        if (net == null) {
+            return null
+        }
+        if (net.prefixLength) {
+            return net.prefixLength as Integer
+        }
+        String cidr = net.cidr?.toString()
+        if (cidr?.contains('/')) {
+            return cidr.substring(cidr.indexOf('/') + 1).toInteger()
+        }
+        return netmaskToPrefixLength(net.netmask?.toString())
+    }
+
+    static Integer netmaskToPrefixLength(String netmask) {
+        if (!netmask) {
+            return null
+        }
+        List<String> octets = netmask.tokenize('.')
+        if (octets.size() != 4) {
+            return null
+        }
+        int bits = 0
+        for (String octet : octets) {
+            bits += Integer.bitCount(octet.toInteger() & 0xFF)
+        }
+        return bits
+    }
+
+    static final String NIC_MODEL_LINUX = 'virtio'
+    static final String NIC_MODEL_WINDOWS = 'e1000e'
+
+    /**
+     * virtio for Linux guests: Debian's cloud kernel ships no e1000e driver, so an e1000e NIC
+     * is invisible to such a guest. e1000e for Windows, which has no virtio driver until one is
+     * installed.
+     */
+    static String nicModelFor(ComputeServer server) {
+        boolean windows = server?.osType == 'windows' || server?.serverOs?.platform?.toString() == 'windows'
+        return windows ? NIC_MODEL_WINDOWS : NIC_MODEL_LINUX
+    }
+
+    /**
+     * The netN value for a NIC on a bridge. An existing value keeps its model, MAC address and
+     * other options, so a resize neither swaps the device nor hands the guest a new address; a
+     * new NIC gets the given model and a MAC address from Proxmox.
+     */
+    static String buildNicConfig(String existing, String bridge, String model) {
+        String current = existing?.trim()
+        if (current) {
+            return current.contains('bridge=') ? current.replaceAll(/bridge=[^,]*/, "bridge=$bridge") : "$current,bridge=$bridge"
+        }
+        return "bridge=$bridge,model=$model"
+    }
+
+    static boolean storageContentHasSnippets(String content) {
+        return content?.split(',')?.collect { it.trim() }?.contains('snippets') ?: false
+    }
+
+    /**
+     * Whether the VM's config enables the QEMU guest agent: "1", "enabled=1" or either followed
+     * by further options.
+     */
+    static boolean guestAgentEnabled(Map vmConfig) {
+        String first = vmConfig?.agent?.toString()?.split(',')?.first()?.trim()
+        return first == '1' || first == 'enabled=1'
+    }
+
+    static String getVMStatus(HttpApiClient client, Map authConfig, String nodeId, String vmId) {
+        ServiceResponse resp = callListApiV2(client, "nodes/$nodeId/qemu/$vmId/status/current", authConfig)
+        if (!resp?.success || !(resp.data instanceof Map)) {
+            return null
+        }
+        return resp.data.status?.toString()
+    }
+
+    static List<String> getGuestAgentIpv4Addresses(HttpApiClient client, Map authConfig, String nodeId, String vmId) {
+        ServiceResponse resp = callListApiV2(client, "nodes/$nodeId/qemu/$vmId/agent/network-get-interfaces", authConfig)
+        if (!resp?.success || !(resp.data instanceof Map)) {
+            return []
+        }
+        return extractGuestIpv4Addresses(resp.data)
+    }
+
+    /**
+     * The usable IPv4 addresses in a guest agent network-get-interfaces result: loopback and
+     * link-local addresses are skipped.
+     */
+    static List<String> extractGuestIpv4Addresses(Map agentResult) {
+        List<String> rtn = []
+        agentResult?.result?.each { iface ->
+            iface?.'ip-addresses'?.each { addr ->
+                String ip = addr?.'ip-address'?.toString()
+                if (addr?.'ip-address-type' == 'ipv4' && ip && !ip.startsWith('127.') && !ip.startsWith('169.254.')) {
+                    rtn << ip
+                }
+            }
+        }
+        return rtn
+    }
+
+    /**
+     * Waits until the VM runs and its guest agent reports an IPv4 address. Returns
+     * [success, ipAddress, status]; status is null when the VM cannot be queried at all.
+     */
+    static Map waitForGuestIp(HttpApiClient client, Map authConfig, String nodeId, String vmId, Long timeoutInSec, Long intervalMs = 10000L) {
+        Map rtn = [success: false, ipAddress: null, status: null]
+        Long started = System.currentTimeMillis()
+        Long deadline = started + timeoutInSec * 1000
+        while (true) {
+            try {
+                rtn.status = getVMStatus(client, authConfig, nodeId, vmId)
+                if (rtn.status == 'running') {
+                    List<String> ips = getGuestAgentIpv4Addresses(client, authConfig, nodeId, vmId)
+                    if (ips) {
+                        rtn.ipAddress = ips.first()
+                        rtn.success = true
+                        log.debug("VM $vmId reports IP ${rtn.ipAddress} after ${(System.currentTimeMillis() - started) / 1000}s")
+                        return rtn
+                    }
+                }
+            } catch (e) {
+                log.warn("Error while waiting for the guest IP of VM $vmId: ${e.message}")
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                log.warn("VM $vmId reported no IPv4 address through the guest agent within ${timeoutInSec}s (status: ${rtn.status})")
+                return rtn
+            }
+            sleep(intervalMs)
+        }
     }
 
 
@@ -270,7 +458,7 @@ class ProxmoxApiComputeUtil {
 
 
 
-    static resizeVM(HttpApiClient client, Map authConfig, String node, String vmId, Long cpu, Long ram, List<StorageVolume> volumes, List<ComputeServerInterface> nics) {
+    static resizeVM(HttpApiClient client, Map authConfig, String node, String vmId, Long cpu, Long ram, List<StorageVolume> volumes, List<ComputeServerInterface> nics, String nicModel = NIC_MODEL_LINUX) {
         log.debug("resizeVMCompute")
         Long ramValue = ram / 1024 / 1024
 
@@ -327,14 +515,9 @@ class ProxmoxApiComputeUtil {
                 }
             }
 
-//            def counter = 0
-//            targetNetworks.each {network ->
-//                opts.body["net$counter"] = "bridge=$network,model=e1000e"
-//                counter++
-//            }
-
+            Map vmConfig = getVMConfigById(client, authConfig, vmId, node)
             nics.each { nic ->
-                opts.body["$nic.externalId"] = "bridge=$nic.network.externalId,model=e1000e"
+                opts.body["$nic.externalId"] = buildNicConfig(vmConfig?.get(nic.externalId)?.toString(), nic.network.externalId, nicModel)
             }
 
             log.debug("Setting VM Compute Size $vmId on node $node...")
@@ -502,7 +685,7 @@ class ProxmoxApiComputeUtil {
             }
 
             log.debug("Resizing newly cloned VM. Spec: CPU: $vcpus,\n RAM: $ram,\n Volumes: $volumes,\n NICs: $nics")
-            ServiceResponse rtnResize = resizeVM(new HttpApiClient(), authConfig, nodeId, nextId, vcpus, ram, volumes, nics)
+            ServiceResponse rtnResize = resizeVM(new HttpApiClient(), authConfig, nodeId, nextId, vcpus, ram, volumes, nics, nicModelFor(server))
 
             if (!rtnResize?.success) {
                 log.error("Resize failed for VM $nextId: ${rtnResize.msg}")
@@ -1016,7 +1199,14 @@ class ProxmoxApiComputeUtil {
         var allowedDatastores = ["rbd", "cifs", "zfspool", "nfs", "lvmthin", "lvm", "cephfs", "iscsi", "dir"]
         Collection<Map> validDatastores = []
         ServiceResponse datastoreResults = callListApiV2(client, "storage", authConfig)
-        def queryNode = getProxmoxHypervisorNodeIds(client, authConfig).data[0]
+        if (!datastoreResults?.success || !(datastoreResults.data instanceof Collection)) {
+            return ServiceResponse.error("Unable to list the cluster's storages: ${datastoreResults?.msg}")
+        }
+        ServiceResponse nodeList = getProxmoxHypervisorNodeIds(client, authConfig)
+        if (!nodeList?.success || !nodeList.data) {
+            return ServiceResponse.error("Unable to list the cluster's nodes: ${nodeList?.msg}")
+        }
+        def queryNode = nodeList.data[0]
 
         datastoreResults.data.each { Map ds ->
             if (allowedDatastores.contains(ds.type)) {
@@ -1070,12 +1260,20 @@ class ProxmoxApiComputeUtil {
         log.debug("listProxmoxNetworks...")
 
         Collection<Map> networks = []
-        List<String> hosts = getProxmoxHypervisorNodeIds(client, authConfig).data
+        List<String> failedHosts = []
+        ServiceResponse hostList = getProxmoxHypervisorNodeIds(client, authConfig)
+        if (!hostList?.success || !(hostList.data instanceof Collection)) {
+            return ServiceResponse.error("Unable to list the cluster's nodes: ${hostList?.msg}")
+        }
+        List<String> hosts = hostList.data
 
         hosts.each { host ->
             try {
                 ServiceResponse hostNetworks = callListApiV2(client, "nodes/$host/network", authConfig)
-                if (hostNetworks.success && hostNetworks.data) {
+                if (!hostNetworks.success) {
+                    log.warn("Failed to get networks for host ${host}: ${hostNetworks.msg}")
+                    failedHosts << host
+                } else if (hostNetworks.data) {
                     hostNetworks.data.each { Map network ->
                         if (['bridge', 'vlan'].contains(network?.type)) {
                             network.networkAddress = ""
@@ -1091,7 +1289,13 @@ class ProxmoxApiComputeUtil {
                 }
             } catch (Exception e) {
                 log.warn("Failed to get networks for host ${host}: ${e.message}")
+                failedHosts << host
             }
+        }
+        // A listing that failed on any node is no listing: reporting the networks that were
+        // read as the whole cluster would make the sync delete the rest.
+        if (failedHosts) {
+            return ServiceResponse.error("Unable to list the networks of node(s) ${failedHosts.join(', ')}")
         }
 
         try {
@@ -1168,6 +1372,9 @@ class ProxmoxApiComputeUtil {
         log.debug("API Util listTemplates")
         def vms = []
         def qemuVMs = callListApiV2(client, "cluster/resources", authConfig)
+        if (!qemuVMs?.success || !(qemuVMs.data instanceof Collection)) {
+            return ServiceResponse.error("Unable to list the cluster's resources: ${qemuVMs?.msg}")
+        }
         qemuVMs.data.each { Map vm ->
             if (vm?.template == 1 && vm?.type == "qemu") {
                 vm.ip = ""
@@ -1226,6 +1433,9 @@ class ProxmoxApiComputeUtil {
         log.debug("API Util listLXCs")
         def containers = []
         def resources = callListApiV2(client, "cluster/resources", authConfig)
+        if (!resources?.success || !(resources.data instanceof Collection)) {
+            return ServiceResponse.error("Unable to list the cluster's resources: ${resources?.msg}")
+        }
         resources.data.each { Map ct ->
             if (ct?.type != "lxc" || ct?.template == 1) return
             def cfg = callListApiV2(client, "nodes/$ct.node/lxc/$ct.vmid/config", authConfig)
@@ -1282,6 +1492,9 @@ class ProxmoxApiComputeUtil {
         log.debug("API Util listVMs")
         def vms = []
         def qemuVMs = callListApiV2(client, "cluster/resources", authConfig)
+        if (!qemuVMs?.success || !(qemuVMs.data instanceof Collection)) {
+            return ServiceResponse.error("Unable to list the cluster's resources: ${qemuVMs?.msg}")
+        }
         qemuVMs.data.each { Map vm ->
             if (vm?.template == 0 && vm?.type == "qemu") {
                 def vmAgentInfo = callListApiV2(client, "nodes/$vm.node/qemu/$vm.vmid/agent/network-get-interfaces", authConfig)
@@ -1326,19 +1539,25 @@ class ProxmoxApiComputeUtil {
     }
 
 
+    /**
+     * The VM's config as Proxmox reports it, or null when the VM cannot be read.
+     */
     static Map getVMConfigById(HttpApiClient client, Map authConfig, String vmId, String nodeId = "0") {
 
         //proxmox api limitation. If we don't have the node we need to query all
-        if (nodeId == 0) {
-            Map vm = listVMs(client, authConfig).data.find { it.vmid == vmId }
+        if (!nodeId || nodeId == "0") {
+            Map vm = listVMs(client, authConfig).data.find { it.vmid?.toString() == vmId?.toString() }
             if (!vm) {
                 throw new Exception("Error: VM with ID $vmId not found.")
             }
-            nodeId = vm.node as Long
+            nodeId = vm.node?.toString()
         }
-        def vmConfigInfo = callListApiV2(client, "nodes/$nodeId/qemu/$vmId/config", authConfig)
-
-        return vmConfigInfo.data.data
+        ServiceResponse vmConfigInfo = callListApiV2(client, "nodes/$nodeId/qemu/$vmId/config", authConfig)
+        if (!vmConfigInfo?.success || !(vmConfigInfo.data instanceof Map)) {
+            log.warn("Could not read the config of VM $vmId on node $nodeId: ${vmConfigInfo?.msg}")
+            return null
+        }
+        return vmConfigInfo.data
     }
 
 
@@ -1346,7 +1565,11 @@ class ProxmoxApiComputeUtil {
         log.debug("listProxmoxPools...")
         def pools = []
 
-        List<Map> poolIds = callListApiV2(client, "pools", authConfig).data
+        ServiceResponse poolList = callListApiV2(client, "pools", authConfig)
+        if (!poolList?.success || !(poolList.data instanceof Collection)) {
+            return ServiceResponse.error("Unable to list the cluster's pools: ${poolList?.msg}")
+        }
+        List<Map> poolIds = poolList.data
 
         poolIds.each { Map pool ->
             Map poolData = callListApiV2(client, "pools/$pool.poolid", authConfig).data
@@ -1556,7 +1779,13 @@ class ProxmoxApiComputeUtil {
                 client.callJsonApi(authConfig.apiUrl, actualPath, queryString, null, opts, 'GET') :
                 client.callJsonApi(authConfig.apiUrl, actualPath, null, null, opts, 'GET')
             
-            def resultData = results.toMap().data.data
+            // The client hands a body it did not parse over as byte[]; read it as JSON before
+            // unwrapping, instead of failing with "No signature of method: [B.getAt()".
+            def body = results.data
+            if (body instanceof byte[]) {
+                body = body.length ? new JsonSlurper().parseText(new String(body, 'UTF-8')) : null
+            }
+            def resultData = (body instanceof Map) ? body.data : null
             log.debug("callListApiV2 results: ${resultData}")
             if(results?.success && !results?.hasErrors()) {
                 rtn.success = true

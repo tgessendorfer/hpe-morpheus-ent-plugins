@@ -15,7 +15,7 @@
 - [X] Add reconfigure for nics
 - [ ] Investigate "Starting determineSshRoute with hostList: []" when skipping agent
 - [ ] Fix validation errors not appearing in instance wizard
-- [ ] Improve ssh error tracking
+- [X] Improve ssh error tracking
 - [X] Add LICENSE
 - [ ] Populate README
 - [ ] Jar Folder

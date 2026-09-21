@@ -47,7 +47,13 @@ class VMSync {
     def execute() {
         try {
             log.debug "Execute VMSync STARTED: ${cloud.id}"
-            def cloudItems = ProxmoxApiComputeUtil.listVMs(apiClient, authConfig).data
+            def listResults = ProxmoxApiComputeUtil.listVMs(apiClient, authConfig)
+            // Never sync against a failed listing: an empty result would remove every VM
+            if (!listResults?.success || !(listResults.data instanceof Collection)) {
+                log.warn("VMSync skipped for cloud ${cloud.id}: ${listResults?.msg ?: 'VM listing failed'}")
+                return
+            }
+            def cloudItems = listResults.data
             // Sync BOTH managed and unmanaged VMs
             def domainRecords = context.async.computeServer.listIdentityProjections(cloud.id, null).filter {
                 it.computeServerTypeCode in ['proxmox-qemu-vm', 'proxmox-qemu-vm-unmanaged']

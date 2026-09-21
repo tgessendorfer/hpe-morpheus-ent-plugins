@@ -88,8 +88,9 @@ class ProxmoxMiscUtil {
 
             // Create and write to the file
             long startTime = System.currentTimeMillis();
-            log.debug("SFTP: Creating file ${destFilePath} on ${host} (${content.length()} bytes)")
-            ByteArrayInputStream inputStream = new ByteArrayInputStream(content.getBytes("UTF-8"))
+            String body = content ?: ''
+            log.debug("SFTP: Creating file ${destFilePath} on ${host} (${body.length()} bytes)")
+            ByteArrayInputStream inputStream = new ByteArrayInputStream(body.getBytes("UTF-8"))
             channelSftp.put(inputStream, destFilePath)
             long endTime = System.currentTimeMillis()
             long duration = (endTime - startTime) / 1000

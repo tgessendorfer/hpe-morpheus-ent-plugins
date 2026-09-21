@@ -23,17 +23,60 @@ class ProxmoxSshUtil {
     static Integer SSH_PORT = 22
     static Integer DEFAULT_TEMPLATE_CPUS = 1
     static Long DEFAULT_TEMPLATE_MEMORY = 1024L
+    static String SNIPPETS_STORAGE = "local"
+    static String SNIPPETS_DIR = "/var/lib/vz/snippets"
+    static String SSH_HINT = "Check the SSH credentials of the host under the cloud's Hosts tab; the user must be root."
 
+    /**
+     * Proves that Morpheus can run qm on the node over SSH before anything is created there.
+     * A failed login otherwise surfaces after the clone as an opaque "session is down", and
+     * leaves a stopped VM behind.
+     */
+    static void checkSshAccess(MorpheusContext context, ComputeServer hvNode) {
+        String target = "${hvNode.sshUsername}@${hvNode.sshHost}"
+        TaskResult result
+        try {
+            result = context.executeSshCommand(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "qm list >/dev/null", "", "", "", false, LogLevel.info, true, null, false).blockingGet()
+        } catch (Exception e) {
+            throw new Exception("SSH to Proxmox node '${hvNode.externalId}' as $target failed: ${e.message}. $SSH_HINT", e)
+        }
+        if (!result?.success) {
+            String detail = result?.error ?: result?.output ?: "exit code ${result?.exitCode}"
+            throw new Exception("SSH to Proxmox node '${hvNode.externalId}' as $target cannot run qm: ${detail}. $SSH_HINT")
+        }
+        log.debug("SSH access to Proxmox node '${hvNode.externalId}' as $target verified")
+    }
+
+    /**
+     * cicustom needs a storage that offers snippets. A fresh Proxmox install has none: 'local'
+     * carries iso, vztmpl and backup only, and Proxmox refuses the snippet reference with
+     * "storage 'local' does not support content type 'snippets'".
+     */
+    static void ensureSnippetsStorage(MorpheusContext context, HttpApiClient client, Map authConfig, ComputeServer hvNode) {
+        String content = ProxmoxApiComputeUtil.getStorageContent(client, authConfig, hvNode.externalId, SNIPPETS_STORAGE)
+        if (content != null && !ProxmoxApiComputeUtil.storageContentHasSnippets(content)) {
+            log.info("Storage '$SNIPPETS_STORAGE' on node ${hvNode.externalId} offers no snippets (content: $content); adding the content type")
+            runSshCmd(context, hvNode, "pvesm set $SNIPPETS_STORAGE --content ${content},snippets")
+        }
+        log.debug("Ensuring snippets directory on node: $hvNode.externalId")
+        runSshCmd(context, hvNode, "mkdir -p $SNIPPETS_DIR")
+    }
+
+    /**
+     * Writes Morpheus's cloud-init user-data as a snippet and points the VM at it, attaches the
+     * cloud-init drive, and sets the network through Proxmox's own ipconfigN (see
+     * {@link ProxmoxApiComputeUtil#buildCloudInitNetworkSettings}). Morpheus's network snippet
+     * is not used: it names the interface eth0, and Proxmox's generated network-config matches
+     * the NIC by MAC address instead.
+     */
     static void createCloudInitDrive(MorpheusContext context, HttpApiClient client, Map authConfig,
                                      ComputeServer hvNode, WorkloadRequest workloadRequest,
-                                     String vmId, String datastoreId) {
+                                     String vmId, String datastoreId, Map<String, String> networkSettings) {
         log.debug("Configuring Cloud-Init")
-        log.debug("Ensuring snippets directory on node: $hvNode.externalId")
-        runSshCmd(context, hvNode, "mkdir -p /var/lib/vz/snippets")
-        log.debug("Creating cloud-init user-data file on hypervisor node: /var/lib/vz/snippets/$vmId-cloud-init-user-data.yml")
-        ProxmoxMiscUtil.sftpCreateFile(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "/var/lib/vz/snippets/$vmId-cloud-init-user-data.yml", workloadRequest.cloudConfigUser, null)
-        log.debug("Creating cloud-init network file on hypervisor node: /var/lib/vz/snippets/$vmId-cloud-init-network.yml")
-        ProxmoxMiscUtil.sftpCreateFile(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "/var/lib/vz/snippets/$vmId-cloud-init-network.yml", workloadRequest.cloudConfigNetwork, null)
+        ensureSnippetsStorage(context, client, authConfig, hvNode)
+        String userFile = "$vmId-cloud-init-user-data.yml"
+        log.debug("Creating cloud-init user-data file on hypervisor node: $SNIPPETS_DIR/$userFile")
+        ProxmoxMiscUtil.sftpCreateFile(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "$SNIPPETS_DIR/$userFile", workloadRequest.cloudConfigUser, null)
         String existingCloudInitVolume = ProxmoxApiComputeUtil.findCloudInitVolume(
                 client, authConfig, hvNode.externalId, datastoreId, vmId)
         if (existingCloudInitVolume) {
@@ -44,8 +87,31 @@ class ProxmoxSshUtil {
             runSshCmd(context, hvNode, "qm set $vmId --ide2 $datastoreId:cloudinit")
         }
         log.debug("Mounting cloud-init data to disk...")
-        String ciMountCommand = "qm set $vmId --cicustom \"user=local:snippets/$vmId-cloud-init-user-data.yml,network=local:snippets/$vmId-cloud-init-network.yml\""
-        runSshCmd(context, hvNode, ciMountCommand)
+        runSshCmd(context, hvNode, "qm set $vmId --cicustom \"user=$SNIPPETS_STORAGE:snippets/$userFile\"")
+        Map<String, String> settings = networkSettings ?: [:]
+        if (!settings) {
+            Map vmConfig = ProxmoxApiComputeUtil.getVMConfigById(client, authConfig, vmId, hvNode.externalId)
+            if (!vmConfig?.ipconfig0) {
+                settings = [ipconfig0: 'ip=dhcp']
+            }
+        }
+        if (settings) {
+            log.info("Cloud-init network for VM $vmId: $settings")
+            String args = settings.collect { key, value -> "--$key '${value.replace("'", "")}'" }.join(' ')
+            runSshCmd(context, hvNode, "qm set $vmId $args")
+        }
+    }
+
+    /**
+     * Removes the cloud-init snippets written for a VM. Both names are matched so a snippet
+     * from an earlier build, which also wrote a network file, goes too.
+     */
+    static void removeCloudInitSnippets(MorpheusContext context, ComputeServer hvNode, String vmId) {
+        if (!(vmId ==~ /\d+/)) {
+            return
+        }
+        log.debug("Removing cloud-init snippets of VM $vmId on node ${hvNode.externalId}")
+        runSshCmd(context, hvNode, "rm -f $SNIPPETS_DIR/$vmId-cloud-init-user-data.yml $SNIPPETS_DIR/$vmId-cloud-init-network.yml")
     }
 
     /**

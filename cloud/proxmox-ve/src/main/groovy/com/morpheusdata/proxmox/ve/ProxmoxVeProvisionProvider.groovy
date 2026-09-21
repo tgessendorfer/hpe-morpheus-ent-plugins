@@ -61,6 +61,11 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
     private static final String VALIDATION_MSG_DATASTORE_NOT_ATTACHED = "Invalid instance config: Selected datastore '%s' is not attached to selected node '%s'."
     private static final String VALIDATION_MSG_NETWORK_NOT_ATTACHED = "Invalid instance config: Selected network '%s' is not attached to selected node '%s'."
 
+    // How long runWorkload waits for the guest agent to report an IP after the VM starts
+    private static final Long GUEST_IP_TIMEOUT_SEC = 600L
+    // How long getServerDetails waits when Morpheus asks again later
+    private static final Long SERVER_DETAILS_TIMEOUT_SEC = 60L
+
 	protected MorpheusContext context
 	protected ProxmoxVePlugin plugin
 
@@ -422,7 +427,13 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
         def rtn = ServiceResponse.success()
 
         if (!opts.config.proxmoxNode) {
-            rtn.addError("proxmoxNode", VALIDATION_MSG_NO_NODE)
+            String defaultNode = resolveDefaultNode(opts.zoneId?.toString()?.toLong())
+            if (defaultNode) {
+                log.info("No Proxmox node selected; using the cloud's only active node '$defaultNode'")
+                opts.config.proxmoxNode = defaultNode
+            } else {
+                rtn.addError("proxmoxNode", VALIDATION_MSG_NO_NODE)
+            }
         }
 
         if (!opts.config.imageId) {
@@ -481,13 +492,26 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 		log.debug("Cloud-Init User-Data User: $workloadRequest.cloudConfigUser")
 		log.debug("Cloud-Init User-Data Network: $workloadRequest.cloudConfigNetwork")
 
+		ComputeServer server = workload.server
 		try {
-			ComputeServer server = workload.server
 			Cloud cloud = server.cloud
 			VirtualImage virtualImage = server.sourceImage
 			Map authConfig = plugin.getAuthConfig(cloud)
 			HttpApiClient client = new HttpApiClient()
-			String nodeId = workload.server.getConfigProperty('proxmoxNode') ?: null
+			String nodeId = server.getConfigProperty('proxmoxNode') ?: null
+			if (!nodeId) {
+				nodeId = resolveDefaultNode(cloud.id)
+				if (!nodeId) {
+					return new ServiceResponse<ProvisionResponse>(
+							false,
+							"No Proxmox node selected, and the cloud has no single active node to default to.",
+							null,
+							new ProvisionResponse(success: false)
+					)
+				}
+				log.info("No Proxmox node selected for ${server.name}; using the cloud's only active node '$nodeId'")
+				server.setConfigProperty('proxmoxNode', nodeId)
+			}
 
 			List<String> targetNetworks = server.getInterfaces().collect { it.network.externalId }
 
@@ -496,7 +520,7 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 			}
 
 			ComputeServer hvNode = getHypervisorHostByExternalId(cloud.id, nodeId)
-			if (!hvNode.sshHost || !hvNode.sshUsername || !hvNode.sshPassword) {
+			if (!hvNode?.sshHost || !hvNode?.sshUsername || !hvNode?.sshPassword) {
 				return new ServiceResponse<ProvisionResponse>(
 						false,
 						"SSH credentials required on host for provisioning to work. Edit the hypervisor host properties under the cloud Hosts tab.",
@@ -506,6 +530,8 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 						)
 				)
 			}
+			// Fail here, before anything is created on the node, when the SSH login does not work
+			ProxmoxSshUtil.checkSshAccess(context, hvNode)
 
 			DatastoreIdentity imgDS
 			try {
@@ -608,12 +634,38 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 					actualStorage = server.volumes.find {it.rootVolume }?.datastore?.externalId
 				}
 				log.debug("Using storage '$actualStorage' for Cloud-Init drive")
-				ProxmoxSshUtil.createCloudInitDrive(context, client, authConfig, hvNode, workloadRequest, rtnClone.data.vmId, actualStorage)
+				Map<String, String> networkSettings = ProxmoxApiComputeUtil.buildCloudInitNetworkSettings(server.interfaces)
+				ProxmoxSshUtil.createCloudInitDrive(context, client, authConfig, hvNode, workloadRequest, rtnClone.data.vmId, actualStorage, networkSettings)
 			} else {
 				log.debug("Non Cloud-Init deployment...")
 			}
 
-			ProxmoxApiComputeUtil.startVM(client, authConfig, nodeId, rtnClone.data.vmId)
+			String vmId = rtnClone.data.vmId
+			def startResult = ProxmoxApiComputeUtil.startVM(client, authConfig, nodeId, vmId)
+			if (!startResult?.success) {
+				throw new Exception("Starting VM $vmId on node $nodeId failed: ${startResult?.msg ?: startResult?.error ?: startResult?.content ?: 'no response'}")
+			}
+			log.info("VM $vmId (${server.name}) started on node $nodeId")
+
+			// Learn the address from the guest agent, so Morpheus has it for the agent install
+			// and the console without waiting for the Morpheus agent to check in.
+			String ipAddress = null
+			Map vmConfig = ProxmoxApiComputeUtil.getVMConfigById(client, authConfig, vmId, nodeId)
+			if (ProxmoxApiComputeUtil.guestAgentEnabled(vmConfig)) {
+				Map guest = ProxmoxApiComputeUtil.waitForGuestIp(client, authConfig, nodeId, vmId, GUEST_IP_TIMEOUT_SEC)
+				if (guest.success) {
+					ipAddress = guest.ipAddress
+					log.info("VM $vmId (${server.name}) is up at $ipAddress")
+					server.internalIp = ipAddress
+					server.externalIp = ipAddress
+					server.sshHost = ipAddress
+					server = saveAndGet(server)
+				} else {
+					log.warn("VM $vmId (${server.name}) reported no IP within ${GUEST_IP_TIMEOUT_SEC}s; leaving the address to the Morpheus agent")
+				}
+			} else {
+				log.info("VM $vmId (${server.name}) has no QEMU guest agent enabled; leaving the address to the Morpheus agent")
+			}
 
 			return new ServiceResponse<ProvisionResponse>(
 					true,
@@ -624,14 +676,24 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 							skipNetworkWait: false,
 							installAgent: false,
 							externalId: server.externalId,
+							publicIp: ipAddress,
+							privateIp: ipAddress,
 							noAgent: skipAgent
 					)
 			)
 		} catch(e) {
-			log.error("Error during provisioning: ${e}")
+			String errorMessage = e.message ?: e.toString()
+			log.error("Error during provisioning: ${errorMessage}", e)
+			try {
+				server.statusMessage = "Provisioning failed: ${errorMessage}"
+				server.status = 'failed'
+				saveAndGet(server)
+			} catch (saveError) {
+				log.warn("Could not record the provisioning failure on server ${server?.id}: ${saveError.message}")
+			}
 			return new ServiceResponse<ProvisionResponse>(
 					false,
-					"Provisioning failed: ${e}",
+					"Provisioning failed: ${errorMessage}",
 					null,
 					new ProvisionResponse(success: false)
 			)
@@ -763,6 +825,49 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 			}
 		}
 		return rtn
+	}
+
+
+	/**
+	 * Best effort: the cloud-init snippets of a destroyed VM hold the user-data with its
+	 * password hashes, so they go with the VM. Needs the node's SSH login; a failure is logged.
+	 */
+	private void removeCloudInitSnippets(Cloud cloud, String nodeId, String vmId) {
+		try {
+			ComputeServer hvNode = getHypervisorHostByExternalId(cloud.id, nodeId)
+			if (hvNode?.sshHost && hvNode?.sshUsername && hvNode?.sshPassword) {
+				ProxmoxSshUtil.removeCloudInitSnippets(context, hvNode, vmId)
+			} else {
+				log.warn("No SSH login for node $nodeId; the cloud-init snippets of VM $vmId stay on the node")
+			}
+		} catch (e) {
+			log.warn("Could not remove the cloud-init snippets of VM $vmId on node $nodeId: ${e.message}")
+		}
+	}
+
+
+	/**
+	 * The node to provision on when the request names none: the cloud's only active node.
+	 * With several active nodes the caller still has to choose, and null comes back.
+	 */
+	private String resolveDefaultNode(Long cloudId) {
+		if (!cloudId) {
+			return null
+		}
+		List<Long> ids = []
+		context.async.computeServer.listIdentityProjections(cloudId, null).filter { ComputeServerIdentityProjection projection ->
+			projection.category == "proxmox.ve.host.${cloudId}".toString()
+		}.blockingSubscribe { ids << it.id }
+		if (!ids) {
+			return null
+		}
+		List<ComputeServer> activeNodes = []
+		context.async.computeServer.listById(ids).blockingSubscribe { ComputeServer node ->
+			if (node.powerState == ComputeServer.PowerState.on) {
+				activeNodes << node
+			}
+		}
+		return activeNodes.size() == 1 ? activeNodes.first().externalId : null
 	}
 
 
@@ -968,9 +1073,28 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 			Cloud cloud = server.cloud
 			Map authConfig = plugin.getAuthConfig(cloud)
 
-			ProxmoxApiComputeUtil.stopVM(stopClient, authConfig, server.parentServer.name, server.externalId)
+			// A provision that failed before the clone has no VM to remove
+			if (!server.externalId) {
+				log.info("Server ${server.name} has no Proxmox VM; nothing to destroy")
+				return ServiceResponse.success()
+			}
+			String nodeId = server.parentServer?.externalId ?: server.parentServer?.name ?: server.getConfigProperty('proxmoxNode')
+			if (!nodeId) {
+				nodeId = ProxmoxApiComputeUtil.findNodeForVM(deleteClient, authConfig, server.externalId)
+			}
+			if (!nodeId) {
+				log.warn("VM ${server.externalId} of server ${server.name} is on no node of the cluster; nothing to destroy")
+				return ServiceResponse.success()
+			}
+
+			ProxmoxApiComputeUtil.stopVM(stopClient, authConfig, nodeId, server.externalId)
 			sleep(5000)
-			return ProxmoxApiComputeUtil.destroyVM(deleteClient, authConfig, server.parentServer.name, server.externalId)
+			def destroyResult = ProxmoxApiComputeUtil.destroyVM(deleteClient, authConfig, nodeId, server.externalId)
+			if (!destroyResult?.success) {
+				return ServiceResponse.error("Destroying VM ${server.externalId} on node $nodeId failed: ${destroyResult?.msg ?: destroyResult?.error ?: destroyResult?.content}")
+			}
+			removeCloudInitSnippets(cloud, nodeId, server.externalId)
+			return ServiceResponse.success()
 		} catch (e) {
 			log.error "Error performing destroy on VM: ${e}", e
 			return ServiceResponse.error("Error performing destroy on VM: ${e}")
@@ -986,7 +1110,21 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 	 */
 	@Override
 	ServiceResponse<ProvisionResponse> getServerDetails(ComputeServer server) {
-		return new ServiceResponse<ProvisionResponse>(true, null, null, new ProvisionResponse(success:true))
+		ProvisionResponse rtn = new ProvisionResponse(success: true, externalId: server.externalId)
+		String nodeId = server.parentServer?.externalId ?: server.parentServer?.name ?: server.getConfigProperty('proxmoxNode')
+		if (server.externalId && nodeId) {
+			HttpApiClient client = new HttpApiClient()
+			Map authConfig = plugin.getAuthConfig(server.cloud)
+			Map vmConfig = ProxmoxApiComputeUtil.getVMConfigById(client, authConfig, server.externalId, nodeId)
+			Long timeout = ProxmoxApiComputeUtil.guestAgentEnabled(vmConfig) ? SERVER_DETAILS_TIMEOUT_SEC : 0L
+			Map guest = ProxmoxApiComputeUtil.waitForGuestIp(client, authConfig, nodeId, server.externalId, timeout)
+			if (guest.status == null) {
+				return ServiceResponse.error("VM ${server.externalId} not found on node $nodeId")
+			}
+			rtn.publicIp = guest.ipAddress
+			rtn.privateIp = guest.ipAddress
+		}
+		return new ServiceResponse<ProvisionResponse>(true, null, null, rtn)
 	}
 
 	/**
@@ -1153,7 +1291,7 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 			log.debug("Resizing VM with specs: ${allocationSpecs}")
 			log.debug("Resizing vm: ${computeServer.name} with $computeServer.coresPerSocket cores and $computeServer.maxMemory memory")
 
-			def resizeResult = ProxmoxApiComputeUtil.resizeVM(resizeClient, authConfigMap, computeServer.parentServer.name, computeServer.externalId, requestedCores, requestedMemory, computeServer.volumes?.toList() ?: [], computeServer.interfaces?.toList() ?: [])
+			def resizeResult = ProxmoxApiComputeUtil.resizeVM(resizeClient, authConfigMap, computeServer.parentServer.name, computeServer.externalId, requestedCores, requestedMemory, computeServer.volumes?.toList() ?: [], computeServer.interfaces?.toList() ?: [], ProxmoxApiComputeUtil.nicModelFor(computeServer))
 
 			if (!resizeResult.success) {
 					log.error("Resize API call failed: ${resizeResult.msg}")
@@ -1300,7 +1438,7 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 				ComputeServerInterface newInterface = new ComputeServerInterface(newInterfaceProps)
 				newInterfaces << newInterface
 			}
-			responses << ProxmoxApiComputeUtil.addVMNics(resizeClient, authConfigMap, newInterfaces, extNodeId, extServerId)
+			responses << ProxmoxApiComputeUtil.addVMNics(resizeClient, authConfigMap, newInterfaces, extNodeId, extServerId, ProxmoxApiComputeUtil.nicModelFor(server))
 			context.async.computeServer.computeServerInterface.create(newInterfaces, server).blockingGet()
 		}
 

@@ -13,6 +13,116 @@ new number, and why the digests are recorded.
 
 ---
 
+## 0.1.21
+
+**Provisioning checks the node's SSH login before it clones, and a provisioned
+VM starts and reports its address.** Lab provisions on Morpheus 9.0.2 ended in
+`Provisioning failed: com.jcraft.jsch.JSchException: session is down`, with a
+stopped VM left on the node and no cloud-init data in it. The cause was the SSH
+login Morpheus uses on the hypervisor host (the host's SSH user and password
+under the cloud's *Hosts* tab): the plugin writes the cloud-init snippets and
+runs `qm set` over that login *after* the clone, so a login that fails surfaced
+late, with an opaque message, and left the VM behind.
+
+- **SSH preflight.** Before the clone, the plugin runs `qm list` on the node
+  with the host's SSH credentials. A failed login now fails the provision at
+  once with `SSH to Proxmox node '<node>' as <user>@<host> failed: ...`, nothing
+  is created on the node, and the message is stored on the server record. The
+  SSH user must be root: `qm` and `pvesm` run without sudo.
+- **Snippets storage.** `cicustom` needs a storage that offers `snippets`, and
+  a fresh Proxmox install has none (`local` carries iso, vztmpl and backup).
+  When `local` lacks it, the plugin adds it with `pvesm set`, then creates
+  `/var/lib/vz/snippets`.
+- **The NIC keeps the template's model; a new NIC is virtio.** After the clone
+  the plugin rewrote every NIC as `bridge=<bridge>,model=e1000e`, which also
+  gave it a new MAC address. Debian's cloud kernel ships no e1000e driver: the
+  lab guest booted, its guest agent answered, and it listed `lo` as its only
+  interface. The NIC now keeps what the template gave it (model, MAC address
+  and other options; only the bridge follows Morpheus), and a NIC added on
+  resize is `virtio` for Linux guests and `e1000e` for Windows, which has no
+  virtio driver until one is installed. A resize no longer changes MAC
+  addresses either.
+- **Cloud-init network through Proxmox.** The plugin no longer passes
+  Morpheus's network snippet, which names the interface (`eth0`) and so
+  depends on the guest's interface naming. It sets Proxmox's own `ipconfigN`
+  per interface instead (`ip=dhcp`, or `ip=<address>/<prefix>,gw=<gateway>`
+  for a static address, with `nameserver` and `searchdomain` from the
+  network), and Proxmox generates a network-config that matches the NIC by
+  MAC address. `cicustom` carries the user-data only. An empty user-data no
+  longer throws a `NullPointerException` in the SFTP upload.
+- **Host SSH credentials follow the cloud form.** `HostSync` set the node's SSH
+  user and password only when it created the host record, never on update. A
+  host created with other values, or edited by hand, kept them; the lab host
+  held the Morpheus login name as SSH user, which does not exist on the node.
+  Every sync now writes the cloud's *Node SSH Username* and *Password* to the
+  host when both are set, and logs the change.
+- **Start and address.** The start call's result is checked; a failure ends
+  the provision with Proxmox's message. When the VM's QEMU guest agent is
+  enabled, the plugin waits **up to 10 minutes** for the agent to report an
+  IPv4 address, stores it on the server (`internalIp`, `externalIp`,
+  `sshHost`) and returns it in the provision response. `getServerDetails`,
+  which Morpheus calls while it waits for the network, now returns that
+  address too, instead of nothing; it waits up to 60 seconds.
+- **Node default.** `config.proxmoxNode` may be omitted when the cloud has
+  exactly one active node: validation and provisioning use that node and
+  record it on the server. With several active nodes the request still needs
+  the node, and `Please select a ProxMox node` stays.
+- **Deleting a failed instance no longer throws.** `removeWorkload` read the
+  node from the server's parent server, which a provision that failed before
+  the clone never set, and deleting such an instance logged
+  `NullPointerException: Cannot get property 'name' on null object`. A server
+  without a VM id is now nothing to destroy; otherwise the node comes from the
+  parent server, the server config or a cluster lookup, and a failed destroy
+  call returns Proxmox's message instead of its raw response. After the
+  destroy, the VM's cloud-init snippets are removed from the node too: the
+  user-data holds the password hashes of the created users, and 0.1.16 left
+  it in `/var/lib/vz/snippets` for ever.
+- **A failed listing no longer empties the cloud.** During a lab refresh the
+  node's network listing failed once, with
+  `No signature of method: [B.getAt()` (the HTTP client handed the body over
+  unparsed), `listProxmoxNetworks` logged the warning and reported the
+  cluster as having no networks, and `NetworkSync` deleted the bridge network
+  `vmbr0`. The next provision failed with `Please select a network`, and the
+  refresh recreated the network under a new id, which breaks anything that
+  referenced the old one. Every listing now reports the failure instead of an
+  empty result (networks per node, cluster resources for VMs, templates and
+  containers, storages, pools), the network, VM and template syncs skip a
+  failed listing with a warning, and an unparsed body is read as JSON.
+
+Behaviour changes from 0.1.16: a provision on a cloud whose host has wrong SSH
+credentials fails within seconds and creates no VM, where 0.1.16 left a
+stopped VM. A provision of a VM with the guest agent enabled takes up to
+10 minutes longer when the guest never reports an address. A NIC keeps the
+template's model where 0.1.16 forced `e1000e`, and the cloud form's node SSH
+account overwrites the host record on every sync.
+
+The plugin code stays `proxmox-ve`, so the jar upgrades an installed 0.1.16 or
+earlier. 0.1.17 to 0.1.20 were lab iterations of this change, uploaded to the
+lab appliance only and never released: 0.1.17 lacked the NIC, network and
+host credential changes, 0.1.18 the deletion fix, 0.1.19 the snippet removal, 0.1.20 the listing guards.
+
+Verified on HPE Morpheus Enterprise 9.0.2 with Proxmox VE 9.2.20, with this
+build and its lab iterations: `POST /api/instances` with the Debian 12 cloud
+template (`debian12-morph`, `agent: 1`, cloud-init), the 1 vCPU / 1 GB plan, a
+5 GB root volume, the DHCP bridge network and **no `proxmoxNode`** reached
+`running` with its address **13 seconds after the start** (35 seconds after
+the request), the Morpheus agent 3.3.0 checked in, the server carries the
+address as `internalIp`, `externalIp` and `sshHost` and the node in its
+config, and port 22 answers from the appliance. On the node the VM has
+`net0: virtio=<mac>,bridge=vmbr0`, `ipconfig0: ip=dhcp`, `cicustom: user=...`
+and `local` gained `snippets`. Deleting the instance removed the VM, the
+server record and the snippets within 8 seconds. With the host record's wrong
+SSH user, the same request failed in 7 seconds with the preflight message and
+created no VM. With 0.1.17 the same VM booted with an `e1000e` NIC and
+reported only `lo`. The listing failure that deleted `vmbr0` happened once
+with 0.1.20 and was not reproduced with the guard in place. The test suite
+passes (29 tests, twelve new). Not verified: a static address from an IP pool,
+a Windows guest, a multi-node cluster, a resize.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.16-lab...proxmox-ve-v0.1.21-lab
+
+---
+
 ## 0.1.16
 
 **The plugin list links to the plugin's source.** The plugin moved, with its full

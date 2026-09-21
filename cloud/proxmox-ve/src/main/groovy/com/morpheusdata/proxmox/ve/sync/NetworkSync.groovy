@@ -43,6 +43,11 @@ class NetworkSync {
             log.debug "Execute NetworkSync STARTED: ${cloud.id}"
 
             def cloudItems = ProxmoxApiComputeUtil.listProxmoxNetworks(apiClient, authConfig, true)
+            // Never sync against a failed listing: an empty result would delete every network
+            if (!cloudItems?.success || !(cloudItems.data instanceof Collection)) {
+                log.warn("NetworkSync skipped for cloud ${cloud.id}: ${cloudItems?.msg ?: 'network listing failed'}")
+                return
+            }
             def domainRecords = morpheusContext.async.network.listIdentityProjections(
                     new DataQuery()
                             .withFilter('refType', "ComputeZone")
