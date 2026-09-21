@@ -68,6 +68,10 @@ upload it under *Administration > Integrations > Plugins > Add*. The plugin regi
 *Tools > AI Services > Integrations > + New Integration > OpenAI-Compatible API* (not HPE's
 *OpenAI Compatible*, which sits next to it in the list):
 
+| | |
+|---|---|
+| ![Create Integration form](docs/images/01-integration-form.png) | ![The rest of the form](docs/images/02-integration-form-options.png) |
+
 | Field | Value |
 |---|---|
 | **API Endpoint** | The base URL including the version path: `https://api.openai.com/v1`, `https://openrouter.ai/api/v1`, `http://litellm.example.com:4000/v1`, `http://ollama.example.com:11434/v1`. The plugin appends `/models` and `/chat/completions` and adds nothing else. A pasted endpoint path or trailing slash is removed. |
@@ -88,6 +92,10 @@ model list points at the version path (`/v1`), a failed TLS handshake at the cer
 `openrouter.ai` the plugin also calls `GET /key`, because OpenRouter serves its model list to any
 key. A healthy integration reports status `ok` and its model count.
 
+![A wrong key on save](docs/images/04-wrong-key.png)
+
+![Integration list](docs/images/06-integration-list.png)
+
 The form follows the viewer's *Default Locale* in *User Settings* — English, German and Polish.
 
 ### 3. Build an agent
@@ -96,6 +104,12 @@ The form follows the viewer's *Default Locale* in *User Settings* — English, G
 built-in **Morpheus** MCP server. Leave **Read-only mode** on for a first run: the built-in MCP
 server also offers tools that change or delete infrastructure. The chat's agent picker loads its
 list with the page — reload the page if a new agent is missing.
+
+![Agent form](docs/images/08-agent-edit.png)
+
+![Agent list](docs/images/09-agent-list.png)
+
+![Agent chat: servers listed through the built-in MCP server](docs/images/10-agent-chat.png)
 
 ### Verified endpoints
 
@@ -123,6 +137,8 @@ The plugin lists a model when
 Names are taken from the catalog when it has them (OpenRouter: *OpenAI: GPT-5.5*) and are the id
 otherwise (`gpt-5.4-mini`, `deepseek-v3.2`) — never title-cased, so the agent form shows the spelling
 the endpoint expects.
+
+![Model list of an api.openai.com integration](docs/images/07-model-list.png)
 
 ### Allow list
 
