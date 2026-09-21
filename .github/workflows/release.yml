@@ -1,12 +1,13 @@
 name: release
 
 # One tag prefix per plugin. The tag names the plugin and its version, for example
-# anthropic-v1.5.0, openrouter-v0.1.1 or proxmox-ve-v0.1.15-lab.
+# anthropic-v1.5.0, openrouter-v0.1.1, openai-v0.1.0 or proxmox-ve-v0.1.15-lab.
 on:
   push:
     tags:
       - 'anthropic-v*'
       - 'openrouter-v*'
+      - 'openai-v*'
       - 'proxmox-ve-v*'
 
 permissions:
@@ -25,6 +26,7 @@ jobs:
           case "$tag" in
             anthropic-v*)  dir=llm/anthropic;    name=Anthropic;    version="${tag#anthropic-v}" ;;
             openrouter-v*) dir=llm/openrouter;   name=OpenRouter;   version="${tag#openrouter-v}" ;;
+            openai-v*)     dir=llm/openai;       name="OpenAI-Compatible API"; version="${tag#openai-v}" ;;
             proxmox-ve-v*) dir=cloud/proxmox-ve; name="Proxmox VE"; version="${tag#proxmox-ve-v}" ;;
             *) echo "::error::Unknown tag prefix: $tag"; exit 1 ;;
           esac
