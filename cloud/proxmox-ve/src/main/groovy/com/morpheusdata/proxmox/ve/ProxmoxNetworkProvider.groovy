@@ -91,9 +91,15 @@ class ProxmoxNetworkProvider implements NetworkProvider, CloudInitializationProv
 		log.debug("Initializeing network provider for ${cloud.name}")
 		ServiceResponse rtn = ServiceResponse.prepare()
 		try {
+			// Morpheus refuses a NetworkServer without an account ("Field error in object
+			// 'com.morpheus.NetworkServer' on field 'account': rejected value [null]"), and a cloud
+			// without a network server cannot have its networks edited: every update fails with
+			// "networkServer: Cannot be blank".
 			NetworkServer networkServer = new NetworkServer(
 				name: cloud.name,
-				type: new NetworkServerType(code:"proxmox-ve.network")
+				type: new NetworkServerType(code:"proxmox-ve.network"),
+				account: cloud.owner ?: cloud.account,
+				zoneId: cloud.id
 			)
 			morpheus.services.integration.registerCloudIntegration(cloud.id, networkServer)
 			morpheus.services.cloud.save(cloud)

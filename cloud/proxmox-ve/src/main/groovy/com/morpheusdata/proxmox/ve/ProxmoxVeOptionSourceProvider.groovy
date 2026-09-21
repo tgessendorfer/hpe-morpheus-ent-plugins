@@ -69,7 +69,7 @@ class ProxmoxVeOptionSourceProvider extends AbstractOptionSourceProvider {
             options = options.sort { it.name }
         }
 
-        log.error("FOUND ${options.size()} ComputeServer Nodes...")
+        log.debug("Found ${options.size()} Proxmox nodes for the option list")
         return options
     }
 
@@ -124,7 +124,7 @@ class ProxmoxVeOptionSourceProvider extends AbstractOptionSourceProvider {
             options = options.sort { it.name }
         }
 
-        log.error("FOUND ${options.size()} VirtualImages...")
+        log.debug("Found ${options.size()} virtual images for the option list")
         return options
     }
 }

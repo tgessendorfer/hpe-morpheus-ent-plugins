@@ -634,8 +634,9 @@ interface. The NIC now keeps the template's model and MAC address.
 **How the VM is configured.** Morpheus's cloud-init user-data (users, hostname,
 agent install) goes to the node as `<vmid>-cloud-init-user-data.yml` and is
 attached with `cicustom user=local:snippets/...`. The network is not taken
-from Morpheus's network snippet, which names the interface `eth0` while the
-guest has `ens18`; the plugin sets Proxmox's `ipconfigN` per interface
+from Morpheus's network snippet, which names the interface (`eth0`) and so
+depends on the guest's naming (the Debian 12 cloud image does call it `eth0`,
+other images do not); the plugin sets Proxmox's `ipconfigN` per interface
 (`ip=dhcp`, or address, prefix and gateway from the network) and Proxmox
 generates a network-config that matches the NIC by MAC address. The VM's
 created users are the *Cloud-Init User* from the provisioning settings and,

@@ -5,7 +5,7 @@
 - [X] Check agentless provision
 - [X] Refactor ssh code to util class
 - [X] Add resource pool sync
-- [X] Add resource pool selection to provision (verified 2026-09-21: the wizard offers synced pools and the VM lands in the selected one; datastore filtering by pool is still open)
+- [X] Add resource pool selection to provision (verified 2026-09-21: the wizard offers synced pools and the VM lands in the selected one) and filter datastores (0.1.24: a pool's storage members are the only datastores offered once that pool is selected)
 - [ ] Add provision container host
 - [X] Fix powerstate on initial host add
 - [X] Cleanup logging (debug dumps of the workload, its options and the cloud-init user-data are gone, they carried password hashes)

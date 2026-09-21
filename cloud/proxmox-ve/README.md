@@ -23,7 +23,7 @@
 > - Every cloud form field has help text and a placeholder.
 >
 > Prebuilt jars are under
-> [Releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.22-lab),
+> [Releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.24-lab),
 > tagged `proxmox-ve-v<version>-lab`.
 > Changes per version are in [`RELEASE-NOTES.md`](RELEASE-NOTES.md), and
 > installing is covered in [`docs/lab/installing.md`](docs/lab/installing.md).
@@ -181,6 +181,10 @@ Requirements, verified with Morpheus 9.0.2 and Proxmox VE 9.2 (lab build 0.1.21 
   as it appears, so provisioning without the Morpheus agent works too.
 - **Proxmox node:** optional when the cloud has exactly one active node.
 - **Resource pool:** selectable in the wizard once pools are synced; the VM is created in it.
+  A pool that holds storages as members narrows the datastore list to those storages; a pool
+  without storage members, or no pool, leaves the list unchanged.
+- **Static addresses:** an address from a Morpheus IP pool, or one given per interface, reaches
+  the guest through `ipconfigN` with the network's gateway and DNS.
 - **API proxy:** the cloud's *API Proxy* setting is applied to every request to Proxmox.
 
 The below provisioning assumes that your datastores and networks have been configured appropriately e.g., DHCP and gateway.

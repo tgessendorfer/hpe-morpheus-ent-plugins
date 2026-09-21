@@ -2,7 +2,10 @@ package com.morpheus.test
 
 import com.morpheusdata.proxmox.ve.util.ProxmoxApiComputeUtil
 import com.morpheusdata.proxmox.ve.ProxmoxNetworkProvider
+import com.morpheusdata.proxmox.ve.ProxmoxVeCloudProvider
+import com.morpheusdata.model.CloudPool
 import com.morpheusdata.model.ComputeServerInterface
+import com.morpheusdata.model.Datastore
 import com.morpheusdata.model.Network
 import com.morpheusdata.model.NetworkSubnet
 import spock.lang.Specification
@@ -136,5 +139,53 @@ class MyTestSpec extends Specification {
         '0'                                || false
         'enabled=0'                        || false
         null                               || false
+    }
+
+    def "reads the storage membership out of Proxmox pool records"() {
+        given:
+        def pools = [
+                [poolid: 'lab', members: [
+                        [type: 'qemu', vmid: 137, node: 'pve1', id: 'qemu/137'],
+                        [type: 'lxc', vmid: 200, node: 'pve1', id: 'lxc/200'],
+                        [type: 'storage', storage: 'local-lvm', node: 'pve1', id: 'storage/pve1/local-lvm'],
+                        [type: 'storage', storage: 'local-lvm', node: 'pve2', id: 'storage/pve2/local-lvm'],
+                        [type: 'storage', storage: 'ceph', node: 'pve1', id: 'storage/pve1/ceph']]],
+                [poolid: 'dev', members: [
+                        [type: 'storage', storage: 'ceph', node: 'pve1', id: 'storage/pve1/ceph']]],
+                [poolid: 'empty', members: []],
+                [poolid: 'bare']
+        ]
+
+        expect:
+        ProxmoxApiComputeUtil.storagePoolMembership(pools) == [
+                'local-lvm': ['lab'] as Set,
+                'ceph'     : ['lab', 'dev'] as Set
+        ]
+        ProxmoxApiComputeUtil.storagePoolMembership([]) == [:]
+        ProxmoxApiComputeUtil.storagePoolMembership(null) == [:]
+    }
+
+    def "filters the datastores offered in the wizard by the selected pools"() {
+        given:
+        def lab = new CloudPool(id: 1L, externalId: 'lab')
+        def dev = new CloudPool(id: 2L, externalId: 'dev')
+        def noStorage = new CloudPool(id: 3L, externalId: 'no-storage')
+        def localLvm = new Datastore(name: 'local-lvm', assignedZonePools: [lab])
+        def ceph = new Datastore(name: 'ceph', assignedZonePools: [lab, dev])
+        def nfs = new Datastore(name: 'nfs', assignedZonePools: [])
+        def all = [localLvm, ceph, nfs]
+
+        expect:
+        ProxmoxVeCloudProvider.filterDatastoresByPools(all, [lab]) == [localLvm, ceph]
+        ProxmoxVeCloudProvider.filterDatastoresByPools(all, [dev]) == [ceph]
+        ProxmoxVeCloudProvider.filterDatastoresByPools(all, [new CloudPool(id: 2L)]) == [ceph]
+        ProxmoxVeCloudProvider.filterDatastoresByPools(all, [dev, lab]) == [localLvm, ceph]
+        ProxmoxVeCloudProvider.filterDatastoresByPools(all, [noStorage]) == all
+        ProxmoxVeCloudProvider.filterDatastoresByPools(all, [noStorage, dev]) == [ceph]
+        ProxmoxVeCloudProvider.filterDatastoresByPools(all, []) == all
+        ProxmoxVeCloudProvider.filterDatastoresByPools(all, null) == all
+        ProxmoxVeCloudProvider.filterDatastoresByPools([nfs], [lab]) == [nfs]
+        ProxmoxVeCloudProvider.filterDatastoresByPools([], [lab]) == []
+        ProxmoxVeCloudProvider.filterDatastoresByPools(null, [lab]) == null
     }
 }

@@ -283,7 +283,9 @@ class ProxmoxApiComputeUtil {
      * Waits until the VM runs and its guest agent reports an IPv4 address. Returns
      * [success, ipAddress, status]; status is null when the VM cannot be queried at all.
      */
-    static Map waitForGuestIp(HttpApiClient client, Map authConfig, String nodeId, String vmId, Long timeoutInSec, Long intervalMs = 10000L) {
+    // Every poll before the agent runs makes HttpApiClient log a WARN for the 500 that Proxmox
+    // answers with; 15 s keeps that to a few lines per boot.
+    static Map waitForGuestIp(HttpApiClient client, Map authConfig, String nodeId, String vmId, Long timeoutInSec, Long intervalMs = 15000L) {
         Map rtn = [success: false, ipAddress: null, status: null]
         Long started = System.currentTimeMillis()
         Long deadline = started + timeoutInSec * 1000
@@ -1582,12 +1584,37 @@ class ProxmoxApiComputeUtil {
         }
         List<Map> poolIds = poolList.data
 
-        poolIds.each { Map pool ->
-            Map poolData = callListApiV2(client, "pools/$pool.poolid", authConfig).data
-            pools << poolData
+        for (Map pool in poolIds) {
+            ServiceResponse poolDetail = callListApiV2(client, "pools/$pool.poolid", authConfig)
+            if (!poolDetail?.success || !(poolDetail.data instanceof Map)) {
+                return ServiceResponse.error("Unable to read pool '${pool.poolid}': ${poolDetail?.msg}")
+            }
+            pools << poolDetail.data
         }
 
         return new ServiceResponse(success: true, data: pools)
+    }
+
+    /**
+     * The storages of each pool, from the pool records that {@link #listProxmoxPools} returns:
+     * storage name to the ids of the pools it belongs to. A pool's members list guests and
+     * storages alike, and a storage member appears once per node, so the sets are de-duplicated.
+     * Storages in no pool are absent from the map.
+     */
+    static Map<String, Set<String>> storagePoolMembership(Collection<Map> pools) {
+        Map<String, Set<String>> rtn = [:]
+        pools?.each { Map pool ->
+            String poolId = pool?.poolid
+            if (!poolId) {
+                return
+            }
+            pool.members?.each { Map member ->
+                if (member?.type == 'storage' && member.storage) {
+                    rtn.computeIfAbsent(member.storage as String) { new LinkedHashSet<String>() } << poolId
+                }
+            }
+        }
+        return rtn
     }
 
 

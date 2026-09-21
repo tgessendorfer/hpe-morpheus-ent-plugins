@@ -13,6 +13,54 @@ new number, and why the digests are recorded.
 
 ---
 
+## 0.1.24
+
+**Datastores follow the resource pool, the network provider registers its
+server, and static addresses, resizes and pools are verified.** The last
+open items of the upstream TODO list that a single-node lab can verify.
+
+- **Datastore filter by resource pool.** A Proxmox pool can hold storages as
+  members. `DatastoreSync` now records that membership on each datastore
+  (`assignedZonePools`) and the cloud provider filters the wizard's datastore
+  list through `filterDatastores`: with a pool selected that has at least one
+  storage member, only its storages are offered; with no pool, or a pool
+  without storage members, the list is unchanged. Verified in the wizard:
+  `local-lvm` and `usb` without a pool, only `local-lvm` with the pool that
+  holds it. `listProxmoxPools` reports a failed pool detail call instead of
+  a `null` entry, and the datastore sync skips a failed pool listing.
+- **The network provider registers its server.** `initializeProvider`
+  created the `NetworkServer` without an account; Morpheus rejected it with
+  `NetworkServer.account rejected value [null]`, the cloud had no network
+  server, and every network edit (an IP pool, DHCP off, DNS) failed with
+  `networkServer: Cannot be blank`. The server now carries the cloud's
+  account and id. Morpheus calls `initializeProvider` when a cloud is
+  created; the lab cloud predates the fix and still has no network server,
+  so its networks cannot be edited until it is re-created. Verified only that
+  a cloud save no longer logs the error.
+- **Quieter waiting.** The guest agent poll runs every 15 seconds instead of
+  10, which halves the `HttpApiClient` warnings Proxmox's 500 answers cause
+  before the agent runs. Two option-source lines logged at ERROR
+  (`FOUND n VirtualImages...`) are debug lines now.
+- **Erratum for 0.1.21:** the Debian 12 cloud image does name its NIC
+  `eth0`, not `ens18` as those notes claimed; the `ipconfigN` approach stays,
+  because it does not depend on the guest's naming at all.
+
+Verified on HPE Morpheus Enterprise 9.0.2 with Proxmox VE 9.2.20, on top of
+0.1.22's checks: a **static address** given per interface (`ipMode: static`,
+`192.168.0.240`) reached the guest as `ipconfig0: ip=192.168.0.240/24,
+gw=192.168.0.1`, the guest agent and Morpheus both report it; a **resize**
+from 1 vCPU / 1 GB / 5 GB to 2 vCPU / 2 GB / 6 GB changed `cores`, `memory`
+and the disk on the running VM and kept the NIC's MAC address; provisioning
+**into a resource pool** places the VM in it; **`noAgentInstall`** reaches
+`running` with its address. The test suite passes (31 tests, two new).
+0.1.23 was a lab iteration of this build, uploaded to the appliance only.
+
+sha256 pending
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.22-lab...proxmox-ve-v0.1.24-lab
+
+---
+
 ## 0.1.22
 
 **The cloud's API proxy reaches Proxmox, and the upstream TODO list is

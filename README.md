@@ -11,7 +11,7 @@ builds, versions and releases on its own.
 |---|---|---|---|---|
 | Anthropic Claude | LLM | [`llm/anthropic`](llm/anthropic) | [1.5.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/anthropic-v1.5.1) | Claude over the native Messages API, direct or through OpenRouter. Verified on Morpheus 9.0.1. |
 | OpenRouter | LLM | [`llm/openrouter`](llm/openrouter) | [0.1.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openrouter-v0.1.2) | Every other model OpenRouter serves, over its OpenAI-compatible API. Verified on Morpheus 9.0.1. |
-| Proxmox VE | Cloud | [`cloud/proxmox-ve`](cloud/proxmox-ve) | [0.1.22-lab](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.22-lab) | Lab build of HPE's community Proxmox VE plugin, with Proxmox VE 9 support. Verified on Morpheus 9.0.1 with Proxmox VE 9.2.10. Community code without support. |
+| Proxmox VE | Cloud | [`cloud/proxmox-ve`](cloud/proxmox-ve) | [0.1.24-lab](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.24-lab) | Lab build of HPE's community Proxmox VE plugin, with Proxmox VE 9 support and working provisioning. Verified on Morpheus 9.0.2 with Proxmox VE 9.2.20. Community code without support. |
 
 ## Installing
 

@@ -609,6 +609,37 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 	}
 
 	/**
+	 * Narrows the datastores the provisioning wizard offers to those of the selected resource
+	 * pool: DatastoreSync records a Proxmox pool's storage members in assignedZonePools. A
+	 * selection that matches no datastore, such as a pool without storage members, keeps the
+	 * full list, so a pool never hides every datastore.
+	 */
+	@Override
+	Collection<Datastore> filterDatastores(Cloud cloud, Collection<Datastore> datastores, Collection<CloudPool> resourcePools) {
+		return filterDatastoresByPools(datastores, resourcePools)
+	}
+
+	/**
+	 * The datastores assigned to at least one of the given pools, or all datastores when no pool
+	 * is given or none of them has a datastore. Pools are compared by id.
+	 */
+	static Collection<Datastore> filterDatastoresByPools(Collection<Datastore> datastores, Collection<CloudPool> resourcePools) {
+		Set<Long> selectedPoolIds = (resourcePools?.collect { it?.id }?.findAll { it != null } ?: []) as Set<Long>
+		if (!selectedPoolIds) {
+			return datastores
+		}
+		Collection<Datastore> matching = datastores?.findAll { Datastore datastore ->
+			datastore.assignedZonePools?.any { CloudPool pool -> pool?.id in selectedPoolIds }
+		}
+		if (!matching) {
+			log.debug("No datastore is assigned to pool ids ${selectedPoolIds}, offering all ${datastores?.size() ?: 0}")
+			return datastores
+		}
+		log.debug("Pool ids ${selectedPoolIds} narrow the datastores to ${matching*.name}")
+		return matching
+	}
+
+	/**
 	 * Returns whether a cloud supports {@link Network}
 	 * @return Boolean
 	 */
