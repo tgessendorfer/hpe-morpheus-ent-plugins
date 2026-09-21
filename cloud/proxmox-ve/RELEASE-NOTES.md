@@ -119,6 +119,12 @@ with 0.1.20 and was not reproduced with the guard in place. The test suite
 passes (29 tests, twelve new). Not verified: a static address from an IP pool,
 a Windows guest, a multi-node cluster, a resize.
 
+Built by the release workflow from the source at tag `proxmox-ve-v0.1.21-lab`.
+The lab appliance runs a local build of the same commit, which has another
+digest.
+
+sha256 `2ff0aee3180f5936d00cac0e9e00671e13e06d3a5bbf6b417353a57001c6faa3`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.16-lab...proxmox-ve-v0.1.21-lab
 
 ---
