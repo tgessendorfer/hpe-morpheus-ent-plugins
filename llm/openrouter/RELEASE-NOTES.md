@@ -6,6 +6,47 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 0.2.0
+
+**Empty tool arguments are dropped, and cut-off answers say so.** Both came out of building the
+[OpenAI-compatible plugin](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/llm/openai)
+on 2026-09-21 and apply to OpenRouter models just the same.
+
+### What changed
+
+- **New option *Drop Empty Tool Arguments*, on by default — also for existing integrations.**
+  Some models fill every optional parameter of a tool call with `""`, `0` or `false`, and Morpheus'
+  built-in MCP tools take those as filters: `openai/gpt-5.4-mini` answered *No servers were found*
+  for a lab with 7 servers, `openai/gpt-5.4-nano` did the same in 0.1.0. The plugin now removes
+  such top-level arguments (`""`, `0`, `false`, `null`, `[]`, `{}`) from the model's tool calls
+  before Morpheus runs the tool, and logs what it dropped. This is a behaviour change from 0.1.2,
+  which forwarded tool arguments unchanged; untick the option for that.
+- **Cut-off answers are marked.** An answer that hits the output token limit ends with *Answer cut
+  off at the output token limit.* in its own language (English, German, Polish), and an answer with
+  no text at all — a reasoning model that spent Morpheus' 1000-token budget thinking — becomes
+  that line instead of Morpheus' generic *An error occurred* text. The line is stripped before the
+  answer is replayed as history, like the cost footer.
+- **The log shows more.** Every request leaves one `OpenRouter request:` line with its shape —
+  model, message and tool counts, `max_tokens`, `temperature`, reasoning effort — never its
+  content, and the `OpenRouter tool calls:` line now carries each call's arguments.
+
+Upgrading: upload the new jar under *Administration > Integrations > Plugins*. No configuration
+changes are required; the new option is on until unticked.
+
+### Verified
+
+On HPE Morpheus Enterprise 9.0.2 (plugin API 1.4.1) with `0.2.0-rc.1`, a local build of this
+code: the plugin loads, integration 4 refreshes `ok` with 246 models, and on 2026-09-22 an agent on
+`openai/gpt-5.4-nano` with the built-in MCP server listed all 7 lab servers. The model had filled
+all 18 optional `list_servers` parameters with empty values; the log shows `OpenRouter dropped empty
+arguments from list_servers: name, phrase, zoneId, …`, and the question cost 0.008 USD over 4
+requests. The cut-off note is covered by unit tests only. 140 tests pass with plugin API 1.4.2, the
+HTTP client tests with 1.4.1.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.1.2...openrouter-v0.2.0
+
+---
+
 ## 0.1.2
 
 **The plugin list links to the plugin's new home.** The plugin moved, with its full history, into

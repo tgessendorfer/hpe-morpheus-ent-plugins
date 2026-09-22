@@ -35,6 +35,7 @@ import com.morpheusdata.openrouter.sync.LlmModelsSync
 import com.morpheusdata.response.LlmStreamingResponseHandler
 import com.morpheusdata.response.ServiceResponse
 import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import groovy.util.logging.Slf4j
 
 import java.math.RoundingMode
@@ -112,8 +113,14 @@ class OpenRouterProvider implements LlmProvider {
 	]
 	// A model that goes away within this many days says so in its name.
 	static final long EXPIRY_NOTICE_DAYS = 365L
-	// One or more italic usage lines at the very end of an answer.
-	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*(?:Tokens|Cost|Kosten|Koszt): [^*\\n]*\\*)+\\s*$'
+	// What an answer says when the output token limit cut it off, per language.
+	static final Map<String, String> TRUNCATION_NOTES = [
+		en: 'Answer cut off at the output token limit.',
+		de: 'Antwort am Ausgabe-Token-Limit abgeschnitten.',
+		pl: 'Odpowiedź ucięta na limicie tokenów wyjściowych.'
+	]
+	// One or more italic usage or truncation lines at the very end of an answer.
+	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*(?:(?:Tokens|Cost|Kosten|Koszt): [^*\\n]*|Answer cut off at the output token limit\\.|Antwort am Ausgabe-Token-Limit abgeschnitten\\.|Odpowiedź ucięta na limicie tokenów wyjściowych\\.)\\*)+\\s*$'
 	// Enough to pick the footer's language, not a language detector: answers in each
 	// language are full of its words and next to never contain the others'. Letters
 	// only one of the languages uses count extra.
@@ -344,6 +351,19 @@ class OpenRouterProvider implements LlmProvider {
 			helpText: 'On by default. When OpenRouter refuses a question - no credits left, a rate limit, a model that is down - the chat shows OpenRouter\'s message and what to do about it, instead of Morpheus\' generic error. The message is left out when the conversation is replayed to the model. A rate limit or an overloaded provider is waited out twice before that.'
 		)
 
+		optionTypes << new OptionType(
+			code: "${PROVIDER_CODE}.dropEmptyToolArguments",
+			name: 'Drop Empty Tool Arguments',
+			fieldName: 'dropEmptyToolArguments',
+			fieldLabel: 'Drop Empty Tool Arguments',
+			fieldContext: 'config',
+			inputType: OptionType.InputType.CHECKBOX,
+			displayOrder: 12,
+			required: false,
+			defaultValue: 'on',
+			helpText: 'On by default. Some models fill every optional parameter of a tool call with an empty string, 0 or false, and the built-in Morpheus tools treat those as filters: list_servers then finds no servers. With this on, such top-level arguments are removed before Morpheus runs the tool, which is the same as leaving them out. Untick it to forward tool calls exactly as the model wrote them.'
+		)
+
 		// Labels and help texts resolve through the plugin's i18n bundles in
 		// src/main/resources/i18n, in the viewer's language; the literal texts above
 		// stay as the fallback.
@@ -471,6 +491,7 @@ class OpenRouterProvider implements LlmProvider {
 					"Chat completion failed: ${message}".toString())
 			}
 			LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(data))
+			dropEmptyToolArguments(response, accountIntegration)
 			return ServiceResponse.success(appendUsageFooter(response, accountIntegration))
 		}
 		return chatFailure(accountIntegration, request, requestBody, failureStatus(result),
@@ -644,6 +665,7 @@ class OpenRouterProvider implements LlmProvider {
 
 			if (result?.success && result.data instanceof Map) {
 				LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(result.data as Map))
+				dropEmptyToolArguments(response, accountIntegration)
 				handler?.onCompleteResponse(appendUsageFooter(response, accountIntegration))
 				return
 			}
@@ -743,6 +765,10 @@ class OpenRouterProvider implements LlmProvider {
 		if (stream != null) {
 			requestBody.stream = stream
 		}
+		// The shape of the request, never its content: enough to see from the log what a
+		// model was asked for when its answer comes back empty or cut off.
+		log.info("OpenRouter request: model=${requestBody.model} messages=${messages.size()} tools=${tools ? tools.size() : 0} " +
+			"max_tokens=${requestBody.max_tokens} temperature=${requestBody.temperature} reasoning=${requestBody.reasoning?.effort} stream=${requestBody.stream}")
 
 		int replaced = countReplacementChars(messages)
 		if (replaced) {
@@ -753,6 +779,13 @@ class OpenRouterProvider implements LlmProvider {
 			insertSystemNote(messages, REPLACEMENT_CHARACTER_NOTE)
 		}
 		return requestBody
+	}
+
+	/** Name and arguments of a tool call, the arguments cut to a log-friendly length. */
+	protected static String describeToolCall(Map call) {
+		Map function = call.function as Map
+		String arguments = function.arguments?.toString() ?: '{}'
+		return "${function.name} ${arguments.length() > 300 ? arguments.substring(0, 300) + '...' : arguments}".toString()
 	}
 
 	/**
@@ -862,7 +895,9 @@ class OpenRouterProvider implements LlmProvider {
 			response.finishReason = 'tool_calls'
 			// The chat shows no trace of tool use, so without this an answer built from
 			// MCP data cannot be told apart from one the model made up.
-			log.info("OpenRouter tool calls: ${toolCalls.collect { (it.function as Map).name }.join(', ')}")
+			// With the arguments: Morpheus' built-in tools treat "" and 0 as filters, and some
+			// models fill every optional parameter that way - "0 servers" then has a reason.
+			log.info("OpenRouter tool calls: ${toolCalls.collect { Map call -> describeToolCall(call) }.join('; ')}")
 			response.metadata.put('tool_calls', toolCalls)
 			chatMessage.metadata = [tool_calls: toolCalls]
 		}
@@ -874,6 +909,15 @@ class OpenRouterProvider implements LlmProvider {
 		}
 		if (data.provider) {
 			response.metadata.put('provider', data.provider.toString())
+		}
+		// An answer the token limit cut off ends mid-sentence, and the chat gives no sign of
+		// it. The note is in the answer's language, and stripped again with the footer. With
+		// no text at all - a reasoning model that thought its whole budget away - the note is
+		// the answer, or Morpheus shows its generic "empty response" text.
+		if (response.finishReason == 'length' && !toolCalls) {
+			String language = answerLanguage(content)
+			chatMessage.content = (content.trim() ? content.trim() + '\n\n' : '') + "*${TRUNCATION_NOTES[language]}*".toString()
+			response.metadata.put('truncated', true)
 		}
 
 		if (data.usage instanceof Map) {
@@ -912,6 +956,83 @@ class OpenRouterProvider implements LlmProvider {
 				"reasoning=${reasoningTokens ?: 0} cost=${cost != null ? cost.toPlainString() : 'n/a'}")
 		}
 		return response
+	}
+
+	/**
+	 * Removes the arguments a model only filled in for the sake of it. gpt-5.4-mini and
+	 * gpt-5.4-nano send list_servers every optional parameter as "", 0 or false; Morpheus'
+	 * built-in tools take each of those as a filter and answer with nothing (verified
+	 * 2026-09-21 on 9.0.2). A dropped argument is the same as one the model never wrote.
+	 */
+	protected void dropEmptyToolArguments(LlmChatResponse response, AccountIntegration accountIntegration) {
+		if (!isDropEmptyToolArgumentsEnabled(accountIntegration)) {
+			return
+		}
+		List<Map> toolCalls = response?.metadata?.get('tool_calls') instanceof List ? response.metadata.get('tool_calls') as List<Map> : null
+		if (!toolCalls) {
+			return
+		}
+		toolCalls.each { Map call ->
+			Map function = call.function as Map
+			Map<String, List<String>> result = pruneEmptyArguments(function.arguments?.toString())
+			if (result.dropped) {
+				function.arguments = result.json
+				log.info("OpenRouter dropped empty arguments from ${function.name}: ${result.dropped.join(', ')}")
+			}
+		}
+		// The message metadata holds the same list Morpheus reads; keep both the same object.
+		if (response.message?.metadata instanceof Map) {
+			response.message.metadata.put('tool_calls', toolCalls)
+		}
+	}
+
+	/**
+	 * The arguments JSON without its empty top-level entries, and the names of those
+	 * entries. Anything that is not a JSON object is returned as it is.
+	 */
+	protected static Map pruneEmptyArguments(String json) {
+		if (!json?.trim()) {
+			return [json: json, dropped: []]
+		}
+		def parsed
+		try {
+			parsed = new JsonSlurper().parseText(json)
+		} catch (Exception ignored) {
+			return [json: json, dropped: []]
+		}
+		if (!(parsed instanceof Map)) {
+			return [json: json, dropped: []]
+		}
+		List<String> dropped = []
+		Map kept = [:]
+		(parsed as Map).each { key, value ->
+			if (isEmptyArgument(value)) {
+				dropped << key.toString()
+			} else {
+				kept.put(key, value)
+			}
+		}
+		return [json: dropped ? JsonOutput.toJson(kept) : json, dropped: dropped]
+	}
+
+	/** "", 0, false, null, [] and {} - the values a model writes for "not set". */
+	protected static boolean isEmptyArgument(def value) {
+		if (value == null || value == false) {
+			return true
+		}
+		if (value instanceof CharSequence) {
+			return !value.toString().trim()
+		}
+		if (value instanceof Number) {
+			return ((Number) value) == 0
+		}
+		if (value instanceof Collection) {
+			return (value as Collection).isEmpty()
+		}
+		if (value instanceof Map) {
+			return (value as Map).isEmpty()
+		}
+		return false
 	}
 
 	// ------------------------------------------------------------------
@@ -1348,6 +1469,11 @@ class OpenRouterProvider implements LlmProvider {
 	/** On unless unticked: integrations saved before the option existed have no value for it. */
 	protected boolean isChatErrorsEnabled(AccountIntegration accountIntegration) {
 		return toBoolean(accountIntegration?.getConfigProperty('chatErrors'), true)
+	}
+
+	/** On unless unticked, for the same reason. */
+	protected boolean isDropEmptyToolArgumentsEnabled(AccountIntegration accountIntegration) {
+		return toBoolean(accountIntegration?.getConfigProperty('dropEmptyToolArguments'), true)
 	}
 
 	protected boolean isNetworkProxyEnabled(AccountIntegration accountIntegration) {

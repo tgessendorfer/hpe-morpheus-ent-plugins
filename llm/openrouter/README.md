@@ -25,6 +25,8 @@ OpenRouter's OpenAI-compatible API.
 | Key check on save | yes — `GET /api/v1/key`, since the model list answers any key |
 | Cost visible in chat | yes — optional footer with the cost of the whole question |
 | Errors visible in chat | yes — OpenRouter's message and what to do, instead of Morpheus' generic error |
+| Empty tool arguments | dropped before Morpheus runs the tool — optional, on by default |
+| Cut-off answers | say so |
 | Rate limits | waited out twice before a question fails |
 | Reasoning effort | optional — low, medium or high; reasoning never shown in the answer |
 | In-region routing (EU, US) | yes — with OpenRouter's Business or Enterprise plan |
@@ -49,7 +51,7 @@ OpenRouter's OpenAI-compatible API.
 ### 1. Install the plugin
 
 Download `morpheus-openrouter-plugin-<version>-all.jar` from the
-[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openrouter-v0.1.2) and upload it under *Administration > Integrations >
+[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openrouter-v0.2.0) and upload it under *Administration > Integrations >
 Plugins > Add*. The plugin registers two providers: `LLM OpenRouter` and `OPTION OpenRouter Options`.
 
 ### 2. Create the integration
@@ -71,6 +73,7 @@ Plugins > Add*. The plugin registers two providers: `LLM OpenRouter` and `OPTION
 | **Only List These Models** | `*` lists every model; see [Allow list](#allow-list) |
 | **Append Cost to Answers** | optional; see [Cost footer](#cost-footer) |
 | **Show OpenRouter Errors in Chat** | on; see [Errors in the chat](#errors-in-the-chat) |
+| **Drop Empty Tool Arguments** | on; see [Empty tool arguments](#empty-tool-arguments) |
 
 **Save.** The plugin checks the key with `GET /api/v1/key`, loads the model list, and on a
 regional domain checks that in-region routing is enabled. A rejected save shows the reason in the
@@ -192,11 +195,41 @@ grep OpenRouter /var/log/morpheus/morpheus-ui/current
 ```
 
 ```
-OpenRouter tool calls: list_instances, list_servers
+OpenRouter request: model=openai/gpt-5.4-nano messages=2 tools=68 max_tokens=1000 temperature=0.7 reasoning=null stream=false
+OpenRouter tool calls: use_servers_tools {"filter":"list_servers"}
 OpenRouter usage: model=openai/gpt-5.4-nano provider=OpenAI input=10775 cached=9728 output=212 reasoning=89 cost=0.00066896
 ```
 
-A question answered without a `tool calls` line did not use MCP data.
+The request line shows the shape of every request, never its content. A question answered without
+a `tool calls` line did not use MCP data.
+
+## Empty tool arguments
+
+Some models fill every optional parameter of a tool call with an empty value, and Morpheus' built-in
+MCP tools take `""`, `0` and `false` as filters: `list_servers` with `status: ""` or `zoneId: 0`
+finds nothing, while `list_servers` without arguments lists every server. Seen with
+`openai/gpt-5.4-nano` and `openai/gpt-5.4-mini` (every one of 20 parameters filled in, answer *No
+servers were found*).
+
+With **Drop Empty Tool Arguments** on, the default — also for existing integrations — the plugin
+removes top-level arguments whose value is `""`, `0`, `false`, `null`, `[]` or `{}` from the
+model's tool calls before Morpheus runs the tool, which is the same as the model leaving them out.
+The log names what was dropped:
+
+```
+OpenRouter tool calls: list_servers {"name":"","phrase":"","zoneId":0,"siteId":0,"managed":false,...}
+OpenRouter dropped empty arguments from list_servers: name, phrase, zoneId, siteId, managed, ...
+```
+
+Untick it to forward tool calls exactly as the model wrote them.
+
+## Cut-off answers
+
+Morpheus asks for 1000 output tokens on every chat request. An answer that hits that limit — or
+**Default Max Output Tokens** — ends mid-sentence, and the chat gives no sign of it. The plugin
+appends a line, *Answer cut off at the output token limit.*, in the language of the answer, and
+shows only that line when there was no text at all, as with a reasoning model that spent the whole
+budget thinking. The line is removed before the answer is replayed as history.
 
 ## Errors in the chat
 
@@ -269,7 +302,7 @@ and stop sequences unchanged; OpenRouter drops the parameters a model does not s
 | The log says `Only List These Models '...' matches none of N models and is ignored` | A typo in the allow list. The list stays complete until it is fixed. |
 | An agent fails after the model list was narrowed | Its model is disabled because it is no longer listed. The log names it. List it again, or give the agent another model. |
 | The model tab has no search | Not available to plugins on 9.0.1. Use the allow list. Reported to HPE: [docs/hpe/hpe-feature-request-llm-model-search.md](../../docs/hpe/hpe-feature-request-llm-model-search.md). |
-| An agent answers **"0"** or "none" although the objects exist | Some models fill every optional parameter of an MCP tool with an empty value, and the built-in Morpheus MCP tools take `""` and `0` as filters: `list_servers` with `status: ""` or `zoneId: 0` finds nothing, while `list_servers` without arguments lists every server. Seen with `openai/gpt-5.4-nano`. The log shows the tool call, but the next request's input grows by only a few dozen tokens. The plugin forwards tool arguments unchanged; use another model for the agent. |
+| An agent answers **"0"**, "none" or "No servers were found" although the objects exist | The model filled optional tool parameters with empty values. **Drop Empty Tool Arguments** is on by default since 0.2.0; the log shows `OpenRouter dropped empty arguments from ...`. If it is unticked, tick it or use another model. |
 | The chat says **"An error occurred while processing your request"** and the conversation is gone | Morpheus' text for a failed question, with **Show OpenRouter Errors in Chat** unticked or before 0.1.1. Look for `429` in the log: OpenRouter limits new accounts to 20 requests per minute per model (`new-account-rpm`), and one question with many tool rounds can exceed that. Wait a minute and ask again. |
 | The chat shows **"OpenRouter error 429"** | The rate limit above lasted through both waits. Wait a minute and ask again, or ask a narrower question that needs fewer tool rounds. |
 | An agent calls `get_result_excerpt` over and over | The built-in MCP tools return a large result truncated, as a preview with an artifact id, and a model can page through the artifact piece by piece. Seen with `google/gemini-3.5-flash` on a server list: 19 excerpt calls, 22 requests in 40 seconds, then the rate limit above. Ask a narrower question. |

@@ -676,6 +676,75 @@ class OpenRouterProviderSpec extends Specification {
 	// Response
 	// ------------------------------------------------------------------
 
+	def "empty tool arguments a model filled in are dropped before Morpheus runs the tool"() {
+		given: 'what openai/gpt-5.4-mini sent for list_servers on 2026-09-21'
+		OpenRouterApiService api = Stub()
+		api.createChatCompletion(*_) >> [success: true, data: [choices: [[finish_reason: 'tool_calls', message: [content: null, tool_calls: [
+			[id: 't1', type: 'function', function: [name: 'list_servers', arguments: '{"name":"","phrase":"","zoneId":0,"managed":false,"status":"","max":100,"offset":0,"tags":[],"filters":{},"note":null,"powerState":"on"}']],
+			[id: 't2', type: 'function', function: [name: 'use_servers_tools', arguments: '{"filter":"list_servers"}']]
+		]]]]]]
+		provider.apiService = api
+		AccountIntegration ai = configured(config)
+		ai.servicePassword = 'sk-or-v1-test'
+
+		when:
+		ServiceResponse<LlmChatResponse> response = provider.generateResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(model: 'openai/gpt-5.4-mini', messages: [message('user', 'List all servers.')]), [:])
+		List<Map> calls = response.data.metadata.tool_calls as List<Map>
+
+		then:
+		calls*.function*.arguments == expected
+		response.data.message.metadata.tool_calls.is(calls)
+
+		where:
+		config                            || expected
+		[:]                               || ['{"max":100,"powerState":"on"}', '{"filter":"list_servers"}']
+		[dropEmptyToolArguments: 'on']    || ['{"max":100,"powerState":"on"}', '{"filter":"list_servers"}']
+		[dropEmptyToolArguments: false]   || ['{"name":"","phrase":"","zoneId":0,"managed":false,"status":"","max":100,"offset":0,"tags":[],"filters":{},"note":null,"powerState":"on"}', '{"filter":"list_servers"}']
+	}
+
+	def "pruning leaves non-object arguments and nested values alone"() {
+		expect:
+		OpenRouterProvider.pruneEmptyArguments(json) == [json: expected, dropped: dropped]
+
+		where:
+		json                                        || expected                            | dropped
+		'{"a":{"b":""},"c":[0],"d":1}'              || '{"a":{"b":""},"c":[0],"d":1}'      | []
+		'{"a":"","b":"x"}'                          || '{"b":"x"}'                         | ['a']
+		'{"a":""}'                                  || '{}'                                | ['a']
+		'[1,2]'                                     || '[1,2]'                             | []
+		'not json'                                  || 'not json'                          | []
+		''                                          || ''                                  | []
+		null                                        || null                                | []
+	}
+
+	def "an answer the token limit cut off says so, in its own language, and the note is stripped on replay"() {
+		given:
+		Map data = [choices: [[finish_reason: 'length', message: [role: 'assistant', content: content]]], usage: [prompt_tokens: 1, completion_tokens: 1000]]
+
+		when:
+		LlmChatResponse response = provider.parseChatResponse(data)
+
+		then:
+		response.finishReason == 'length'
+		response.metadata.truncated == true
+		response.message.content == content + '\n\n*' + note + '*'
+		OpenRouterProvider.stripUsageFooter(response.message.content) == content
+
+		where:
+		content                                                     || note
+		'The history of virtualization begins with the mainframe'   || 'Answer cut off at the output token limit.'
+		'Die Geschichte der Virtualisierung beginnt mit dem'         || 'Antwort am Ausgabe-Token-Limit abgeschnitten.'
+	}
+
+	def "an empty answer cut off by the token limit becomes the note itself"() {
+		given: 'a reasoning model that spent its whole budget thinking'
+		Map data = [choices: [[finish_reason: 'length', message: [role: 'assistant', content: '']]], usage: [prompt_tokens: 13847, completion_tokens: 960]]
+
+		expect:
+		provider.parseChatResponse(data).message.content == '*Answer cut off at the output token limit.*'
+	}
+
 	def "a tool-call answer maps onto the tool_calls metadata Morpheus acts on"() {
 		given: 'what Gemini returned through OpenRouter: content null, and encrypted reasoning details'
 		Map data = [
@@ -960,7 +1029,7 @@ class OpenRouterProviderSpec extends Specification {
 		and: '* on its own lets every model through'
 		OpenRouterProvider.isListedModel(catalogEntry('mistralai/mistral-large'), false, false, LocalDate.of(2026, 9, 15),
 			OpenRouterProvider.parseModelAllowList('*'))
-		provider.optionTypes*.displayOrder == (0..11).toList()
+		provider.optionTypes*.displayOrder == (0..12).toList()
 	}
 
 	def "an expiry within a year goes into the name, a placeholder date does not"() {
