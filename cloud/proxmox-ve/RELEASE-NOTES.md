@@ -31,6 +31,12 @@ new number, and why the digests are recorded.
   first created and are the operator's afterwards. Name, CIDR, gateway,
   netmask and subnet still follow Proxmox.
 
+Built by the release workflow from the source at tag `proxmox-ve-v0.1.28-lab`.
+
+sha256 `591fb4fa08884c85643b5a71eb653675f3f4e8dc56071588a1d3907097488f3d`
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.27-lab...proxmox-ve-v0.1.28-lab
+
 ## 0.1.27
 
 **HPE's Morpheus OS images are offered for provisioning, with nothing to
