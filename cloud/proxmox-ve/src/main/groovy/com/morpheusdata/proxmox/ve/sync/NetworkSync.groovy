@@ -10,6 +10,7 @@ import com.morpheusdata.core.util.HttpApiClient
 import com.morpheusdata.core.util.SyncTask
 import com.morpheusdata.model.Cloud
 import com.morpheusdata.model.Network
+import com.morpheusdata.model.NetworkServer
 import com.morpheusdata.model.projection.NetworkIdentityProjection
 import com.morpheusdata.proxmox.ve.util.ProxmoxMiscUtil
 import groovy.util.logging.Slf4j
@@ -26,6 +27,7 @@ class NetworkSync {
     private ProxmoxVePlugin plugin
     private HttpApiClient apiClient
     private Map authConfig
+    private NetworkServer networkServer
 
     public NetworkSync(ProxmoxVePlugin proxmoxVePlugin, Cloud cloud, HttpApiClient apiClient) {
         this.@plugin = proxmoxVePlugin
@@ -41,6 +43,7 @@ class NetworkSync {
         try {
 
             log.debug "Execute NetworkSync STARTED: ${cloud.id}"
+            networkServer = resolveNetworkServer()
 
             def cloudItems = ProxmoxApiComputeUtil.listProxmoxNetworks(apiClient, authConfig, true)
             // Never sync against a failed listing: an empty result would delete every network
@@ -108,7 +111,7 @@ class NetworkSync {
                         tenantName   : cloud.account.name,
                         refType      : "ComputeZone",
                         refId        : cloud.id,
-                        networkServer: cloud.networkServer,
+                        networkServer: networkServer,
                         providerId   : "",
                         gateway      : cloudItem?.gateway,
                         netmask      : cloudItem?.netmask,
@@ -144,13 +147,20 @@ class NetworkSync {
                     gateway      : cloudItem?.gateway,
                     netmask      : cloudItem?.netmask,
                     subnetAddress: cloudItem?.subnetAddress,
-                    dnsPrimary   : "",
-                    dnsSecondary : "",
-                    dhcpServer   : true,
                     active       : true
             ]
+            // DNS servers, the DHCP flag, the domain and the search domains are the operator's to
+            // set: Proxmox knows none of them, so writing them here blanked every edit on the next
+            // refresh.
 
-            if (ProxmoxMiscUtil.doUpdateDomainEntity(existingItem, networkFieldValueMap)) {
+            boolean changed = ProxmoxMiscUtil.doUpdateDomainEntity(existingItem, networkFieldValueMap)
+            // Networks synced before the cloud had a network server were saved without one, and
+            // Morpheus refuses every later edit of them with "networkServer: Cannot be blank".
+            if (existingItem.networkServer == null && networkServer != null) {
+                existingItem.networkServer = networkServer
+                changed = true
+            }
+            if (changed) {
                 itemsToUpdate << existingItem
             }
         }
@@ -161,6 +171,26 @@ class NetworkSync {
         //Example:
         // Nutanix - https://github.com/gomorpheus/morpheus-nutanix-prism-plugin/blob/master/src/main/groovy/com/morpheusdata/nutanix/prism/plugin/sync/NetworksSync.groovy
         // Openstack - https://github.com/gomorpheus/morpheus-openstack-plugin/blob/main/src/main/groovy/com/morpheusdata/openstack/plugin/sync/NetworksSync.groovy
+    }
+
+
+    /**
+     * The cloud's network server. {@code cloud.networkServer} is empty on a cloud whose server was
+     * registered by {@code initializeProvider} after the cloud was saved, so fall back to looking
+     * the server up by type and cloud.
+     */
+    private NetworkServer resolveNetworkServer() {
+        if (cloud.networkServer) {
+            return cloud.networkServer
+        }
+        try {
+            return morpheusContext.services.network.server.find(new DataQuery()
+                    .withFilter('type.code', 'proxmox-ve.network')
+                    .withFilter('zoneId', cloud.id))
+        } catch (e) {
+            log.warn("No network server found for cloud ${cloud.id}: ${e.message}")
+            return null
+        }
     }
 
 

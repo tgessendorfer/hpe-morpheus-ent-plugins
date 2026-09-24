@@ -13,6 +13,24 @@ new number, and why the digests are recorded.
 
 ---
 
+## 0.1.28
+
+**Proxmox networks can be edited, and edits survive the next refresh.**
+
+- **`networkServer: Cannot be blank` is gone for existing clouds.** 0.1.24
+  registers a network server when a cloud is added, but a cloud created before
+  that has an empty `cloud.networkServer`, and its networks were saved without
+  one, so every edit in *Infrastructure › Network* failed. The network sync now
+  looks the server up by type (`proxmox-ve.network`) and cloud when the cloud
+  carries none, uses it for new networks, and attaches it to existing networks
+  that lack one.
+- **The sync no longer blanks operator settings.** Each refresh wrote
+  `dnsPrimary`, `dnsSecondary` and `dhcpServer` back to their defaults on every
+  existing network, so a DNS server entered in the UI vanished within minutes.
+  Proxmox knows none of these values; they are set only when a network is
+  first created and are the operator's afterwards. Name, CIDR, gateway,
+  netmask and subnet still follow Proxmox.
+
 ## 0.1.27
 
 **HPE's Morpheus OS images are offered for provisioning, with nothing to
