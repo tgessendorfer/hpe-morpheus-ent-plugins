@@ -44,6 +44,24 @@ of 2), `publicVirtualMachineCount` fell from 12 to 0, and `sockets` went from
 such field on `ComputeServer`, so a node counts as Morpheus's default of 2
 sockets, whatever the hardware.
 
+## Where the UI shows it
+
+*Administration › Settings › License* shows a usage bar only for what the
+installed licence key limits. From the page template
+(`admin/settings/_license.gsp`, 9.0.2):
+
+```
+showSockets    = license.maxSockets > 0
+showHosts      = license.maxHosts > 0
+showMvmSockets = !showSockets
+```
+
+So the socket bar and the hypervisor list (`_socketDetails.gsp`) appear only
+with a socket-based key. A key without `maxSockets`, like the lab's, shows the
+*HVM Sockets* bar instead, which counts `mvm-host` servers and never a Proxmox
+node. The counts are computed either way; `GET /api/license` → `currentUsage`
+has them (`hypervisorSocketCount`, `sockets`, `mvmSockets`).
+
 ## What the appliance reported (9.0.1, before 0.1.29)
 
 From `GET /api/license` → `currentUsage`, on a lab appliance at 9.0.1 backed by
