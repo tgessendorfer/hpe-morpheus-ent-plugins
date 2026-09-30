@@ -676,6 +676,20 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 	}
 
 	/**
+	 * Proxmox VE is an on-premises hypervisor, so the cloud type is private.
+	 * The interface default is PUBLIC, and Morpheus copies it into the cloud
+	 * type's `cloud` column when the plugin loads. Socket licensing counts
+	 * hypervisor hosts only in private clouds; in a public one the nodes
+	 * count for nothing and every guest, the node included, counts at 15
+	 * VMs per socket.
+	 * @return CloudClassification
+	 */
+	@Override
+	CloudProvider.CloudClassification getCloudClassification() {
+		return CloudProvider.CloudClassification.PRIVATE
+	}
+
+	/**
 	 * Indicates if the cloud supports cloud-init. Returning true will allow configuration of the Cloud
 	 * to allow installing the agent remotely via SSH /WinRM or via Cloud Init
 	 * @return Boolean

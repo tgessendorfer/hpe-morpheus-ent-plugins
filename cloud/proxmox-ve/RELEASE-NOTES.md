@@ -13,6 +13,49 @@ new number, and why the digests are recorded.
 
 ---
 
+## 0.1.29
+
+**Proxmox VE nodes count as hypervisor sockets for licensing.**
+
+- **The cloud type is now private.** `CloudProvider.getCloudClassification()`
+  defaults to `PUBLIC`, the plugin never overrode it, and Morpheus copies the
+  value into the cloud type's `cloud` column whenever the plugin loads. The
+  licence code (`ApplianceStatsService.getSocketStats` in Morpheus 9.0.2)
+  counts hypervisor hosts only in clouds whose type is `private`, and counts
+  every server in a `public` cloud as a VM at 15 VMs per socket. So a Proxmox
+  node counted for nothing, and every guest, **the node itself and powered-off
+  guests included**, counted as a fifteenth of a socket. The plugin now
+  returns `PRIVATE`.
+- **Behaviour change: licence consumption goes up.** Each node now counts as
+  `maxSockets` sockets, and its guests no longer count separately. The Plugin
+  API (1.4.2) has no `maxSockets` on `ComputeServer`, so the plugin cannot
+  report the real socket count and Morpheus falls back to its default of
+  **2 sockets per node**. That is right for a typical two-socket server and one
+  socket too many for a single-socket one.
+- **HVM sockets are unaffected.** The *HVM Sockets* bar on the licence page
+  counts only HPE VM hosts (compute type `mvm-host`); Proxmox nodes count in
+  the total `sockets` figure.
+
+Verified on Morpheus 9.0.2 with a local build of this commit: the plugin
+loaded, `GET /api/zone-types?code=proxmox-ve.cloud` answers `"cloud": "private"`,
+the cloud synced `ok`, and the log shows no new error. `GET /api/license` →
+`currentUsage` on the lab appliance (one single-socket node, 12 servers in the
+cloud), before → after:
+
+| field | 0.1.28 | 0.1.29 |
+|---|---|---|
+| `hypervisorSocketCount` | 6 | **8** |
+| `publicVirtualMachineCount` | 12 | **0** |
+| `publicVirtualMachineSocketCount` | 0.8 | **0** |
+| `sockets` | 8.1333 | **9.3333** |
+| `mvmSockets` (HVM) | 2 | 2 |
+
+The node now counts 2 sockets, the default, although the hardware has one.
+
+Built by the release workflow from the source at tag `proxmox-ve-v0.1.29-lab`.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.28-lab...proxmox-ve-v0.1.29-lab
+
 ## 0.1.28
 
 **Proxmox networks can be edited, and edits survive the next refresh.**

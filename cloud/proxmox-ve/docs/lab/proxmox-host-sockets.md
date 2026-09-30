@@ -1,14 +1,50 @@
-# Proxmox sockets are not counted, and the reason is not what this file said
+# Proxmox sockets for licensing: the cloud type was public
 
-The appliance reports licence consumption as a fraction of a socket for guests
-running on a single-socket on-premises Proxmox host. This records what was
-measured, what has been fixed, and the one thing still open.
+The appliance reported licence consumption as a fraction of a socket for guests
+running on a single-socket on-premises Proxmox host. **The cause is the cloud
+type's classification, fixed in plugin 0.1.29.** The investigation that led
+there is kept below, including the wrong turns, because each was arrived at
+carefully and each was wrong in a way worth not repeating.
 
-**Two claims in the previous version of this document were wrong.** They are
-corrected below rather than deleted, because both were arrived at carefully and
-both were wrong in a way worth not repeating.
+## The cause (found 2026-09-30, Morpheus 9.0.2)
 
-## What the appliance reports
+The licence figures are computed in `ApplianceStatsService` in
+`WEB-INF/lib/morpheus-core-<version>.jar` (searching the class files of that jar
+for `hypervisorSocketCount` finds it; the earlier search here missed it). What
+`getSocketStats` does:
+
+- **`hypervisorSocketCount`** sums `maxSockets ?: 2` over compute servers in
+  clouds whose type has `cloud = 'private'`, with no parent server, a server
+  type with `vmHypervisor`, `containerHypervisor` or `bareMetalHost`, not
+  `guestVm`, not an agent type `controller`, not a node type `kube-master`,
+  de-duplicated by `uniqueId`.
+- **`publicVirtualMachineCount`** counts every compute server in clouds whose
+  type has `cloud = 'public'` (distinct `external_id`, plus those without one),
+  whatever its server type or power state. 15 of them make a socket.
+- **`privateVirtualMachineCount`** counts the same way in private clouds
+  **without** such a hypervisor host; guests of a counted host are not counted
+  again.
+- **`hosts`** counts only compute types `docker-host`, `kube-worker`,
+  `kvm-host` and `kvm-docker-host`. It has nothing to do with hypervisor
+  sockets.
+- **`mvmSockets`** (the *HVM Sockets* bar on the licence page) sums
+  `max_sockets` over compute type `mvm-host` only.
+
+`GET /api/zone-types?code=proxmox-ve.cloud` answered `"cloud": "public"`. The
+plugin never overrode `CloudProvider.getCloudClassification()`, whose default is
+`PUBLIC`, and `CloudProviderPluginManagerService.syncProvider` writes that value
+into the cloud type on every plugin load. So the node counted for nothing, and
+all 12 servers of the lab cloud, the node itself and two powered-off guests
+included, counted as 12 / 15 = 0.8 sockets.
+
+0.1.29 returns `PRIVATE`. Measured after uploading it: the cloud type reads
+`private`, `hypervisorSocketCount` rose from 6 to 8 (the node, at the default
+of 2), `publicVirtualMachineCount` fell from 12 to 0, and `sockets` went from
+8.13 to 9.33, exactly as the code predicts. What remains is `maxSockets`: the Plugin API has no
+such field on `ComputeServer`, so a node counts as Morpheus's default of 2
+sockets, whatever the hardware.
+
+## What the appliance reported (9.0.1, before 0.1.29)
 
 From `GET /api/license` → `currentUsage`, on a lab appliance at 9.0.1 backed by
 one Proxmox host with one physical socket:
@@ -90,7 +126,7 @@ Measured before and after a cloud sync:
 The record now describes the hardware. See
 [`RELEASE-NOTES.md`](../../RELEASE-NOTES.md).
 
-## The finding: the plugin cannot fix this
+## `maxSockets`: what the plugin still cannot set
 
 `coresPerSocket` is not the field the licence counts. Morpheus's own socket view,
 `WEB-INF/classes/admin/settings/_socketDetails.gsp`, reads:
@@ -136,25 +172,17 @@ Both database changes were reverted; the appliance is back as found
 (`managed=0`, `max_sockets=NULL`, `cores_per_socket=4`).
 
 Through every one of those, `sockets` stayed at exactly `0.2666666667` and
-`hosts` at `0`. `hosts: 0` is the gate — the controller's `hypervisors`
-collection is empty — and nothing in the host record explains why. The figures
-are computed rather than stored: `appliance_license` has no host or socket
-columns, only `date_created` and `last_updated`. The computing code is not
-greppable as a plain string in `WEB-INF/classes` or the shipped jars.
+`hosts` at `0`. This document then called `hosts: 0` the gate. **That was the
+third wrong claim**: `hosts` counts only Docker, Kubernetes and KVM hosts, and
+none of the four changes could matter while the cloud type was public. See
+*The cause* above.
 
 ## What to ask HPE
 
-The question is now specific enough to be worth asking, and does not need this
-lab to reproduce:
-
-> A Proxmox VE host is registered as a ComputeServer of type `proxmox-ve-node`,
-> whose ComputeServerType has `vm_hypervisor = 1`, with `server_type =
-> hypervisor` and `power_state = on`. `currentUsage.hosts` is still 0, so its
-> guests are counted as public-cloud workloads at 15:1. What makes a
-> ComputeServer count as a hypervisor host for licensing — and since
-> `_socketDetails.gsp` reads `server.maxSockets`, how is a cloud plugin expected
-> to populate it, given the Plugin API exposes only `coresPerSocket` on
-> ComputeServer?
+How a cloud plugin is expected to report a host's socket count. Licensing reads
+`compute_server.max_sockets`, and the Plugin API exposes only `coresPerSocket`
+on `ComputeServer`, so every plugin-provided hypervisor host counts as 2
+sockets.
 
 ## What no longer blocks this
 
