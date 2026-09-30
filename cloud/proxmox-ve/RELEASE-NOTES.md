@@ -54,6 +54,8 @@ The node now counts 2 sockets, the default, although the hardware has one.
 
 Built by the release workflow from the source at tag `proxmox-ve-v0.1.29-lab`.
 
+sha256 `154d32d3c0fecb02cac4a493a88456cb50ba489b4834900d5a77c2cf5f529913`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.28-lab...proxmox-ve-v0.1.29-lab
 
 ## 0.1.28
