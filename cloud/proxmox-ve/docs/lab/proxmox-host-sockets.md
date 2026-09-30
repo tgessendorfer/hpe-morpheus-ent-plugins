@@ -62,6 +62,25 @@ with a socket-based key. A key without `maxSockets`, like the lab's, shows the
 node. The counts are computed either way; `GET /api/license` → `currentUsage`
 has them (`hypervisorSocketCount`, `sockets`, `mvmSockets`).
 
+## Verified in the UI (2026-09-30, 9.0.2, plugin 0.1.29)
+
+With a socket-limited key stacked on the lab's key, the licence page shows the
+*Sockets* bar: 9.333 used. *View Details* opens *Socket Usage* with *Host
+Sockets: 8*, *Public Cloud VM Sockets: 0*, and a host list in which the Proxmox
+node appears as type *Proxmox VE Node* with *Default (2)* sockets.
+
+Two things on that dialog are Morpheus's, not the plugin's:
+
+- **The host list shows *Default (2)* for every host**, including two HPE VM
+  hosts whose `maxSockets` is 1 in `GET /api/servers`. The summary counts them
+  as 1: 2 + 2 + 2 + 1 + 1 = 8. Only the rows are wrong.
+- **The dialog has no section for private-cloud VMs without a hypervisor host**,
+  so its figures (8 + 0) do not add up to the bar (9.333); the difference is
+  20 such VMs at 15 per socket.
+
+Stacking keys combined `maxSockets` but left `maxMvmSockets` empty although the
+new key carries one; with a socket limit the page hides the HVM bar anyway.
+
 ## What the appliance reported (9.0.1, before 0.1.29)
 
 From `GET /api/license` → `currentUsage`, on a lab appliance at 9.0.1 backed by
