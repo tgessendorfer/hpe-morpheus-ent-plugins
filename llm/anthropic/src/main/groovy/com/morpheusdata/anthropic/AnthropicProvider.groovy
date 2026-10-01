@@ -254,7 +254,7 @@ class AnthropicProvider implements LlmProvider {
 			displayOrder: 6,
 			required: false,
 			defaultValue: DEFAULT_MAX_OUTPUT_TOKENS.toString(),
-			helpText: 'The Messages API requires max_tokens on every request. Used when the caller does not supply one.'
+			helpText: 'The Messages API requires max_tokens on every request. Also the minimum: Morpheus asks for 1000 on every chat request, which cuts answers off, so a smaller request is raised to this value.'
 		)
 
 		optionTypes << new OptionType(
@@ -879,7 +879,7 @@ class AnthropicProvider implements LlmProvider {
 		boolean cachingEnabled = isPromptCachingEnabled(accountIntegration)
 		boolean thinkingEnabled = isThinkingEnabled(accountIntegration)
 
-		Integer maxTokens = request.maxOutputTokens ?: resolveDefaultMaxOutputTokens(accountIntegration)
+		Integer maxTokens = resolveMaxTokens(request.maxOutputTokens, accountIntegration)
 		Map requestBody = [
 			model     : request.model ?: DEFAULT_CHAT_MODEL,
 			max_tokens: maxTokens,
@@ -1440,6 +1440,17 @@ class AnthropicProvider implements LlmProvider {
 		def configured = accountIntegration?.getConfigProperty('maxOutputTokens')
 		Integer parsed = toInteger(configured)
 		return (parsed != null && parsed > 0) ? parsed : DEFAULT_MAX_OUTPUT_TOKENS
+	}
+
+	/**
+	 * The integration's value is a floor, not only a fallback. Morpheus asks for 1000
+	 * output tokens on every chat request, and newer models spend part of that on
+	 * thinking blocks even with thinking off, so answers stopped at max_tokens in mid
+	 * sentence. A caller asking for more than the integration's value still gets it.
+	 */
+	protected Integer resolveMaxTokens(Integer requested, AccountIntegration accountIntegration) {
+		Integer floor = resolveDefaultMaxOutputTokens(accountIntegration)
+		return (requested != null && requested > floor) ? requested : floor
 	}
 
 	/** Checkbox config values arrive as 'on'/'true'/true depending on the caller. */

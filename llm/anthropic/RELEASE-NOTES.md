@@ -6,6 +6,30 @@ shaded `-all.jar` is attached. Notes for 1.4.1 and earlier exist only there.
 
 ---
 
+## 1.6.1
+
+**Answers are no longer cut off at 1,000 output tokens.** Morpheus asks for `maxOutputTokens: 1000`
+on every chat request, and the plugin passed that on, so *Default Max Output Tokens* (8,192 unless
+set) was never used in the chat. With web search and Claude Sonnet 5, which writes thinking blocks
+even with *Extended Thinking* off, two of three test questions on Morpheus 9.0.2 ended with
+`stop_reason=max_tokens` after 462 and 2,048 characters of answer text. The integration's value is
+now a floor: a smaller request is raised to it, a larger one is kept. **Behaviour change:** chat
+answers can be up to 8,192 output tokens by default instead of 1,000; set *Default Max Output
+Tokens* lower to cap cost.
+
+**1.6.0 checked on an appliance.** On Morpheus 9.0.2 with Claude Sonnet 5 and web search on, the
+question that had failed with `400 prompt is too long` before was answered in full. The new log line
+showed the caps at work: 3 `web_search` and 3 `web_fetch` calls, about 243,000 input tokens summed
+over the server-side loop, against about 1,065,000 before. A turn without answer text did not occur,
+so the final-answer request is still covered by tests only.
+
+Verified: the test suite passes, with a new test for the floor. Not yet verified on an appliance:
+that the chat request goes out with `max_tokens=8192`.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.6.0...anthropic-v1.6.1
+
+---
+
 ## 1.6.0
 
 Makes web search and fetch safe to leave on for an MCP-backed agent. A chat question on Claude

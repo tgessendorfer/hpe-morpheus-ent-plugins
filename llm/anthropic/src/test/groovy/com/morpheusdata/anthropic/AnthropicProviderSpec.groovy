@@ -387,6 +387,19 @@ class AnthropicProviderSpec extends Specification {
 		provider.resolveDefaultMaxOutputTokens(integration) == AnthropicProvider.DEFAULT_MAX_OUTPUT_TOKENS
 	}
 
+	def "the integration's max output tokens are a floor for what Morpheus asks for"() {
+		given: 'Morpheus asks for 1000 output tokens on every chat request'
+		LlmChatRequest request = new LlmChatRequest(model: 'claude-sonnet-5', maxOutputTokens: 1000,
+			messages: [message('user', 'GA?')])
+		AccountIntegration withConfig = configured([maxOutputTokens: '8192'])
+
+		expect:
+		provider.buildMessagesRequestBody(request, withConfig, false).max_tokens == 8192
+		provider.buildMessagesRequestBody(request, integration, false).max_tokens == AnthropicProvider.DEFAULT_MAX_OUTPUT_TOKENS
+		provider.resolveMaxTokens(32000, withConfig) == 32000
+		provider.resolveMaxTokens(null, withConfig) == 8192
+	}
+
 	def "temperature and top_p are withheld by default"() {
 		given: 'Morpheus supplies sampling parameters on every chat request'
 		LlmChatRequest request = new LlmChatRequest(
