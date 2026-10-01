@@ -170,22 +170,61 @@ class BudgetBurnMathSpec extends Specification {
 		barWidth(140G) == 100
 	}
 
-	def "scopeCondition filters invoices by the budget scope"() {
+	def "scopeCondition of a master-owned budget filters by the scope only (master sees subtenants' spend)"() {
 		given:
 		List params = []
 
 		expect:
-		scopeCondition([ref_scope: scope, ref_id: 7, account_id: 3], params) == sql
+		scopeCondition([ref_scope: scope, ref_id: 7, account_id: 1, owner_master: master], params) == sql
 		params == [param]
 
 		where:
-		scope     || sql                 | param
-		'tenant'  || 'i.account_id = ?'  | 7
-		'group'   || 'i.site_id = ?'     | 7
-		'cloud'   || 'i.zone_id = ?'     | 7
-		'user'    || 'i.user_id = ?'     | 7
-		'account' || 'i.account_id = ?'  | 3
-		null      || 'i.account_id = ?'  | 3
+		scope     | master                 || sql                 | param
+		'tenant'  | 1                      || 'i.account_id = ?'  | 7
+		'group'   | 1                      || 'i.site_id = ?'     | 7
+		'cloud'   | 1                      || 'i.zone_id = ?'     | 7
+		'user'    | true                   || 'i.user_id = ?'     | 7
+		'account' | BigInteger.ONE         || 'i.account_id = ?'  | 1
+		null      | 1L                     || 'i.account_id = ?'  | 1
+	}
+
+	def "scopeCondition of a subtenant budget counts only the owner's invoices"() {
+		given:
+		List params = []
+
+		expect:
+		scopeCondition([ref_scope: scope, ref_id: ref, account_id: 3, owner_master: master], params) == sql
+		params == expected
+
+		where:
+		scope     | ref  | master || sql                                    | expected
+		'cloud'   | 7    | 0      || 'i.account_id = ? AND i.zone_id = ?'   | [3, 7]
+		'group'   | 7    | 0      || 'i.account_id = ? AND i.site_id = ?'   | [3, 7]
+		'user'    | 7    | 0      || 'i.account_id = ? AND i.user_id = ?'   | [3, 7]
+		'tenant'  | 7    | 0      || 'i.account_id = ? AND i.account_id = ?' | [3, 7]
+		'tenant'  | 3L   | 0      || 'i.account_id = ?'                     | [3L]
+		'account' | null | 0      || 'i.account_id = ?'                     | [3]
+		null      | null | 0      || 'i.account_id = ?'                     | [3]
+		'cloud'   | 7    | null   || 'i.account_id = ? AND i.zone_id = ?'   | [3, 7]
+		'cloud'   | 7    | false  || 'i.account_id = ? AND i.zone_id = ?'   | [3, 7]
+	}
+
+	def "isMaster reads the master flag in the forms the database returns"() {
+		expect:
+		isMaster(flag) == result
+
+		where:
+		flag           || result
+		1              || true
+		1L             || true
+		BigInteger.ONE || true
+		true           || true
+		'1'            || true
+		0              || false
+		BigInteger.ZERO|| false
+		false          || false
+		null           || false
+		'0'            || false
 	}
 
 	def "scope and status keys use the provider code"() {

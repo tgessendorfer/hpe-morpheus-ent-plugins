@@ -107,7 +107,8 @@ class BudgetBurnAnalyticsProvider extends AbstractAnalyticsProvider {
 			int day = now.get(Calendar.DAY_OF_MONTH), days = now.getActualMaximum(Calendar.DAY_OF_MONTH)
 			String per = now.time.format('yyyyMM')
 			// Only yearly budgets; the budget currency is the owner's (as GET /api/budgets/{id} shows it).
-			String budgetSelect = "SELECT b.*, a.name AS owner, a.currency AS owner_currency FROM account_budget b JOIN account a ON a.id = b.account_id WHERE b.period = 'year' AND b.period_value = ?"
+			// owner_master feeds the spend rule in scopeCondition (owner's invoices only, plus subtenants' for the master).
+			String budgetSelect = "SELECT b.*, a.name AS owner, a.currency AS owner_currency, CAST(a.master_account AS UNSIGNED) AS owner_master FROM account_budget b JOIN account a ON a.id = b.account_id WHERE b.period = 'year' AND b.period_value = ?"
 			List<GroovyRowResult> budgets = master ?
 				sql.rows("${budgetSelect} ORDER BY a.master_account DESC, b.name".toString(), [year.toString()]) :
 				sql.rows("${budgetSelect} AND b.account_id = ? ORDER BY b.name".toString(), [year.toString(), acc?.id])

@@ -59,7 +59,7 @@ jar {
 			'Morpheus-Name': 'Cost Threshold Approval',
 			'Morpheus-Organization': 'community',
 			'Morpheus-Code': 'morpheus-cost-approval-plugin',
-			'Morpheus-Description': 'Approval integration that auto-approves requests whose monthly price is at or below a configurable threshold. Requests above it, or priced in another currency, wait for a human approver.',
+			'Morpheus-Description': 'Approval integration that approves requests whose monthly price is at or below a configurable threshold. Requests above it, priced in another currency or without a price are rejected at once.',
 			'Morpheus-Labels': 'FinOps, Cost, Reporting',
 			'Morpheus-Repo': 'https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/finops/cost-approval',
 			'Morpheus-Min-Appliance-Version': morpheusMinApplianceVersion
@@ -74,9 +74,10 @@ task copyRuntimeLibs(type: Copy) {
 
 test {
 	useJUnitPlatform()
-	// The plugin spec compares getCode() and setWebsiteUrl() against the manifest above.
+	// The plugin spec compares getCode(), setWebsiteUrl() and the description against the manifest above.
 	systemProperty 'morpheus.code', jar.manifest.attributes['Morpheus-Code']
 	systemProperty 'morpheus.repo', jar.manifest.attributes['Morpheus-Repo']
+	systemProperty 'morpheus.description', jar.manifest.attributes['Morpheus-Description']
 	testLogging {
 		exceptionFormat = 'full'
 		showStandardStreams = true

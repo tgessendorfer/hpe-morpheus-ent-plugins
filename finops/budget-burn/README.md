@@ -33,6 +33,12 @@ so nothing is counted twice. The budget scope maps to the invoices as follows: t
 `account_id`, group → `site_id`, cloud → `zone_id`, user → `user_id`, otherwise the budget
 owner's tenant.
 
+**Whose invoices count.** A budget counts only the invoices of the tenant that owns it. A
+budget owned by the master tenant also counts the invoices of its sub-tenants within its scope
+(for example every tenant's spend on a cloud). A sub-tenant's budget never counts another
+tenant's invoices, even when its cloud is shared by the master tenant or its group or user also
+carries invoices of the master tenant.
+
 ## Who sees what
 
 - Users of the **master tenant** see all budgets of the master tenant and of every sub-tenant,

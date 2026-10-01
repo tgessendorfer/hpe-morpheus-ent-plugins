@@ -39,7 +39,12 @@ hang until the instance is deleted, so the plugin answers `rejected`
 ### Verified
 
 - Unit tests (Spock): option lookup and precedence, currency resolution, price summing, rounding,
-  every decision outcome, number format per locale, message bundles, plugin and provider codes.
+  every decision outcome, number format per locale, message bundles, plugin and provider codes,
+  plugin description equal to the manifest `Morpheus-Description` and at most 255 characters.
+- Live on 9.0.2: the plugin list shows the description that matches this behaviour
+  (*... Requests above it, priced in another currency or without a price are rejected at once.*).
+  The approval runs below were made with an earlier candidate that differs from this source only
+  in that description; they were not repeated.
 - On HPE Morpheus Enterprise 9.0.2: the integration type lists its fields as
   `cm.plugin.costThreshold` and `cm.plugin.thresholdCurrency` with field context `config`.
 - Live on 9.0.2 with an *Approve Provision* policy scoped to one group: a 16.00 EUR request is

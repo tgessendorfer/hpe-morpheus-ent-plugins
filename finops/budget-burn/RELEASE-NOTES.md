@@ -20,6 +20,9 @@ the spend in its scope.** Plugin API 1.4.2, minimum appliance 9.0.2.
   budget* above 100 % of the monthly budget.
 - **Budget scopes** tenant, group, cloud and user, mapped to the matching monthly invoices.
   Quarterly and yearly budget amounts are spread evenly over their months.
+- **Whose invoices count:** a budget counts only its owner tenant's invoices; a master tenant
+  budget also counts its sub-tenants' invoices in its scope. A sub-tenant's cloud, group or user
+  budget on a shared cloud never includes another tenant's spend.
 - **Tenant aware:** master tenant users see all budgets, sub-tenant users only their own.
 - **Currencies kept apart:** budget currency = owner tenant currency, else master tenant
   currency, else USD. Spend in another currency is listed separately, never converted or added
@@ -29,11 +32,17 @@ the spend in its scope.** Plugin API 1.4.2, minimum appliance 9.0.2.
 ### Verified
 
 - Unit tests (Spock) for the budget split per month, currency grouping, foreign amounts,
-  rounding, burn rate, status thresholds, scope mapping, locale formats and the message keys;
-  plugin code equals the manifest `Morpheus-Code`.
+  rounding, burn rate, status thresholds, scope mapping with the owner rule, locale formats and
+  the message keys; plugin code equals the manifest `Morpheus-Code`.
 - Live on Morpheus 9.0.2 with the 1.1.0 release candidates: every figure equal to a reference
   implementation run side by side, as master and as sub-tenant user (a sub-tenant sees only its
   own budgets), page in English and German.
+- Live on Morpheus 9.0.2 with a release candidate of the final source: three sub-tenant budgets
+  (cloud, group and user scope) whose cloud, group or user also carried master tenant invoices
+  showed the master tenant's spend before the owner rule (forecast 37.51 and 36.83 instead of
+  21.33 EUR) and only the sub-tenant's own spend with it (21.33 EUR, equal to its invoices);
+  all other budgets, as master and as sub-tenant, showed the same figures before and after.
+  This check ran with the page in German; the English page was not rechecked after the fix.
 - Not yet uploaded: this release jar itself. The release candidates were replaced in place by
   later builds with the same plugin id, so 1.1.0 is expected to install over them the same way.
 

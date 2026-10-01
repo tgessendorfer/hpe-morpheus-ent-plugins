@@ -36,6 +36,14 @@ class CostApprovalPluginSpec extends Specification {
 		plugin.description.length() <= 255
 	}
 
+	def "description equals the manifest Morpheus-Description and names the rejection"() {
+		expect:
+		System.getProperty('morpheus.description')
+		plugin.description == System.getProperty('morpheus.description')
+		plugin.description.contains('rejected')
+		!plugin.description.contains('human')
+	}
+
 	def "the plugin registers exactly the expected providers"() {
 		expect:
 		plugin.providers*.code as Set == PROVIDER_CODES as Set

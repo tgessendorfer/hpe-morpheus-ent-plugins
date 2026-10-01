@@ -121,15 +121,42 @@ class BudgetBurnMath {
 		(1..month).inject(0.00G) { BigDecimal acc, m -> acc + monthlyBudget(interval, periods, m as int) } as BigDecimal
 	}
 
-	/** SQL condition on account_invoice (alias i) for the scope of a budget; adds its parameter. */
+	/**
+	 * SQL condition on account_invoice (alias i) for the scope of a budget; adds its parameters.
+	 * Spend rule: a budget counts only the invoices of its owner (b.account_id), plus those of
+	 * the subtenants when the owner is the master tenant (b.owner_master). Clouds are shared
+	 * across tenants, and a tenant's group or user can carry invoices of another account, so a
+	 * subtenant's budget always gets the owner restriction on top of its scope.
+	 */
 	static String scopeCondition(Map b, List params) {
+		List scopeParams = []
+		String cond
 		switch(b.ref_scope) {
-			case 'tenant': params << b.ref_id; return 'i.account_id = ?'
-			case 'group': params << b.ref_id; return 'i.site_id = ?'
-			case 'cloud': params << b.ref_id; return 'i.zone_id = ?'
-			case 'user': params << b.ref_id; return 'i.user_id = ?'
-			default: params << b.account_id; return 'i.account_id = ?'
+			case 'tenant': scopeParams << b.ref_id; cond = 'i.account_id = ?'; break
+			case 'group': scopeParams << b.ref_id; cond = 'i.site_id = ?'; break
+			case 'cloud': scopeParams << b.ref_id; cond = 'i.zone_id = ?'; break
+			case 'user': scopeParams << b.ref_id; cond = 'i.user_id = ?'; break
+			default: scopeParams << b.account_id; cond = 'i.account_id = ?'
 		}
+		boolean ownerOnly = cond == 'i.account_id = ?' && sameId(scopeParams[0], b.account_id)
+		if(isMaster(b.owner_master) || ownerOnly) {
+			params.addAll(scopeParams)
+			return cond
+		}
+		params << b.account_id
+		params.addAll(scopeParams)
+		return "i.account_id = ? AND ${cond}".toString()
+	}
+
+	/** True for a master-tenant flag as the database returns it (1, true, "1"); null is false. */
+	static boolean isMaster(def flag) {
+		if(flag instanceof Boolean) return flag
+		if(flag instanceof Number) return (flag as Number).intValue() == 1
+		return flag != null && flag.toString().trim() in ['1', 'true']
+	}
+
+	private static boolean sameId(def a, def b) {
+		a != null && b != null && a.toString() == b.toString()
 	}
 
 	/**

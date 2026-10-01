@@ -29,7 +29,7 @@ class CostApprovalPlugin extends Plugin {
 
 	// plugin_instance.description holds 255 characters. A longer text makes the whole
 	// plugin registration fail with "Data too long for column 'description'".
-	static final String DESCRIPTION = 'Approval integration that auto-approves requests whose monthly price is at or below a configurable threshold. Requests above it, or priced in another currency, wait for a human approver.'
+	static final String DESCRIPTION = 'Approval integration that approves requests whose monthly price is at or below a configurable threshold. Requests above it, priced in another currency or without a price are rejected at once.'
 
 	@Override
 	String getCode() {
