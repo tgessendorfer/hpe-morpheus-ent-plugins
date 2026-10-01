@@ -51,4 +51,8 @@ the spend in its scope.** Plugin API 1.4.2, minimum appliance 9.0.2.
 - Only budgets with `period = year`; the current month follows the appliance JVM time zone.
 - Reads internal database tables; tested on 9.0.2 only and may break on an upgrade.
 
+Built by the release workflow from the source at tag `budget-burn-v1.1.0`.
+
+sha256 `118ae9067bbbb9c166890e769861c6121a6a15828aa5b54aa77c439f6cc9cf43`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/budget-burn-v1.1.0

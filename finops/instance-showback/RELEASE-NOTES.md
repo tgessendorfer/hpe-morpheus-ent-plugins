@@ -37,4 +37,8 @@ per currency. Built against plugin API 1.4.2, minimum appliance 9.0.2.
 - Not yet uploaded: this release jar itself. The release candidates were replaced in place by
   later builds with the same plugin id, so 1.1.0 is expected to install over them the same way.
 
+Built by the release workflow from the source at tag `instance-showback-v1.1.0`.
+
+sha256 `d16fb6da0961c421b4c1b8773401c32c8bd112b0829983e9ccc053dcf2d31763`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/instance-showback-v1.1.0

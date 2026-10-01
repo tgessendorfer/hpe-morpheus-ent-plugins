@@ -69,4 +69,8 @@ hang until the instance is deleted, so the plugin answers `rejected`
 - `PUT /api/integrations/{id}` replaces the whole option map: send threshold and currency together.
 - Reads the internal table `account` for the currency fallback; tested on 9.0.2 only.
 
+Built by the release workflow from the source at tag `cost-approval-v1.1.0`.
+
+sha256 `7e17f84908f917211597579a21330a387ac9f339f745aab585d8e14fe9e9b8ae`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/cost-approval-v1.1.0

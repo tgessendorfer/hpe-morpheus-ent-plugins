@@ -49,4 +49,8 @@ invoices.** Plugin API 1.4.2, minimum appliance 9.0.2.
 - Reads internal database tables (`account_invoice`, `account`); tested on 9.0.2 only and may
   break on an upgrade.
 
+Built by the release workflow from the source at tag `tenant-chargeback-v1.1.0`.
+
+sha256 `38cdaac17bf58a7993a8980f342f5264ca2f54fa5dd77e2c9b74499fe05bce38`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/tenant-chargeback-v1.1.0

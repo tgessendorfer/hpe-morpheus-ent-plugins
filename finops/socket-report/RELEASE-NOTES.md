@@ -39,4 +39,8 @@ report type `socket-usage-report` (*Socket Usage*, category *Inventory*), master
 
 Plugin API 1.4.2, minimum appliance 9.0.2.
 
+Built by the release workflow from the source at tag `socket-report-v1.1.0`.
+
+sha256 `62d1761e8dd7f66dff001c271e601c516c16b2cc37e716f65dc78257d25ba0cb`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/socket-report-v1.1.0

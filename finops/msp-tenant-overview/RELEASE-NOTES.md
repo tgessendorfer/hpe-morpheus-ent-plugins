@@ -45,4 +45,8 @@ Plugin API 1.4.2, minimum appliance 9.0.2, tested on 9.0.2 only. Reads the inter
 `account`, `compute_site`, `instance`, `compute_server` and `account_invoice`; may break on an
 appliance upgrade.
 
+Built by the release workflow from the source at tag `msp-tenant-overview-v1.1.0`.
+
+sha256 `f8def473b5024ac4362cdc56c35c33a183320d6265e70456bcc7f02f862d1c8d`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/msp-tenant-overview-v1.1.0
