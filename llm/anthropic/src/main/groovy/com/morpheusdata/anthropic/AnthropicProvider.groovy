@@ -74,12 +74,22 @@ class AnthropicProvider implements LlmProvider {
 	static final String WEB_SEARCH_TOOL_TYPE_BASIC = 'web_search_20250305'
 	static final String WEB_FETCH_TOOL_TYPE = 'web_fetch_20260318'
 	static final String WEB_FETCH_TOOL_TYPE_BASIC = 'web_fetch_20250910'
-	static final Integer DEFAULT_WEB_SEARCH_MAX_USES = 5
+	// Three searches answer a simple question; more mostly let a looping agent pile
+	// pages into one request. Each tool has its own cap.
+	static final Integer DEFAULT_WEB_SEARCH_MAX_USES = 3
+	static final Integer DEFAULT_WEB_FETCH_MAX_USES = 3
+	// A fetched page or PDF is otherwise added at full length, inside the same request,
+	// and a few of them took one request past the 1M-token context window.
+	static final Integer DEFAULT_WEB_FETCH_MAX_CONTENT_TOKENS = 25000
 	static final Integer MAX_LISTED_SOURCES = 8
 	static final Integer MAX_SOURCE_LABEL_LENGTH = 90
 	// A paused turn is resumed by resending it unchanged; the cap stops a runaway
 	// server-tool loop from spending the whole conversation on one answer.
 	static final Integer MAX_PAUSE_TURN_CONTINUATIONS = 4
+	// Sent once when a finished turn carries no answer text, with tools switched off.
+	static final String FINAL_ANSWER_PROMPT = 'Your previous turn ended without an answer. Using only what you have ' +
+		'already gathered above, write your final answer to my last question now, in the language of that question. ' +
+		'Do not call any tools. If what you gathered is not enough, say what is missing.'
 	// One or more italic usage lines at the very end of an answer.
 	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*(?:Tokens|Cost|Kosten|Koszt): [^*\\n]*\\*)+\\s*$'
 	// Enough to pick the footer's language, not a language detector: answers in each
@@ -355,7 +365,33 @@ class AnthropicProvider implements LlmProvider {
 			displayOrder: 15,
 			required: false,
 			defaultValue: DEFAULT_WEB_SEARCH_MAX_USES.toString(),
-			helpText: 'Hard cap on searches and fetches for a single request, applied to both tools. Simple questions use one to three searches. This is the only ceiling on what a looping agent can spend on search.'
+			helpText: 'Hard cap on web searches for a single request. Empty means 3, 0 means no cap. Simple questions use one to three searches. Together with the fetch cap below, this is the only ceiling on what a looping agent can spend on search.'
+		)
+
+		optionTypes << new OptionType(
+			code: "${PROVIDER_CODE}.webFetchMaxUses",
+			name: "Web Fetch Max Uses",
+			fieldName: "webFetchMaxUses",
+			fieldLabel: "Max Page Fetches per Request",
+			fieldContext: "config",
+			inputType: OptionType.InputType.NUMBER,
+			displayOrder: 16,
+			required: false,
+			defaultValue: DEFAULT_WEB_FETCH_MAX_USES.toString(),
+			helpText: 'Hard cap on pages read with web_fetch for a single request. Empty means 3, 0 means no cap. Every fetched page is added to the same request, so this and the token limit below decide how large a web-heavy request can grow.'
+		)
+
+		optionTypes << new OptionType(
+			code: "${PROVIDER_CODE}.webFetchMaxContentTokens",
+			name: "Web Fetch Max Content Tokens",
+			fieldName: "webFetchMaxContentTokens",
+			fieldLabel: "Web Fetch Max Content Tokens",
+			fieldContext: "config",
+			inputType: OptionType.InputType.NUMBER,
+			displayOrder: 17,
+			required: false,
+			defaultValue: DEFAULT_WEB_FETCH_MAX_CONTENT_TOKENS.toString(),
+			helpText: 'Longest a fetched page or PDF may be, in tokens; longer content is cut off. Empty means 25000, 0 means no limit. Without a limit a few long pages can push a single request past the model context window, which fails with "prompt is too long".'
 		)
 
 		optionTypes << new OptionType(
@@ -365,9 +401,9 @@ class AnthropicProvider implements LlmProvider {
 			fieldLabel: "Restrict to Domains",
 			fieldContext: "config",
 			inputType: OptionType.InputType.TEXT,
-			displayOrder: 16,
+			displayOrder: 18,
 			required: false,
-			helpText: 'Optional comma-separated allow list, for example: docs.morpheusdata.com, community.hpe.com, support.hpe.com. Bare hostnames with an optional path and no scheme. Leave empty to search the whole web. Narrowing this is the strongest control against a fetched page trying to talk the agent into something.'
+			helpText: 'Optional comma-separated allow list for both web search and web fetch, for example: docs.morpheusdata.com, community.hpe.com, support.hpe.com. Bare hostnames with an optional path and no scheme. Leave empty to search the whole web. Narrowing this is the strongest control against a fetched page trying to talk the agent into something.'
 		)
 
 		// Labels and help texts resolve through the plugin's i18n bundles in
@@ -429,7 +465,7 @@ class AnthropicProvider implements LlmProvider {
 					buildModelsFromApiResponse(llmIntegration, apiResponse)
 				}
 			new LlmUsageSync(llmIntegration, morpheusContext)
-				.execute(apiService, baseUrl, apiKey, apiVersion, resolveUsageProbeModel(llmIntegration), clientOpts)
+				.execute(apiService, baseUrl, apiKey, apiVersion, resolveUsageProbeModels(llmIntegration), clientOpts)
 		} catch (Exception e) {
 			log.error("Error refreshing Anthropic integration: ${e.message}", e)
 		}
@@ -460,7 +496,11 @@ class AnthropicProvider implements LlmProvider {
 				}
 				if (result.success && result.data) {
 					LlmChatResponse response = trackQuestionCost(requestBody, parseMessageResponse(result.data as Map))
+					response = ensureAnswerText(response, result.data as Map)
 					return ServiceResponse.success(appendUsageFooter(appendSourceList(response), accountIntegration))
+				}
+				if (isPromptTooLong(result)) {
+					return ServiceResponse.success(buildPromptTooLongResponse(result, requestBody))
 				}
 				return ServiceResponse.error(result.msg ?: 'Chat completion failed')
 			} catch (Exception e) {
@@ -498,7 +538,10 @@ class AnthropicProvider implements LlmProvider {
 
 			if (result?.success && result.data) {
 				LlmChatResponse response = trackQuestionCost(requestBody, parseMessageResponse(result.data as Map))
+				response = ensureAnswerText(response, result.data as Map)
 				handler?.onCompleteResponse(appendUsageFooter(appendSourceList(response), accountIntegration))
+			} else if (isPromptTooLong(result)) {
+				handler?.onCompleteResponse(buildPromptTooLongResponse(result, requestBody))
 			} else {
 				handler?.onError(new RuntimeException(result?.msg ?: 'Streaming chat completion failed'))
 			}
@@ -528,9 +571,6 @@ class AnthropicProvider implements LlmProvider {
 			return result
 		}
 		Map data = result.data as Map
-		if (data.stop_reason != 'pause_turn') {
-			return result
-		}
 
 		List<Map> segments = [data]
 		List messages = new ArrayList((requestBody.messages ?: []) as List)
@@ -568,16 +608,140 @@ class AnthropicProvider implements LlmProvider {
 			segments << data
 			result = next
 		}
-		if (logPauses) {
-			log.info("Anthropic turn finished after ${continuations} pause_turn continuation(s): ${describeTurn(data)}")
-		}
 		if (data.stop_reason == 'pause_turn') {
 			log.warn("Anthropic turn still paused after ${continuations} continuations; returning what has been generated so far")
 		}
 
+		// A turn can end with nothing for the chat to show: the server-side loop spent
+		// the output on searches and fetches, or stopped at max_tokens before writing.
+		// Returned as is, Morpheus falls back to its own summary of the last MCP result,
+		// which for a tool search is a bare header that reads like an empty answer.
+		boolean finalAnswerRequested = false
+		if (needsFinalAnswer(segments)) {
+			log.info("Anthropic turn ended without answer text (${describeTurn(data)}); asking once for a final answer without tools")
+			Map finalAnswer = requestFinalAnswer(requestBody, messages, data, call)
+			if (finalAnswer != null) {
+				segments << finalAnswer
+				finalAnswerRequested = true
+			}
+		}
+
 		Map merged = new LinkedHashMap(result)
 		merged.data = mergeMessageSegments(segments)
+		logFinishedTurn(requestBody, merged.data as Map, continuations, finalAnswerRequested)
 		return merged
+	}
+
+	/**
+	 * True when a finished turn has no answer text and nothing for Morpheus to run.
+	 * A refusal is left alone: asking again would only repeat it.
+	 */
+	protected static boolean needsFinalAnswer(List<Map> segments) {
+		Map last = segments ? segments[-1] : null
+		if (last == null || last.stop_reason == 'refusal' || last.stop_reason == 'tool_use') {
+			return false
+		}
+		List blocks = segments.collectMany { Map segment -> segment.content instanceof List ? segment.content as List : [] }
+		if (blocks.any { it instanceof Map && (it as Map).type == 'tool_use' }) {
+			return false
+		}
+		return !answerText(blocks).trim()
+	}
+
+	/**
+	 * One more request for the answer, with the gathered turn handed back and tools
+	 * switched off. tool_choice none keeps the tool definitions - and with them the
+	 * cached prefix and the meaning of the replayed server-tool blocks - while
+	 * stopping any further search. Returns null when that request fails too.
+	 */
+	protected Map requestFinalAnswer(Map requestBody, List messages, Map lastTurn, Closure<Map> call) {
+		List followUp = new ArrayList(messages)
+		List replay = replayableContent(lastTurn?.content)
+		if (replay) {
+			// Verbatim, like a pause_turn continuation: search results carry
+			// encrypted_content the API has to decrypt again.
+			followUp << [role: 'assistant', content: replay]
+		}
+		followUp << [role: 'user', content: FINAL_ANSWER_PROMPT]
+		Map body = new LinkedHashMap(requestBody)
+		body.messages = followUp
+		if (body.tools) {
+			body.tool_choice = [type: 'none']
+		}
+		try {
+			Map next = call(body)
+			if (next?.success == true && next.data instanceof Map) {
+				return next.data as Map
+			}
+			log.warn("Anthropic final-answer request failed (${next?.msg})")
+		} catch (Exception e) {
+			log.warn("Anthropic final-answer request threw (${e.message})")
+		}
+		return null
+	}
+
+	/**
+	 * The blocks of a turn that can go back as history: a server_tool_use whose
+	 * result never arrived, as at max_tokens, is dropped, since the API rejects a
+	 * call without its result once the turn is no longer the one being resumed.
+	 */
+	protected static List replayableContent(def content) {
+		if (!(content instanceof List)) {
+			return []
+		}
+		Set<String> answered = (content as List).findAll { it instanceof Map && (it as Map).tool_use_id }
+			.collect { (it as Map).tool_use_id.toString() } as Set<String>
+		return (content as List).findAll { block ->
+			!(block instanceof Map && (block as Map).type == 'server_tool_use' && !answered.contains((block as Map).id?.toString()))
+		}
+	}
+
+	/** The text blocks of a turn, joined. */
+	protected static String answerText(List blocks) {
+		return (blocks ?: []).findAll { it instanceof Map && (it as Map).type == 'text' && (it as Map).text != null }
+			.collect { (it as Map).text.toString() }.join('')
+	}
+
+	/**
+	 * One INFO line per finished turn that used or offered the web tools, or that
+	 * came back without answer text - the only record of how such a turn ended, since
+	 * the chat shows none of it and Morpheus logs only its own fallback.
+	 */
+	protected void logFinishedTurn(Map requestBody, Map data, int continuations, boolean finalAnswerRequested) {
+		List blocks = data?.content instanceof List ? data.content as List : []
+		boolean empty = data?.stop_reason != 'tool_use' && !answerText(blocks).trim()
+		boolean serverTools = blocks.any { it instanceof Map && (it as Map).type == 'server_tool_use' }
+		if (hasWebSearchTools(requestBody) || serverTools || empty) {
+			log.info("Anthropic turn finished: ${describeFinishedTurn(data, requestBody?.max_tokens, continuations, finalAnswerRequested)}")
+		}
+	}
+
+	/**
+	 * stop_reason, the max_tokens that was sent, block types with counts, which
+	 * server tools ran, and the usage - summed over every segment of the turn.
+	 */
+	protected static String describeFinishedTurn(Map data, def maxTokens, int continuations, boolean finalAnswerRequested) {
+		List blocks = data?.content instanceof List ? data.content as List : []
+		Map<String, Integer> types = [:]
+		Map<String, Integer> serverTools = [:]
+		blocks.each { block ->
+			Map b = block instanceof Map ? block as Map : [:]
+			String type = b.type?.toString() ?: 'unknown'
+			types[type] = (types[type] ?: 0) + 1
+			if (type == 'server_tool_use') {
+				String name = b.name?.toString() ?: 'unknown'
+				serverTools[name] = (serverTools[name] ?: 0) + 1
+			}
+		}
+		Map usage = data?.usage instanceof Map ? data.usage as Map : [:]
+		Map serverUsage = usage.server_tool_use instanceof Map ? usage.server_tool_use as Map : [:]
+		String usageText = "input=${usage.input_tokens ?: 0} output=${usage.output_tokens ?: 0} " +
+			"read=${usage.cache_read_input_tokens ?: 0} created=${usage.cache_creation_input_tokens ?: 0}" +
+			serverUsage.collect { key, value -> " ${key}=${value}" }.join('')
+		return "stop_reason=${data?.stop_reason} max_tokens=${maxTokens} text_chars=${answerText(blocks).length()} " +
+			"blocks={${types.collect { key, value -> "${key}=${value}" }.join(', ')}} " +
+			"server_tool_use={${serverTools.collect { key, value -> "${key}=${value}" }.join(', ')}} " +
+			"usage={${usageText}} pause_turn_continuations=${continuations} final_answer_request=${finalAnswerRequested ? 'yes' : 'no'}"
 	}
 
 	protected static boolean hasWebSearchTools(Map requestBody) {
@@ -876,6 +1040,8 @@ class AnthropicProvider implements LlmProvider {
 		// is opt-in; by default the basic tools are called directly.
 		boolean filtering = isWebSearchCodeFilteringEnabled(accountIntegration) && supportsDynamicFiltering(model)
 		Integer maxUses = resolveWebSearchMaxUses(accountIntegration)
+		Integer fetchMaxUses = resolveWebFetchMaxUses(accountIntegration)
+		Integer fetchMaxContentTokens = resolveWebFetchMaxContentTokens(accountIntegration)
 		List<String> allowedDomains = resolveWebSearchAllowedDomains(accountIntegration)
 
 		Map search = [type: filtering ? WEB_SEARCH_TOOL_TYPE : WEB_SEARCH_TOOL_TYPE_BASIC, name: 'web_search']
@@ -885,7 +1051,14 @@ class AnthropicProvider implements LlmProvider {
 					 citations: [enabled: true]]
 		if (maxUses != null) {
 			search.max_uses = maxUses
-			fetch.max_uses = maxUses
+		}
+		if (fetchMaxUses != null) {
+			fetch.max_uses = fetchMaxUses
+		}
+		// Fetched content is added to this same request; the cap keeps a long page or
+		// PDF from carrying it past the context window.
+		if (fetchMaxContentTokens != null) {
+			fetch.max_content_tokens = fetchMaxContentTokens
 		}
 		if (allowedDomains) {
 			search.allowed_domains = allowedDomains
@@ -1323,12 +1496,32 @@ class AnthropicProvider implements LlmProvider {
 
 	/** Null means no cap, which the API accepts - but the default is a cap. */
 	protected Integer resolveWebSearchMaxUses(AccountIntegration accountIntegration) {
-		def configured = accountIntegration?.getConfigProperty('webSearchMaxUses')
+		return resolveCap(accountIntegration, 'webSearchMaxUses', DEFAULT_WEB_SEARCH_MAX_USES)
+	}
+
+	/** Its own cap since 1.6.0; before, web_fetch shared the web search one. */
+	protected Integer resolveWebFetchMaxUses(AccountIntegration accountIntegration) {
+		return resolveCap(accountIntegration, 'webFetchMaxUses', DEFAULT_WEB_FETCH_MAX_USES)
+	}
+
+	protected Integer resolveWebFetchMaxContentTokens(AccountIntegration accountIntegration) {
+		return resolveCap(accountIntegration, 'webFetchMaxContentTokens', DEFAULT_WEB_FETCH_MAX_CONTENT_TOKENS)
+	}
+
+	/**
+	 * Empty means the default, so an integration saved before the field existed is
+	 * capped too; 0 is the explicit way to send no cap.
+	 */
+	protected Integer resolveCap(AccountIntegration accountIntegration, String name, Integer defaultValue) {
+		def configured = accountIntegration?.getConfigProperty(name)
 		if (configured == null || !configured.toString().trim()) {
-			return DEFAULT_WEB_SEARCH_MAX_USES
+			return defaultValue
 		}
 		Integer parsed = toInteger(configured)
-		return (parsed != null && parsed > 0) ? parsed : null
+		if (parsed == null) {
+			return defaultValue
+		}
+		return parsed > 0 ? parsed : null
 	}
 
 	/**
@@ -1599,6 +1792,96 @@ class AnthropicProvider implements LlmProvider {
 		return response
 	}
 
+	/**
+	 * Never hands Morpheus an empty final answer. Reached only when the request for
+	 * a final answer came back without text as well, or failed: the reply then says
+	 * how the turn ended and lists the pages the searches found, so the user sees
+	 * what happened instead of Morpheus' fallback for an empty reply.
+	 */
+	protected LlmChatResponse ensureAnswerText(LlmChatResponse response, Map data) {
+		if (response?.message == null || response.finishReason == 'tool_calls' || response.message.content?.toString()?.trim()) {
+			return response
+		}
+		String stopReason = data?.stop_reason?.toString() ?: 'unknown'
+		List blocks = data?.content instanceof List ? data.content as List : []
+		int webCalls = blocks.count { it instanceof Map && (it as Map).type == 'server_tool_use' } as int
+
+		// Cited and fetched pages first, then whatever the searches returned.
+		List<Map> pages = []
+		((response.metadata?.get('sources') ?: []) as List<Map>).each { Map source -> addSource(pages, source.url?.toString(), source.title?.toString()) }
+		blocks.each { block ->
+			Map b = block instanceof Map ? block as Map : [:]
+			if (b.type == 'web_search_tool_result' && b.content instanceof List) {
+				(b.content as List).each { entry ->
+					if (entry instanceof Map) {
+						addSource(pages, (entry as Map).url?.toString(), (entry as Map).title?.toString())
+					}
+				}
+			}
+		}
+
+		String text
+		if (stopReason == 'refusal') {
+			text = 'The model declined to answer this request (stop_reason: refusal).'
+		} else if (stopReason == 'max_tokens') {
+			text = 'The model reached its output limit (stop_reason: max_tokens) before it wrote an answer. ' +
+				'Ask a narrower question, or raise Default Max Output Tokens on the integration.'
+		} else {
+			text = "The model ended its turn without writing an answer (stop_reason: ${stopReason}). Ask again, or narrow the question."
+		}
+		if (webCalls > 0) {
+			text += " It ran ${webCalls} web search or fetch call(s) for this question."
+		}
+		List<String> lines = pages.take(MAX_LISTED_SOURCES).collect { Map page ->
+			String url = toAscii(page.url?.toString(), 0)
+			String label = toAscii(page.title?.toString(), MAX_SOURCE_LABEL_LENGTH) ?: hostOf(url) ?: url
+			label == url ? url : "${label} - ${url}".toString()
+		}.findAll { it } as List<String>
+		if (lines) {
+			text += "\n\n**Pages it found**\n\n${lines.join('\n\n')}"
+		}
+		log.warn("Anthropic returned no answer text (stop_reason=${stopReason}, web calls=${webCalls}); returning an explanation instead")
+		response.message.content = text.toString()
+		// Already listed above; a second Sources list would repeat them.
+		response.metadata?.remove('sources')
+		return response
+	}
+
+	/** A 400 because the request no longer fits the context window. */
+	protected static boolean isPromptTooLong(Map result) {
+		if (result == null || result.success == true) {
+			return false
+		}
+		String message = "${result.errorMessage ?: ''} ${result.msg ?: ''}".toString()
+		return message.toLowerCase().contains('prompt is too long')
+	}
+
+	/**
+	 * Answers a context overflow with an explanation instead of an error. Morpheus
+	 * shows every provider error as the same generic sentence and drops the question
+	 * from the conversation, so the user would learn neither what happened nor what
+	 * to change. With web search on, the overflow mostly comes from pages fetched
+	 * inside the one request, not from the conversation Morpheus sent.
+	 */
+	protected LlmChatResponse buildPromptTooLongResponse(Map result, Map requestBody) {
+		String detail = toAscii((result?.errorMessage ?: result?.msg)?.toString(), 200)
+		String text = "This request did not fit into the model's context window (Anthropic: ${detail})."
+		if (hasWebSearchTools(requestBody)) {
+			text += ' Web search and fetch results are added inside the same request, so a few long pages can overflow it. ' +
+				'Narrow the question or name the page to read, or lower Web Fetch Max Content Tokens or the search and fetch caps on the integration.'
+		} else {
+			text += ' Start a new conversation, or ask a narrower question.'
+		}
+		LlmChatResponse response = new LlmChatResponse()
+		response.model = requestBody?.model?.toString()
+		response.finishReason = 'stop'
+		LlmChatMessage message = new LlmChatMessage()
+		message.role = 'assistant'
+		message.content = text.toString()
+		response.message = message
+		return response
+	}
+
 	/** maxLength 0 means leave the value at whatever length it is. */
 	protected static String toAscii(String value, Integer maxLength = 0) {
 		if (!value) {
@@ -1692,9 +1975,45 @@ class AnthropicProvider implements LlmProvider {
 	 * as close to nothing as possible.
 	 */
 	protected String resolveUsageProbeModel(LlmIntegration llmIntegration) {
-		List<LlmModel> models = llmIntegration?.models ?: []
-		LlmModel haiku = models.find { it?.enabled != false && it?.code?.toLowerCase()?.contains('haiku') }
-		return haiku?.code ?: models.find { it?.enabled != false }?.code ?: 'claude-haiku-4-5'
+		return resolveUsageProbeModels(llmIntegration)[0]
+	}
+
+	/**
+	 * Models to try for the probe, in order: the newest enabled Haiku first, then
+	 * the older ones, then any other enabled model. A catalog can still list a model
+	 * the API has retired - OpenRouter listed anthropic/claude-3-haiku, and the probe
+	 * that took the first Haiku in the list got "404 ... end of its life" on every
+	 * refresh. The usage sync moves on to the next candidate when that happens.
+	 */
+	protected List<String> resolveUsageProbeModels(LlmIntegration llmIntegration) {
+		List<LlmModel> enabled = (llmIntegration?.models ?: []).findAll { it?.enabled != false && it?.code } as List<LlmModel>
+		List<String> haikus = enabled.findAll { it.code.toLowerCase().contains('haiku') }
+			.sort { a, b -> compareModelVersions(b.code, a.code) }*.code
+		List<String> others = enabled.findAll { !it.code.toLowerCase().contains('haiku') }
+			.sort { a, b -> compareModelVersions(b.code, a.code) }*.code
+		List<String> candidates = (haikus + others).unique()
+		return candidates ?: ['claude-haiku-4-5']
+	}
+
+	/**
+	 * Orders model ids by their version numbers, ignoring a date snapshot suffix:
+	 * claude-haiku-4-5 sorts above claude-3-5-haiku-20241022, which sorts above
+	 * claude-3-haiku-20240307.
+	 */
+	protected static int compareModelVersions(String left, String right) {
+		List<Integer> a = modelVersion(left)
+		List<Integer> b = modelVersion(right)
+		for (int i = 0; i < Math.min(a.size(), b.size()); i++) {
+			if (a[i] != b[i]) {
+				return a[i] <=> b[i]
+			}
+		}
+		return a.size() <=> b.size()
+	}
+
+	protected static List<Integer> modelVersion(String modelId) {
+		String id = normalizeModelId(modelId).replaceFirst('-\\d{8}$', '').replaceFirst('-latest$', '')
+		return id.findAll(/\d+/).collect { it.length() > 6 ? 0 : Integer.parseInt(it) }
 	}
 
 	protected static Long toLong(def value) {

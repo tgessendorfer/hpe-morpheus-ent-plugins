@@ -171,4 +171,41 @@ class AnthropicApiServiceSpec extends Specification {
 		cleanup:
 		server.stop(0)
 	}
+
+	def "a 400 carries the Anthropic error type, message and request id"() {
+		given: 'a local endpoint answering like api.anthropic.com does when the context overflows'
+		com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(new InetSocketAddress('127.0.0.1', 0), 0)
+		server.createContext('/v1/messages', { com.sun.net.httpserver.HttpExchange exchange ->
+			exchange.requestBody.bytes
+			byte[] body = ('{"type":"error","error":{"type":"invalid_request_error",' +
+				'"message":"prompt is too long: 1065647 tokens > 1000000 maximum"},"request_id":"req_body_1"}').getBytes('UTF-8')
+			exchange.responseHeaders.add('Content-Type', 'application/json')
+			exchange.responseHeaders.add('request-id', 'req_header_1')
+			exchange.sendResponseHeaders(400, body.length)
+			exchange.responseBody.withStream { it.write(body) }
+		} as com.sun.net.httpserver.HttpHandler)
+		server.start()
+
+		when:
+		Map result = new AnthropicApiService().createMessage("http://127.0.0.1:${server.address.port}", 'sk-ant-test',
+			[model: 'claude-sonnet-5', max_tokens: 1, messages: [[role: 'user', content: 'hi']]])
+
+		then:
+		!result.success
+		result.statusCode == '400'
+		result.errorType == 'invalid_request_error'
+		result.errorMessage == 'prompt is too long: 1065647 tokens > 1000000 maximum'
+		result.requestId == 'req_body_1'
+		result.msg.contains('prompt is too long')
+
+		cleanup:
+		server.stop(0)
+	}
+
+	def "the request id falls back to the request-id header"() {
+		expect:
+		AnthropicApiService.errorDetails(400, [error: [type: 'overloaded_error']], ['Request-Id': 'req_h']) ==
+			[statusCode: '400', errorType: 'overloaded_error', errorMessage: null, requestId: 'req_h']
+		AnthropicApiService.errorDetails('500', [:], null).requestId == null
+	}
 }

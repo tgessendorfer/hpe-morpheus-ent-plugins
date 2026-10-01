@@ -128,11 +128,11 @@ verified that path.
 ### 2. Download the plugin JAR
 
 Grab `morpheus-anthropic-plugin-<version>-all.jar` from the
-[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/anthropic-v1.5.1) — it is the shaded (`-all`) JAR, which bundles the
+[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/anthropic-v1.6.0) — it is the shaded (`-all`) JAR, which bundles the
 dependencies. The plain `.jar` is not what you want.
 
 ```bash
-gh release download anthropic-v1.5.1 --repo tgessendorfer/hpe-morpheus-ent-plugins -p '*-all.jar'
+gh release download anthropic-v1.6.0 --repo tgessendorfer/hpe-morpheus-ent-plugins -p '*-all.jar'
 ```
 
 Or [build it from source](#build-from-source).
@@ -185,8 +185,10 @@ Fill in:
 | **Append token usage to answers** | optional. Adds an italic token line to each final answer — the only way to see caching without the appliance log. Through OpenRouter it shows the cost of the whole question instead |
 | **Enable Web Search and Fetch** | optional. Lets the agent answer from the live web — see [Web search](#web-search--answering-from-outside-the-appliance) |
 | **Filter Search Results with Code Execution** | off. Saves tokens on search-heavy research, but slows MCP-backed agents down — see [why](#what-it-costs-and-what-it-does-not-constrain) |
-| **Max Web Searches per Request** | `5`. The only ceiling on what a looping agent can spend on search |
-| **Restrict to Domains** | optional allow list, e.g. `docs.morpheusdata.com, community.hpe.com` |
+| **Max Web Searches per Request** | `3` (empty means 3, `0` no cap). Caps `web_search` only |
+| **Max Page Fetches per Request** | `3` (empty means 3, `0` no cap). Caps `web_fetch` only |
+| **Web Fetch Max Content Tokens** | `25000` (empty means 25000, `0` no limit). Longest a fetched page or PDF may be; keeps a few long pages from overflowing the context window |
+| **Restrict to Domains** | optional allow list for both tools, e.g. `docs.morpheusdata.com, community.hpe.com` |
 
 The form is translated. Its labels and help texts follow the **Default Locale** under *User
 Settings*: English, German and Polish. Both translations have been shown on a live appliance, but
@@ -432,9 +434,15 @@ much as the page behind it.
 
 - **Web search is billed at $10 per 1,000 searches**, on top of tokens. **Web fetch adds no charge**
   beyond the tokens of the page it reads — and a large documentation page is easily 25,000 of them.
-- **Max Web Searches per Request** caps both tools per request. Simple questions use one to three
-  searches. This cap and your [workspace spend limit](#1-get-an-anthropic-api-key) are the only hard
-  stops on an agent that decides to research something thoroughly.
+- **Max Web Searches per Request** and **Max Page Fetches per Request** cap each tool per request,
+  at 3 by default. Simple questions use one to three searches. These caps and your
+  [workspace spend limit](#1-get-an-anthropic-api-key) are the only hard stops on an agent that
+  decides to research something thoroughly. Before 1.6.0 one cap of 5 applied to both tools.
+- **Web Fetch Max Content Tokens** cuts every fetched page or PDF to 25,000 tokens by default.
+  Everything search and fetch return is added to the *same* request, inside Anthropic's server-side
+  loop, so without this cap a handful of long pages can push one request past the model's context
+  window. That request fails with `400 prompt is too long`, even though the conversation Morpheus
+  sent was small.
 - **Code filtering is off by default, for MCP agents' sake.** With **Filter Search Results with Code
   Execution** on, Claude 4.6 and newer run the search inside code execution and filter results before
   they reach the context window. Once code execution is there, though, the model also uses it to
@@ -466,6 +474,16 @@ much as the page behind it.
   the API returns a half-finished turn with `stop_reason: pause_turn`. The provider sends that turn
   straight back, up to four times, and folds the segments into one answer — otherwise the chat would
   show a reply that stops mid-sentence.
+- **A turn that ends without an answer is asked once more.** The model can spend a turn on searches
+  and fetches and stop, at `max_tokens` or at `end_turn`, without writing any text. Morpheus would
+  then show its own fallback, which for a tool search is a header with nothing under it. Since 1.6.0
+  the provider hands that turn back once, with `tool_choice: none`, and asks for the final answer
+  from what was gathered. If that still yields no text, the chat gets a short explanation with the
+  stop reason and the pages the searches found — never an empty reply. A `refusal` is explained but
+  not asked again.
+- **Every web turn is logged.** A line `Anthropic turn finished: stop_reason=... max_tokens=...
+  blocks={...} server_tool_use={...} usage={...}` follows each turn that offered or used the web
+  tools, and each turn that came back without text.
 - **Web search can be disabled organization-wide** in the Anthropic Console under *Privacy*. If it
   is, requests that declare the tool fail with `400 invalid_request_error`, not a quiet empty result.
 - **One rough edge.** If Claude calls a Morpheus MCP tool and a web search in the *same* turn, the
@@ -564,9 +582,11 @@ Two things to know:
 | In Polish, the integration dialog is titled *Edytuj {0} Integrację* | Not this plugin: Morpheus' own Polish text for `gomorpheus.administration.integrations.editHeader` expects a value the dialog never passes. It affects every integration. |
 | The chat's agent picker says **No agents found** for an agent you just created | The chat widget loads its agent list with the page. Reload the page. |
 | The agent still says it cannot reach the web | Re-save the integration after ticking **Enable Web Search and Fetch**, and start a *new* conversation — the tool catalog is fixed for the life of one. Also confirm the agent is on this integration and not a second one. |
+| The chat answers *This request did not fit into the model's context window* | Anthropic answered `400 prompt is too long`. With web search on this usually means fetched pages, added inside the one request, overflowed the context window. Lower **Web Fetch Max Content Tokens** or the search and fetch caps, or ask a narrower question. The log has a `WARN Anthropic API error: HTTP 400 ...` line with the `request_id` Anthropic support asks for. Before 1.6.0 this showed as *An error occurred while processing your request* and the question was dropped. |
+| An answer reads *The model ended its turn without writing an answer* | The model stopped without text twice, the second time when asked explicitly. The `Anthropic turn finished:` line in the log shows the stop reason, which server tools ran and the `max_tokens` sent. Morpheus asks for 1000 output tokens on some requests; a search-heavy turn can use them up. |
 | `400 invalid_request_error` mentioning web search | Web search is disabled for the organization in the Anthropic Console under *Privacy*, or the **Restrict to Domains** list has a scheme or a trailing slash the API rejects. |
 | The agent answers about a URL without reading it | `web_fetch` only reads URLs already in the conversation. Paste the link in the chat; a link that exists only in the agent's system prompt does not count. |
-| Web searches are burning credit | Lower **Max Web Searches per Request**, or narrow **Restrict to Domains**. Searches are $10 per 1,000 on top of tokens; `server_tool_use.web_search_requests` in the response counts them. |
+| Web searches are burning credit | Lower **Max Web Searches per Request** and **Max Page Fetches per Request**, or narrow **Restrict to Domains**. Searches are $10 per 1,000 on top of tokens; `server_tool_use.web_search_requests` in the response counts them. |
 
 Appliance-side logs for the plugin (model and usage sync errors land here):
 
@@ -614,7 +634,8 @@ releases (`.github/workflows/` at the repository root).
 - Context window is reported as 200k unless the 1M beta is enabled (Sonnet 4.5+ only).
 - The plugin is unsigned. Depending on appliance policy you may need to allow unsigned plugins.
 - Usage metrics come from a tiny probe request (`max_tokens: 1`) issued during refresh, using the
-  cheapest enabled model. Anthropic reports per-minute buckets for requests, input tokens and output
+  newest enabled Haiku. If the API answers that the model is retired or unknown, as a catalog can
+  still list one, the probe tries the next model, up to three. Anthropic reports per-minute buckets for requests, input tokens and output
   tokens; Morpheus models a single token bucket, so the **input token** bucket is surfaced.
 - API cost is billed by Anthropic per token, entirely outside Morpheus licensing. Set a spend limit
   in the Console if an agent might loop. [Web search](#web-search--answering-from-outside-the-appliance)

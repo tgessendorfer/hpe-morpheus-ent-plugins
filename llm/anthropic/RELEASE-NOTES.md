@@ -6,6 +6,74 @@ shaded `-all.jar` is attached. Notes for 1.4.1 and earlier exist only there.
 
 ---
 
+## 1.6.0
+
+Makes web search and fetch safe to leave on for an MCP-backed agent. A chat question on Claude
+Sonnet 5 with web search on failed with *An error occurred while processing your request*; asked
+again, it came back as a header with nothing under it. The appliance log showed
+`400 prompt is too long: 1065647 tokens > 1000000 maximum` for the first, and an empty answer for the
+second — while the conversation Morpheus sent was about 37,000 tokens. The most likely cause is
+Anthropic's server-side search loop: everything `web_search` and `web_fetch` return is added inside
+the same request, and `web_fetch` had no limit on how much of a page or PDF it adds. 1.5.1 logged
+neither the stop reason nor the server-side tool use, so this is an interpretation, not a
+measurement; 1.6.0 logs both.
+
+**A fetched page is capped at 25,000 tokens.** New option *Web Fetch Max Content Tokens* sends
+`max_content_tokens` on `web_fetch`. Empty means 25,000, `0` means no limit. Existing integrations get
+the cap without being edited.
+
+**Search and fetch have separate caps, and both default to 3.** *Max Web Searches per Request* now
+caps `web_search` only; the new *Max Page Fetches per Request* caps `web_fetch`. **Behaviour change:**
+in 1.5.1 one cap of **5** applied to both tools. An integration that left the field empty now gets
+**3** searches and **3** fetches; one with its own value keeps it for search, and fetch drops to 3
+until *Max Page Fetches per Request* is set. *Restrict to Domains* keeps applying to both tools.
+
+**An answer is never empty.** A turn that ends without text and without a Morpheus tool call — the
+model spent it on searches and fetches, or ran into `max_tokens` — is handed back once with
+`tool_choice: none`, asking for the final answer from what was gathered. The server-tool blocks go
+back verbatim, as in a `pause_turn` continuation; a search call that never got its result is left
+out. If the second answer is empty too, or the request fails, the chat gets a short explanation with
+the stop reason and the pages the searches found. A `refusal` is explained, not asked again.
+Before, the plugin returned `""` and Morpheus showed its own fallback, which for a tool search is a
+bare header.
+
+**A context overflow is explained in the chat.** A `400 prompt is too long` comes back as an answer
+saying the request did not fit the context window and what to lower, instead of an error. Morpheus
+shows every provider error as the same generic sentence and drops the question from the
+conversation, so neither the cause nor the fix was visible. **Behaviour change:** for this one error
+the request now succeeds, with the explanation as the answer. Every other API error still fails as
+before.
+
+**Better logs.**
+
+- Every failed API call logs `WARN Anthropic API error: HTTP <status> <type>: <message>
+  (request_id <id>)`, with the request id from the body or the `request-id` header — what Anthropic
+  support asks for.
+- Every turn that offered or used the web tools, or came back without text, logs `INFO Anthropic turn
+  finished:` with the stop reason, the `max_tokens` sent, block types with counts, which server tools
+  ran, and the usage including `web_search_requests` and `web_fetch_requests`. This replaces the
+  line that was logged only after a `pause_turn`. The `prompt cache` line is unchanged.
+
+**The usage probe no longer hits a retired model.** It took the first enabled model with `haiku` in
+its id. Through OpenRouter that was `anthropic/claude-3-haiku`, which answered
+`404 ... end of its life` on every refresh. It now takes the newest enabled Haiku by version, and on
+a 404 for the model tries the next candidate, up to three.
+
+Upgrading: upload the new jar under *Administration > Integrations > Plugins*. No configuration
+changes are required; open and save an integration to see the two new fields with their defaults.
+
+Verified: the test suite passes on plugin API 1.4.2, and the API client tests also on 1.4.1. New tests
+cover a turn with only server-tool blocks, the final-answer request and its payload, a turn that
+stays empty, `max_tokens` without text, `refusal`, `redacted_thinking`, the `prompt is too long`
+answer, the error details of a real `400` from a local endpoint, `max_content_tokens` and `max_uses`
+in the request body, and the probe model choice. **Not yet verified on an appliance**, and not
+against the live API: that the server-side loop stays inside the context window with the cap, and
+that `tool_choice: none` after replayed web results yields an answer.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.5.1...anthropic-v1.6.0
+
+---
+
 ## 1.5.1
 
 **The plugin list links to the plugin's new home.** The plugin moved, with its full history, into

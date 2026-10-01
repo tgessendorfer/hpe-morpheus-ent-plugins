@@ -48,6 +48,9 @@ class LlmUsageSync {
 	static final String TOKENS_REMAINING = 'anthropic-ratelimit-tokens-remaining'
 	static final String TOKENS_RESET = 'anthropic-ratelimit-tokens-reset'
 
+	// Each probe is a request of its own; three are enough to get past a stale catalog.
+	static final int MAX_PROBE_MODELS = 3
+
 	static final List<String> RATE_LIMIT_HEADERS = [
 		REQUESTS_LIMIT, REQUESTS_REMAINING, REQUESTS_RESET,
 		INPUT_TOKENS_LIMIT, INPUT_TOKENS_REMAINING, INPUT_TOKENS_RESET,
@@ -60,10 +63,27 @@ class LlmUsageSync {
 	}
 
 	void execute(AnthropicApiService apiService, String baseUrl, String apiKey, String apiVersion, String model, Map opts = [:]) {
+		execute(apiService, baseUrl, apiKey, apiVersion, model ? [model] : [], opts)
+	}
+
+	/**
+	 * Probes with the first model, moving on to the next only when the API says the
+	 * model does not exist or has been retired - a catalog can still list one. Any
+	 * other failure is not about the model, so it is not retried.
+	 */
+	void execute(AnthropicApiService apiService, String baseUrl, String apiKey, String apiVersion, List<String> models, Map opts = [:]) {
 		if (!llmIntegration || !apiService) {
 			return
 		}
-		Map usageResult = apiService.fetchUsageHeaders(baseUrl, apiKey, apiVersion, model, opts) ?: [success: false, msg: 'No usage response from the Anthropic API']
+		List<String> candidates = (models ?: [null]).take(MAX_PROBE_MODELS)
+		Map usageResult = null
+		for (int i = 0; i < candidates.size(); i++) {
+			usageResult = apiService.fetchUsageHeaders(baseUrl, apiKey, apiVersion, candidates[i], opts) ?: [success: false, msg: 'No usage response from the Anthropic API']
+			if (usageResult.success == true || !isModelUnavailable(usageResult) || i == candidates.size() - 1) {
+				break
+			}
+			log.info("Anthropic usage probe model ${candidates[i]} is not available (${usageResult.msg}); trying ${candidates[i + 1]}")
+		}
 		if (usageResult.success != true) {
 			log.warn("Unable to refresh Anthropic usage metrics: ${usageResult.msg ?: 'unknown error'}")
 		}
@@ -75,6 +95,11 @@ class LlmUsageSync {
 		if (applyHeadersUsageMetrics(usageHeaders)) {
 			morpheusContext?.llm?.integration?.save(llmIntegration)
 		}
+	}
+
+	protected static boolean isModelUnavailable(Map usageResult) {
+		String text = "${usageResult?.statusCode ?: ''} ${usageResult?.errorType ?: ''} ${usageResult?.msg ?: ''}".toString().toLowerCase()
+		return text.contains('404') || text.contains('not_found') || text.contains('end of its life') || text.contains('deprecated')
 	}
 
 	boolean applyHeadersUsageMetrics(Map headers) {

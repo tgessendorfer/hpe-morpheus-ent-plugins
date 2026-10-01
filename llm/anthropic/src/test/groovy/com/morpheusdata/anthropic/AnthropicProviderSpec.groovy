@@ -7,6 +7,10 @@ import com.morpheusdata.model.OptionType
 import com.morpheusdata.model.llm.LlmChatMessage
 import com.morpheusdata.model.llm.LlmChatRequest
 import com.morpheusdata.model.llm.LlmChatResponse
+import com.morpheusdata.model.llm.LlmIntegration
+import com.morpheusdata.model.llm.LlmModel
+import com.morpheusdata.response.ServiceResponse
+import com.morpheusdata.anthropic.sync.LlmUsageSync
 import spock.lang.Specification
 
 /**
@@ -879,8 +883,9 @@ class AnthropicProviderSpec extends Specification {
 		tools[1].allowed_domains == tools[0].allowed_domains
 	}
 
-	def "a blank max uses means no cap"() {
+	def "a blank max uses means the default and 0 means no cap"() {
 		expect:
+		AnthropicProvider.DEFAULT_WEB_SEARCH_MAX_USES == 3
 		provider.resolveWebSearchMaxUses(configured([webSearch: 'on'])) == AnthropicProvider.DEFAULT_WEB_SEARCH_MAX_USES
 		provider.resolveWebSearchMaxUses(configured([webSearch: 'on', webSearchMaxUses: '12'])) == 12
 		provider.resolveWebSearchMaxUses(configured([webSearch: 'on', webSearchMaxUses: '0'])) == null
@@ -1104,5 +1109,343 @@ class AnthropicProviderSpec extends Specification {
 		then:
 		calls == AnthropicProvider.MAX_PAUSE_TURN_CONTINUATIONS + 1
 		provider.parseMessageResponse(result.data as Map).message.content.startsWith('s1 s2 ')
+	}
+
+	// ------------------------------------------------------------------
+	// Web fetch caps, empty answers, context overflow, usage probe (1.6.0)
+	// ------------------------------------------------------------------
+
+	def "web fetch gets its own max uses and a content token cap by default"() {
+		when: 'an integration saved before the fields existed'
+		List<Map> tools = provider.buildServerTools(configured([webSearch: 'on']), 'claude-sonnet-5')
+
+		then:
+		tools[0].max_uses == 3
+		!tools[0].containsKey('max_content_tokens')
+		tools[1].max_uses == AnthropicProvider.DEFAULT_WEB_FETCH_MAX_USES
+		tools[1].max_content_tokens == AnthropicProvider.DEFAULT_WEB_FETCH_MAX_CONTENT_TOKENS
+		tools[1].max_content_tokens == 25000
+	}
+
+	def "the fetch caps are configured independently of the search cap"() {
+		when:
+		Map body = provider.buildMessagesRequestBody(new LlmChatRequest(model: 'claude-sonnet-5', messages: [message('user', 'hi')]),
+			configured([webSearch: 'on', webSearchMaxUses: '2', webFetchMaxUses: '1', webFetchMaxContentTokens: '8000',
+						webSearchAllowedDomains: 'docs.morpheusdata.com']), false)
+
+		then: 'both caps and the allow list reach the request body'
+		body.tools[0].name == 'web_search'
+		body.tools[0].max_uses == 2
+		body.tools[1].name == 'web_fetch'
+		body.tools[1].max_uses == 1
+		body.tools[1].max_content_tokens == 8000
+		body.tools[1].allowed_domains == ['docs.morpheusdata.com']
+		AnthropicApiService.toAsciiJson(body).contains('"max_content_tokens":8000')
+	}
+
+	def "0 removes a fetch cap, and an unreadable value falls back to the default"() {
+		when:
+		Map fetch = provider.buildServerTools(configured([webSearch: 'on', webFetchMaxUses: '0', webFetchMaxContentTokens: '0']), 'claude-sonnet-5')[1]
+
+		then:
+		!fetch.containsKey('max_uses')
+		!fetch.containsKey('max_content_tokens')
+		provider.resolveWebFetchMaxContentTokens(configured([webFetchMaxContentTokens: 'lots'])) == 25000
+	}
+
+	private static Map serverToolsOnlyTurn(String stopReason = 'end_turn') {
+		return [
+			id         : 'msg_empty',
+			role       : 'assistant',
+			stop_reason: stopReason,
+			content    : [
+				[type: 'server_tool_use', id: 'srvtoolu_1', name: 'web_search', input: [query: 'morpheus 9 release notes']],
+				[type: 'web_search_tool_result', tool_use_id: 'srvtoolu_1', content: [
+					[type: 'web_search_result', url: 'https://example.com/notes', title: 'Release Notes 9.0', encrypted_content: 'Eqgf...']
+				]],
+				[type: 'server_tool_use', id: 'srvtoolu_2', name: 'web_fetch', input: [url: 'https://example.com/notes']],
+				[type: 'web_fetch_tool_result', tool_use_id: 'srvtoolu_2', content: [
+					type: 'web_fetch_result', url: 'https://example.com/notes', content: [type: 'document', title: 'Release Notes 9.0']
+				]]
+			],
+			usage      : [input_tokens: 500, output_tokens: 300, cache_read_input_tokens: 1000,
+						  server_tool_use: [web_search_requests: 1, web_fetch_requests: 1]]
+		]
+	}
+
+	def "a turn with only server tool blocks gets one request for the final answer, without tools"() {
+		given:
+		List<Map> sent = []
+		Closure<Map> call = { Map body ->
+			sent << body
+			return sent.size() == 1 ? [success: true, data: serverToolsOnlyTurn()] :
+				[success: true, data: [stop_reason: 'end_turn', content: [[type: 'text', text: 'The current release is 9.0.2.']],
+									   usage: [input_tokens: 700, output_tokens: 40]]]
+		}
+		Map request = [model: 'claude-sonnet-5', max_tokens: 1000,
+					   tools: [[type: 'web_search_20250305', name: 'web_search'], [name: 'list_servers', input_schema: [type: 'object']]],
+					   messages: [[role: 'user', content: 'Which release is current?']]]
+
+		when:
+		Map result = provider.runToCompletion(request, call)
+		LlmChatResponse response = provider.ensureAnswerText(provider.parseMessageResponse(result.data as Map), result.data as Map)
+
+		then: 'the gathered turn goes back verbatim, followed by the request for an answer'
+		sent.size() == 2
+		sent[1].tool_choice == [type: 'none']
+		sent[1].tools == request.tools
+		sent[1].messages.size() == 3
+		sent[1].messages[1].role == 'assistant'
+		sent[1].messages[1].content == serverToolsOnlyTurn().content
+		sent[1].messages[2] == [role: 'user', content: AnthropicProvider.FINAL_ANSWER_PROMPT]
+
+		and: 'the original request is left untouched'
+		!request.containsKey('tool_choice')
+		request.messages.size() == 1
+
+		and: 'the caller sees the answer, with both requests in the totals'
+		response.message.content == 'The current release is 9.0.2.'
+		response.tokenUsage.inputTokens == 1200
+		response.tokenUsage.outputTokens == 340
+	}
+
+	def "an answer that stays empty becomes an explanation with the pages found, never an empty string"() {
+		given:
+		int calls = 0
+		Closure<Map> call = { Map body ->
+			calls++
+			return calls == 1 ? [success: true, data: serverToolsOnlyTurn()] :
+				[success: true, data: [stop_reason: 'end_turn', content: []]]
+		}
+
+		when:
+		Map result = provider.runToCompletion([model: 'claude-sonnet-5', messages: [[role: 'user', content: 'GA?']]], call)
+		LlmChatResponse response = provider.appendSourceList(
+			provider.ensureAnswerText(provider.parseMessageResponse(result.data as Map), result.data as Map))
+
+		then: 'one extra request only'
+		calls == 2
+
+		and:
+		response.message.content.startsWith('The model ended its turn without writing an answer (stop_reason: end_turn).')
+		response.message.content.contains('It ran 2 web search or fetch call(s)')
+		response.message.content.contains('Release Notes 9.0 - https://example.com/notes')
+
+		and: 'listed once, not again as a Sources block, and ASCII only for the replayed history'
+		!response.message.content.contains('**Sources**')
+		response.message.content.every { it.toCharacter() < 128 as char }
+	}
+
+	def "a failed final-answer request still ends in an explanation"() {
+		given:
+		int calls = 0
+		Closure<Map> call = { Map body ->
+			calls++
+			if (calls == 1) {
+				return [success: true, data: serverToolsOnlyTurn()]
+			}
+			throw new RuntimeException('Connection reset')
+		}
+
+		when:
+		Map result = provider.runToCompletion([messages: [[role: 'user', content: 'GA?']]], call)
+		LlmChatResponse response = provider.ensureAnswerText(provider.parseMessageResponse(result.data as Map), result.data as Map)
+
+		then:
+		noExceptionThrown()
+		result.success
+		response.message.content.contains('stop_reason: end_turn')
+	}
+
+	def "max_tokens without text asks for the answer, dropping a search call that never got its result"() {
+		given:
+		List<Map> sent = []
+		Map truncated = serverToolsOnlyTurn('max_tokens')
+		truncated.content = truncated.content + [[type: 'server_tool_use', id: 'srvtoolu_3', name: 'web_search', input: [query: 'more']]]
+		Closure<Map> call = { Map body ->
+			sent << body
+			return sent.size() == 1 ? [success: true, data: truncated] :
+				[success: true, data: [stop_reason: 'max_tokens', content: []]]
+		}
+
+		when:
+		Map result = provider.runToCompletion([model: 'claude-sonnet-5', max_tokens: 1000, messages: [[role: 'user', content: 'GA?']]], call)
+		LlmChatResponse response = provider.ensureAnswerText(provider.parseMessageResponse(result.data as Map), result.data as Map)
+
+		then:
+		sent.size() == 2
+		sent[1].messages[1].content*.id.findAll { it } == ['srvtoolu_1', 'srvtoolu_2']
+
+		and: 'no tools were declared, so no tool_choice either'
+		!sent[1].containsKey('tool_choice')
+
+		and:
+		response.finishReason == 'length'
+		response.message.content.startsWith('The model reached its output limit (stop_reason: max_tokens)')
+	}
+
+	def "a refusal is not asked again, and is explained"() {
+		given:
+		int calls = 0
+		Closure<Map> call = { Map body ->
+			calls++
+			return [success: true, data: [stop_reason: 'refusal', content: []]]
+		}
+
+		when:
+		Map result = provider.runToCompletion([messages: [[role: 'user', content: 'x']]], call)
+		LlmChatResponse response = provider.ensureAnswerText(provider.parseMessageResponse(result.data as Map), result.data as Map)
+
+		then:
+		calls == 1
+		response.finishReason == 'content_filter'
+		response.message.content == 'The model declined to answer this request (stop_reason: refusal).'
+	}
+
+	def "a tool-call turn without text is left to Morpheus"() {
+		given:
+		int calls = 0
+		Closure<Map> call = { Map body ->
+			calls++
+			return [success: true, data: [stop_reason: 'tool_use', content: [[type: 'tool_use', id: 't1', name: 'list_servers', input: [:]]]]]
+		}
+
+		when:
+		Map result = provider.runToCompletion([messages: [[role: 'user', content: 'x']]], call)
+		LlmChatResponse response = provider.ensureAnswerText(provider.parseMessageResponse(result.data as Map), result.data as Map)
+
+		then:
+		calls == 1
+		response.finishReason == 'tool_calls'
+		response.message.content == ''
+	}
+
+	def "redacted thinking is never shown, and is replayed verbatim when the answer is asked for"() {
+		given:
+		Map redacted = [type: 'redacted_thinking', data: 'EmwKAhgBEgy3va3pzix/LafPsn4a...']
+		List<Map> sent = []
+		Closure<Map> call = { Map body ->
+			sent << body
+			return sent.size() == 1 ? [success: true, data: [stop_reason: 'end_turn', content: [redacted]]] :
+				[success: true, data: [stop_reason: 'end_turn', content: [redacted, [type: 'text', text: 'Done.']]]]
+		}
+
+		when:
+		Map result = provider.runToCompletion([messages: [[role: 'user', content: 'x']]], call)
+		LlmChatResponse response = provider.parseMessageResponse(result.data as Map)
+
+		then:
+		sent[1].messages[1].content == [redacted]
+		response.message.content == 'Done.'
+		response.metadata.thinking == null
+	}
+
+	def "the finished-turn line names stop reason, max_tokens, block counts, server tools and usage"() {
+		expect:
+		AnthropicProvider.describeFinishedTurn(serverToolsOnlyTurn(), 1000, 0, true) ==
+			'stop_reason=end_turn max_tokens=1000 text_chars=0 ' +
+			'blocks={server_tool_use=2, web_search_tool_result=1, web_fetch_tool_result=1} ' +
+			'server_tool_use={web_search=1, web_fetch=1} ' +
+			'usage={input=500 output=300 read=1000 created=0 web_search_requests=1 web_fetch_requests=1} ' +
+			'pause_turn_continuations=0 final_answer_request=yes'
+	}
+
+	private static AnthropicProvider providerAnswering(Map result) {
+		AnthropicProvider withApi = new AnthropicProvider(null, null)
+		withApi.apiService = new AnthropicApiService() {
+			@Override
+			Map createMessage(String baseUrl, String apiKey, Map requestBody, String apiVersion, List<String> betas, Map opts) {
+				return result
+			}
+		}
+		return withApi
+	}
+
+	def "a prompt that no longer fits the context comes back as an explanation, not as an error"() {
+		given:
+		AnthropicProvider withApi = providerAnswering([success: false, statusCode: '400', errorType: 'invalid_request_error',
+			errorMessage: 'prompt is too long: 1065647 tokens > 1000000 maximum', requestId: 'req_test',
+			msg: 'API returned 400: prompt is too long: 1065647 tokens > 1000000 maximum'])
+		AccountIntegration ai = configured([webSearch: 'on'])
+		ai.servicePassword = 'sk-ant-test'
+
+		when:
+		ServiceResponse<LlmChatResponse> response = withApi.generateResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(model: 'claude-sonnet-5', messages: [message('user', 'Summarise every release note')]), [:])
+
+		then: 'Morpheus would show a generic error and drop the question'
+		response.success
+		response.data.message.content.startsWith("This request did not fit into the model's context window " +
+			'(Anthropic: prompt is too long: 1065647 tokens > 1000000 maximum).')
+		response.data.message.content.contains('Web Fetch Max Content Tokens')
+	}
+
+	def "any other API error still fails the request"() {
+		given:
+		AnthropicProvider withApi = providerAnswering([success: false, statusCode: '400', msg: 'API returned 400: credit balance is too low'])
+		AccountIntegration ai = configured([:])
+		ai.servicePassword = 'sk-ant-test'
+
+		when:
+		ServiceResponse<LlmChatResponse> response = withApi.generateResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(messages: [message('user', 'hi')]), [:])
+
+		then:
+		!response.success
+		response.errors.error.contains('credit balance')
+	}
+
+	private static LlmModel model(String code, Boolean enabled = true) {
+		return new LlmModel(code: code, enabled: enabled)
+	}
+
+	def "the usage probe prefers the newest enabled Haiku, not the first one listed"() {
+		given:
+		LlmIntegration llm = new LlmIntegration(models: [
+			model('anthropic/claude-3-haiku'),
+			model('anthropic/claude-sonnet-4.6'),
+			model('anthropic/claude-haiku-4.5'),
+			model('anthropic/claude-3.5-haiku-20241022'),
+			model('anthropic/claude-haiku-5', false)
+		])
+
+		expect:
+		provider.resolveUsageProbeModel(llm) == 'anthropic/claude-haiku-4.5'
+		provider.resolveUsageProbeModels(llm) ==
+			['anthropic/claude-haiku-4.5', 'anthropic/claude-3.5-haiku-20241022', 'anthropic/claude-3-haiku', 'anthropic/claude-sonnet-4.6']
+		provider.resolveUsageProbeModel(new LlmIntegration(models: [])) == 'claude-haiku-4-5'
+	}
+
+	def "a retired probe model is skipped for the next candidate, and other errors are not retried"() {
+		given:
+		List<String> probed = []
+		AnthropicApiService api = new AnthropicApiService() {
+			@Override
+			Map fetchUsageHeaders(String baseUrl, String apiKey, String apiVersion, String model, Map opts) {
+				probed << model
+				if (model == 'claude-3-haiku') {
+					return [success: false, statusCode: '404', msg: 'API returned 404: claude-3-haiku has reached the end of its life']
+				}
+				if (model == 'claude-broken') {
+					return [success: false, statusCode: '529', msg: 'API returned 529: overloaded']
+				}
+				return [success: true, headers: ['anthropic-ratelimit-requests-limit': '50', 'anthropic-ratelimit-requests-remaining': '49']]
+			}
+		}
+		LlmIntegration llm = new LlmIntegration()
+
+		when:
+		new LlmUsageSync(llm, null).execute(api, 'https://api.anthropic.com', 'k', null, ['claude-3-haiku', 'claude-haiku-4-5', 'claude-x'], [:])
+
+		then:
+		probed == ['claude-3-haiku', 'claude-haiku-4-5']
+		llm.requestUsageLimit == 50L
+
+		when:
+		probed.clear()
+		new LlmUsageSync(llm, null).execute(api, 'https://api.anthropic.com', 'k', null, ['claude-broken', 'claude-haiku-4-5'], [:])
+
+		then:
+		probed == ['claude-broken']
 	}
 }

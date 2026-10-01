@@ -133,7 +133,12 @@ class AnthropicApiService {
 				if (apiResponse?.success != true || response == null) {
 					String statusCode = apiResponse?.errorCode ?: response?.statusLine?.statusCode?.toString() ?: 'unknown'
 					String errorBody = readErrorBody(response)
-					return [success: false, msg: "Anthropic API returned ${statusCode}: ${errorBody ?: buildErrorMessage(apiResponse)}"]
+					Map body = parseJsonMap(errorBody) ?: (apiResponse?.data instanceof Map ? apiResponse.data as Map : [:])
+					Map headers = [:]
+					response?.allHeaders?.each { headers[it.name] = it.value }
+					Map details = errorDetails(statusCode, body, headers ?: apiResponse?.headers)
+					logApiError(details)
+					return [success: false, msg: "Anthropic API returned ${statusCode}: ${errorBody ?: buildErrorMessage(apiResponse)}"] + details
 				}
 				return [success: true, data: consumeEventStream(response, onText)]
 			}
@@ -290,7 +295,50 @@ class AnthropicApiService {
 			}
 			return [success: true, data: responseData, headers: apiResponse?.headers]
 		}
-		return [success: false, msg: buildErrorMessage(apiResponse), headers: apiResponse?.headers]
+		Map body = apiResponse?.data instanceof Map ? apiResponse.data as Map : (parseJsonMap(apiResponse?.content) ?: [:])
+		Map details = errorDetails(apiResponse?.errorCode ?: apiResponse?.statusCode, body, apiResponse?.headers)
+		logApiError(details)
+		return [success: false, msg: buildErrorMessage(apiResponse), headers: apiResponse?.headers] + details
+	}
+
+	/**
+	 * What Anthropic said about a failed call: HTTP status, error type and message,
+	 * and the request id support asks for. The id is in the body since 2025 and in
+	 * the request-id header; either is taken.
+	 */
+	protected static Map errorDetails(def statusCode, Map body, Map headers) {
+		Map error = body?.error instanceof Map ? body.error as Map : [:]
+		String requestId = body?.request_id?.toString()
+		if (!requestId && headers) {
+			def entry = headers.find { it.key?.toString()?.equalsIgnoreCase('request-id') }
+			def value = entry?.value
+			requestId = (value instanceof Collection ? (value as Collection)[0] : value)?.toString()
+		}
+		return [statusCode  : statusCode?.toString(),
+				errorType   : error.type?.toString(),
+				errorMessage: (error.message ?: body?.message)?.toString(),
+				requestId   : requestId ?: null]
+	}
+
+	/**
+	 * Morpheus shows every provider error as one generic sentence and keeps no
+	 * trace of it, so this line is what an administrator has to go on.
+	 */
+	protected void logApiError(Map details) {
+		log.warn("Anthropic API error: HTTP ${details.statusCode ?: 'unknown'} ${details.errorType ?: 'unknown_error'}: " +
+			"${details.errorMessage ?: 'no message'} (request_id ${details.requestId ?: 'none'})")
+	}
+
+	protected static Map parseJsonMap(String text) {
+		if (!text?.trim()) {
+			return null
+		}
+		try {
+			def parsed = new groovy.json.JsonSlurper().parseText(text)
+			return parsed instanceof Map ? parsed as Map : null
+		} catch (Exception ignored) {
+			return null
+		}
 	}
 
 	protected <T> T withApiClient(Map opts = [:], Closure<T> work) {
