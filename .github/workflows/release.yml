@@ -1,7 +1,8 @@
 name: release
 
 # One tag prefix per plugin. The tag names the plugin and its version, for example
-# anthropic-v1.5.0, openrouter-v0.1.1, openai-v0.1.0 or proxmox-ve-v0.1.15-lab.
+# anthropic-v1.5.0, openrouter-v0.1.1, openai-v0.1.0, proxmox-ve-v0.1.15-lab or
+# tenant-chargeback-v1.1.0.
 on:
   push:
     tags:
@@ -9,6 +10,12 @@ on:
       - 'openrouter-v*'
       - 'openai-v*'
       - 'proxmox-ve-v*'
+      - 'tenant-chargeback-v*'
+      - 'instance-showback-v*'
+      - 'budget-burn-v*'
+      - 'msp-tenant-overview-v*'
+      - 'socket-report-v*'
+      - 'cost-approval-v*'
 
 permissions:
   contents: write
@@ -28,6 +35,12 @@ jobs:
             openrouter-v*) dir=llm/openrouter;   name=OpenRouter;   version="${tag#openrouter-v}" ;;
             openai-v*)     dir=llm/openai;       name="OpenAI-Compatible API"; version="${tag#openai-v}" ;;
             proxmox-ve-v*) dir=cloud/proxmox-ve; name="Proxmox VE"; version="${tag#proxmox-ve-v}" ;;
+            tenant-chargeback-v*)   dir=finops/tenant-chargeback;   name="Tenant Chargeback";       version="${tag#tenant-chargeback-v}" ;;
+            instance-showback-v*)   dir=finops/instance-showback;   name="Instance Showback";       version="${tag#instance-showback-v}" ;;
+            budget-burn-v*)         dir=finops/budget-burn;         name="Budget Burn";             version="${tag#budget-burn-v}" ;;
+            msp-tenant-overview-v*) dir=finops/msp-tenant-overview; name="MSP Tenant Overview";     version="${tag#msp-tenant-overview-v}" ;;
+            socket-report-v*)       dir=finops/socket-report;       name="Socket Usage Report";     version="${tag#socket-report-v}" ;;
+            cost-approval-v*)       dir=finops/cost-approval;       name="Cost Threshold Approval"; version="${tag#cost-approval-v}" ;;
             *) echo "::error::Unknown tag prefix: $tag"; exit 1 ;;
           esac
           # A Proxmox VE lab build carries -lab in its tag but not in gradle.properties.

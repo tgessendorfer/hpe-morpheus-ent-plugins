@@ -1,0 +1,41 @@
+<div class="finops-budget-burn">
+  <h2>{{i18n 'budget-burn-analytics.heading'}} {{month}}</h2>
+  <p class="text-muted">{{i18n 'budget-burn-analytics.day'}} {{day}} {{i18n 'budget-burn-analytics.dayOf'}} {{days}}.
+    {{#if master}}{{i18n 'budget-burn-analytics.intro.master'}}{{else}}{{i18n 'budget-burn-analytics.intro.tenant'}} {{tenant}}.{{/if}}
+    {{i18n 'budget-burn-analytics.intro.forecast'}}</p>
+  <table class="table table-condensed">
+    <thead><tr>
+      <th>{{i18n 'budget-burn-analytics.col.budget'}}</th>{{#if master}}<th>{{i18n 'budget-burn-analytics.col.owner'}}</th>{{/if}}
+      <th>{{i18n 'budget-burn-analytics.col.scope'}}</th><th>{{i18n 'budget-burn-analytics.col.currency'}}</th>
+      <th>{{i18n 'budget-burn-analytics.col.monthlyBudget'}}</th><th>{{i18n 'budget-burn-analytics.col.toDate'}}</th>
+      <th>{{i18n 'budget-burn-analytics.col.burnRate'}}</th><th>{{i18n 'budget-burn-analytics.col.forecast'}}</th>
+      <th style="width:20%">{{i18n 'budget-burn-analytics.col.forecastVsBudget'}}</th><th>{{i18n 'budget-burn-analytics.col.status'}}</th>
+      <th>{{i18n 'budget-burn-analytics.col.yearToDate'}}</th>
+    </tr></thead>
+    <tbody>
+    {{#each items}}
+      <tr>
+        <td>{{name}}</td>{{#if ../master}}<td>{{owner}}</td>{{/if}}<td>{{i18n scopeKey}}: {{target}}</td><td>{{currency}}</td>
+        <td>{{budgetText}} {{currency}}</td>
+        {{#if mismatch}}
+        <td>{{runningText}} {{currency}}{{#if foreignRunning}}<br><small>+ {{foreignRunning}}</small>{{/if}}</td><td>-</td>
+        <td>{{forecastText}} {{currency}}{{#if foreignForecast}}<br><small>+ {{foreignForecast}}</small>{{/if}}</td>
+        <td><small>{{i18n 'budget-burn-analytics.noComparison'}} ({{currency}})</small></td>
+        {{else}}
+        <td>{{runningText}} {{currency}} ({{usedPct}} %)</td><td>{{burnText}} {{currency}}</td><td>{{forecastText}} {{currency}}</td>
+        <td><div class="finops-bar-track" style="background:#e6e6e6;height:12px;width:100%"><div class="finops-bar" style="background:{{color}};height:12px;width:{{bar}}%;min-width:1px"></div></div><small>{{forecastPct}} %</small></td>
+        {{/if}}
+        <td><span class="finops-status" style="color:{{color}};font-weight:600">{{i18n statusKey}}</span></td>
+        {{#if ytdMismatch}}
+        <td>{{ytdText}} / {{ytdBudgetText}} {{currency}}<br><small>+ {{foreignYtd}}, {{i18n 'budget-burn-analytics.status.mismatch'}}</small></td>
+        {{else}}
+        <td>{{ytdText}} / {{ytdBudgetText}} {{currency}} ({{ytdPct}} %)</td>
+        {{/if}}
+      </tr>
+    {{else}}
+      <tr><td colspan="11">{{i18n 'budget-burn-analytics.empty'}}</td></tr>
+    {{/each}}
+    </tbody>
+  </table>
+  {{#if anyMismatch}}<p class="text-muted">{{i18n 'budget-burn-analytics.mismatchNote'}}</p>{{/if}}
+</div>

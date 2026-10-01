@@ -6,9 +6,9 @@ You may obtain a copy of the License in the accompanying LICENSE file or at:
 
     http://www.apache.org/licenses/LICENSE-2.0
 
-This repository holds three plugins. Each plugin folder keeps its own LICENSE
-file, and its own NOTICE file where it has one; those files ship with that
-plugin.
+This repository holds plugins in llm/, cloud/ and finops/. Each plugin folder
+keeps its own LICENSE file, and its own NOTICE file where it has one; those
+files ship with that plugin.
 
 --------------------------------------------------------------------------------
 Derived work
@@ -39,17 +39,23 @@ cloud/proxmox-ve
     The upstream project does not ship a NOTICE file. The commit history of
     cloud/proxmox-ve records every change made to the upstream files.
 
+finops/*
+
+    Own work, not derived from another project. The project structure and
+    Gradle build setup follow the llm/* plugins in this repository.
+
 --------------------------------------------------------------------------------
 Trademarks
 --------------------------------------------------------------------------------
 
 These are independent, community-built plugins. They are not official
-Hewlett Packard Enterprise, Anthropic, OpenRouter or Proxmox products, and they
-are neither endorsed by nor affiliated with any of those companies.
+Hewlett Packard Enterprise, Anthropic, OpenAI, OpenRouter or Proxmox products,
+and they are neither endorsed by nor affiliated with any of those companies.
 
 "HPE", "Hewlett Packard Enterprise" and "Morpheus" are trademarks of
 Hewlett Packard Enterprise Development LP.
 "Anthropic" and "Claude" are trademarks of Anthropic PBC.
+"OpenAI", "GPT" and "ChatGPT" are trademarks of OpenAI.
 "OpenRouter" is a trademark of its owner.
 "Proxmox" is a trademark of Proxmox Server Solutions GmbH.
 Other model and vendor names are trademarks of their respective owners.

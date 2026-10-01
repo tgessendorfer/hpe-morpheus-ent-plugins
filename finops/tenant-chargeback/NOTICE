@@ -1,0 +1,31 @@
+Morpheus Tenant Chargeback Plugin
+Copyright 2026 Thomas Gessendorfer
+
+This product is licensed under the Apache License, Version 2.0 (the "License").
+You may obtain a copy of the License in the accompanying LICENSE file or at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+--------------------------------------------------------------------------------
+Origin
+--------------------------------------------------------------------------------
+
+Own work. The project structure and Gradle build setup follow the convention of
+the llm/* plugins in this repository.
+
+--------------------------------------------------------------------------------
+Trademarks
+--------------------------------------------------------------------------------
+
+This is an independent, community-built plugin. It is not an official
+Hewlett Packard Enterprise product, and it is neither endorsed by nor
+affiliated with Hewlett Packard Enterprise.
+
+"HPE", "Hewlett Packard Enterprise" and "Morpheus" are trademarks of
+Hewlett Packard Enterprise Development LP.
+Other vendor names are trademarks of their respective owners.
+
+These names are used solely to identify the platform this plugin extends.
+The Apache License, Version 2.0 does not grant permission to use the trade
+names, trademarks, service marks, or product names of any contributor or
+third party (Section 6).

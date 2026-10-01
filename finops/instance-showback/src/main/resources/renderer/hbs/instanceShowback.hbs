@@ -1,0 +1,44 @@
+<div class="finops-showback">
+{{#if hasData}}
+  {{#if hasCurrent}}
+  {{#each current}}
+  <div class="intro-stats">
+    <div class="count-stats">
+      <div class="stats-container"><span class="big-stat">{{runningText}} {{currency}}</span><span class="stat-label">{{i18n 'instance-showback-tab.monthToDate'}} ({{i18n 'instance-showback-tab.day'}} {{../day}}/{{../days}})</span></div>
+      <div class="stats-container"><span class="big-stat">{{forecastText}} {{currency}}</span><span class="stat-label">{{i18n 'instance-showback-tab.forecast'}}</span></div>
+      {{#if @first}}<div class="stats-container"><span class="big-stat">{{../plan}}</span><span class="stat-label">{{i18n 'instance-showback-tab.plan'}}</span></div>{{/if}}
+    </div>
+  </div>
+  {{/each}}
+  <h3>{{i18n 'instance-showback-tab.splitHeading'}}</h3>
+  <table class="table table-condensed">
+    <thead><tr><th>{{i18n 'instance-showback-tab.currency'}}</th><th>{{i18n 'instance-showback-tab.compute'}}</th><th>{{i18n 'instance-showback-tab.storage'}}</th><th>{{i18n 'instance-showback-tab.licenses'}}</th></tr></thead>
+    <tbody>
+    {{#each current}}<tr><td>{{currency}}</td><td>{{computeText}}</td><td>{{storageText}}</td><td>{{licenseText}}</td></tr>{{/each}}
+    </tbody>
+  </table>
+  {{else}}
+  <p>{{i18n 'instance-showback-tab.noCurrent'}}</p>
+  {{/if}}
+  <h3>{{i18n 'instance-showback-tab.history'}}</h3>
+  <table class="table table-condensed">
+    <thead><tr><th style="width:120px">{{i18n 'instance-showback-tab.month'}}</th><th style="width:80px">{{i18n 'instance-showback-tab.currency'}}</th><th style="width:140px">{{i18n 'instance-showback-tab.amount'}}</th><th></th></tr></thead>
+    <tbody>
+    {{#each history}}
+      {{#if has}}
+      {{#each amounts}}
+      <tr><td>{{#if @first}}{{../month}}{{#if ../current}} *{{/if}}{{/if}}</td><td>{{currency}}</td><td>{{priceText}}</td>
+        <td><div class="finops-bar" style="background:#8c96a3;height:10px;width:{{bar}}%;min-width:1px"></div></td></tr>
+      {{/each}}
+      {{else}}
+      <tr><td>{{month}}{{#if current}} *{{/if}}</td><td>-</td><td>-</td><td></td></tr>
+      {{/if}}
+    {{/each}}
+    </tbody>
+  </table>
+  <p class="text-muted">{{i18n 'instance-showback-tab.footCurrent'}} {{i18n 'instance-showback-tab.footPrices'}} {{i18n 'instance-showback-tab.footUpdated'}} {{updated}} UTC.
+  {{#if multiCurrency}}{{i18n 'instance-showback-tab.footMulti'}} {{currencies}}. {{i18n 'instance-showback-tab.footMultiRule'}}{{/if}}</p>
+{{else}}
+  <p>{{i18n 'instance-showback-tab.noDataFor'}} {{instanceName}}. {{i18n 'instance-showback-tab.noDataHint'}}</p>
+{{/if}}
+</div>

@@ -1,0 +1,93 @@
+buildscript {
+	repositories {
+		mavenLocal()
+		mavenCentral()
+		maven { url "https://plugins.gradle.org/m2/" }
+	}
+	dependencies {
+		classpath "com.github.jengelman.gradle.plugins:shadow:6.0.0"
+		classpath "com.morpheusdata:morpheus-plugin-gradle:$morpheusPluginApiVersion"
+	}
+}
+
+apply plugin: 'java'
+apply plugin: 'groovy'
+apply plugin: 'idea'
+apply plugin: 'com.github.johnrengelman.shadow'
+apply plugin: 'com.morpheusdata.morpheus-plugin-gradle'
+
+group = 'com.morpheusdata.tenantchargeback'
+sourceCompatibility = '1.11'
+targetCompatibility = '1.11'
+ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
+
+repositories {
+	mavenLocal()
+	mavenCentral()
+}
+
+configurations {
+	provided
+}
+
+dependencies {
+	provided "com.morpheusdata:morpheus-plugin-api:$morpheusPluginApiVersion"
+	provided "org.codehaus.groovy:groovy-all:$groovyVersion"
+	provided "org.slf4j:slf4j-api:$slf4jVersion"
+	provided 'io.reactivex.rxjava3:rxjava:3.1.8'
+
+	testImplementation "com.morpheusdata:morpheus-plugin-api:$morpheusPluginApiVersion"
+	testImplementation 'io.reactivex.rxjava3:rxjava:3.1.8'
+	testImplementation "org.slf4j:slf4j-api:$slf4jVersion"
+	testImplementation "org.codehaus.groovy:groovy-all:$groovyVersion"
+	testImplementation 'net.bytebuddy:byte-buddy:1.14.11'
+	testImplementation 'org.objenesis:objenesis:3.3'
+	testImplementation "org.spockframework:spock-core:$spockVersion"
+}
+
+sourceSets {
+	main {
+		compileClasspath += configurations.provided
+	}
+}
+
+jar {
+	manifest {
+		attributes(
+			'Plugin-Class': 'com.morpheusdata.tenantchargeback.TenantChargebackPlugin',
+			'Plugin-Version': version,
+			'Morpheus-Name': 'Tenant Chargeback',
+			'Morpheus-Organization': 'community',
+			'Morpheus-Code': 'morpheus-tenant-chargeback-plugin',
+			'Morpheus-Description': 'Monthly chargeback report per tenant and group from Morpheus invoices: cost, list price, margin, optional additional markup and invoice amount, totalled per currency. CSV export via the report result.',
+			'Morpheus-Labels': 'FinOps, Cost, Reporting',
+			'Morpheus-Repo': 'https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/finops/tenant-chargeback',
+			'Morpheus-Min-Appliance-Version': morpheusMinApplianceVersion
+		)
+	}
+}
+
+task copyRuntimeLibs(type: Copy) {
+	into "lib"
+	from project.configurations.runtimeClasspath - project.configurations.provided
+}
+
+test {
+	useJUnitPlatform()
+	// The plugin spec compares getCode() and setWebsiteUrl() against the manifest above.
+	systemProperty 'morpheus.code', jar.manifest.attributes['Morpheus-Code']
+	systemProperty 'morpheus.repo', jar.manifest.attributes['Morpheus-Repo']
+	testLogging {
+		exceptionFormat = 'full'
+		showStandardStreams = true
+	}
+}
+
+shadowJar {
+}
+
+tasks.withType(Sign) {
+	onlyIf { isReleaseVersion }
+}
+
+tasks.assemble.dependsOn tasks.shadowJar
