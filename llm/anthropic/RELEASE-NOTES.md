@@ -23,8 +23,10 @@ showed the caps at work: 3 `web_search` and 3 `web_fetch` calls, about 243,000 i
 over the server-side loop, against about 1,065,000 before. A turn without answer text did not occur,
 so the final-answer request is still covered by tests only.
 
-Verified: the test suite passes, with a new test for the floor. Not yet verified on an appliance:
-that the chat request goes out with `max_tokens=8192`.
+Verified: the test suite passes, with a new test for the floor. The release jar loaded on a
+Morpheus 9.0.2 appliance; every chat request went out with `max_tokens=8192`, and a question answered
+through the built-in MCP tools (`list_clouds`, eight `list_instances` calls) ended with
+`stop_reason=end_turn`.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.6.0...anthropic-v1.6.1
 
