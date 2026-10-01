@@ -59,7 +59,7 @@ viewers use in Morpheus.
 ## Install
 
 1. Download `morpheus-instance-showback-plugin-<version>-all.jar` from the
-   [releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases) (tags
+   [release instance-showback-v1.1.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/instance-showback-v1.1.0) (tag
    `instance-showback-v<version>`) and check it against `SHA256SUMS`.
 2. *Administration > Integrations > Plugins > Add*, upload the jar.
 3. Open any instance: the tab **Costs** appears next to the built-in tabs.

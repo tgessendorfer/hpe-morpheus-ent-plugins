@@ -56,7 +56,7 @@ and invoices in Morpheus.
 ## Install
 
 1. Download `morpheus-msp-tenant-overview-plugin-<version>-all.jar` from the
-   [releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases) (tag
+   [release msp-tenant-overview-v1.1.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/msp-tenant-overview-v1.1.0) (tag
    `msp-tenant-overview-v<version>`) and check it against `SHA256SUMS`.
 2. *Administration > Integrations > Plugins > Add*, upload the jar.
 3. Open *Operations > Analytics* in the master tenant and pick **MSP Tenant Overview**.

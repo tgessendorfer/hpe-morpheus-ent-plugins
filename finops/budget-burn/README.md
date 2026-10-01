@@ -91,7 +91,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 ## Install
 
 Download `morpheus-budget-burn-plugin-<version>-all.jar` from the
-[releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases) (tag
+[release budget-burn-v1.1.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/budget-burn-v1.1.0) (tag
 `budget-burn-v<version>`), then upload it under *Administration → Integrations → Plugins →
 Add*. Updating to a newer version with the same plugin code replaces the plugin in place.
 

@@ -33,14 +33,16 @@ margin of every sub-tenant, per currency.** Built against plugin API 1.4.2, mini
 - `./gradlew clean test shadowJar` with JDK 17: Spock tests for plugin code = manifest code, repo
   link, the one provider, identical message keys in English and German, every template key present,
   currency fallback, grouping per currency, rounding, percentages and number formats.
-
-### Not yet verified
-
-- Live on Morpheus 9.0.2: page load as master and as sub-tenant user, German and English UI,
-  numbers against the invoices, upgrade from a `1.1.0-rc.N` test build.
+- Live on Morpheus 9.0.2 with the 1.1.0 release candidates: every figure equal to a reference
+  implementation run side by side; sub-tenant users see neither the menu entry nor the content;
+  English and German, including an apostrophe in a German text that MessageFormat used to drop.
+- Not yet uploaded: this release jar itself. The release candidates were replaced in place by
+  later builds with the same plugin id, so 1.1.0 is expected to install over them the same way.
 
 ### Compatibility
 
 Plugin API 1.4.2, minimum appliance 9.0.2, tested on 9.0.2 only. Reads the internal tables `user`,
 `account`, `compute_site`, `instance`, `compute_server` and `account_invoice`; may break on an
 appliance upgrade.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/msp-tenant-overview-v1.1.0

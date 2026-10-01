@@ -29,13 +29,12 @@ plugin API 1.4.2, minimum appliance 9.0.2.
   integration it is asked about.**
 - Form labels and help texts in English and German; request ids start with `ca-`.
 
-### Changed in rc.5
+### Why it rejects instead of waiting
 
-- Above the threshold, on a currency mismatch and without a price the plugin now answers
-  `rejected` (`RequestReference.ApprovalStatus.rejected`) instead of `requested`. On 9.0.2 a
-  `requested` item owned by an approval integration cannot be approved, denied or cancelled by
-  anyone (HTTP 403 *action not available for item*), so such a request used to hang until the
-  instance was deleted.
+On 9.0.2 a `requested` item owned by an approval integration cannot be approved, denied or
+cancelled by anyone (HTTP 403 *action not available for item*). A request left `requested` would
+hang until the instance is deleted, so the plugin answers `rejected`
+(`RequestReference.ApprovalStatus.rejected`) with the reason instead.
 
 ### Verified
 
@@ -44,13 +43,15 @@ plugin API 1.4.2, minimum appliance 9.0.2.
 - On HPE Morpheus Enterprise 9.0.2: the integration type lists its fields as
   `cm.plugin.costThreshold` and `cm.plugin.thresholdCurrency` with field context `config`.
 - Live on 9.0.2 with an *Approve Provision* policy scoped to one group: a 16.00 EUR request is
-  approved under a 20 EUR threshold and provisions. With rc.5 under a 10 EUR threshold the item
+  approved under a 20 EUR threshold and provisions. Under a 10 EUR threshold the item
   becomes `rejected` in the next monitor run (here after about 5 minutes), the instance `denied`,
   and approval and item show *Above cost threshold of 10.00 EUR/month (requested 16.00 EUR).
   Please contact your provider for approval.*; nothing stays pending. Values saved over the API
   appear in the edit form and are the ones the plugin applies.
 - `Request.refs` holds Morpheus' internal reference objects, not the plugin model class; they are
   read by property name (a typed closure failed live with `MissingMethodException`).
+- Not yet uploaded: this release jar itself. The release candidates were replaced in place by
+  later builds with the same plugin id, so 1.1.0 is expected to install over them the same way.
 
 ### Known limits
 
@@ -62,3 +63,5 @@ plugin API 1.4.2, minimum appliance 9.0.2.
   to let a larger request through, raise the threshold of the integration or policy.
 - `PUT /api/integrations/{id}` replaces the whole option map: send threshold and currency together.
 - Reads the internal table `account` for the currency fallback; tested on 9.0.2 only.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/cost-approval-v1.1.0

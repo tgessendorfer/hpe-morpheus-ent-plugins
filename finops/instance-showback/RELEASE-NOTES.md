@@ -31,9 +31,10 @@ per currency. Built against plugin API 1.4.2, minimum appliance 9.0.2.
   half-up rounding, number format in English and German, bar scaling, month list across year
   boundaries and month ends, plugin code against the manifest, repository URL, registered provider,
   and identical keys in the English and German bundles.
-
-Not verified yet: the tab on an appliance with this build (planned on HPE Morpheus Enterprise 9.0.2
-with the release candidate), the German texts in the UI, and the upgrade from a release candidate
-to 1.1.0.
+- Live on HPE Morpheus Enterprise 9.0.2 with the 1.1.0 release candidates: every figure equal to a
+  reference implementation run side by side, as master and as sub-tenant user, texts in English
+  and German.
+- Not yet uploaded: this release jar itself. The release candidates were replaced in place by
+  later builds with the same plugin id, so 1.1.0 is expected to install over them the same way.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/instance-showback-v1.1.0

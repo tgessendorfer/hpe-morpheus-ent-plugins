@@ -97,7 +97,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 ./gradlew clean test shadowJar
 ```
 
-JDK 11 or newer. The plugin jar is `build/libs/morpheus-cost-approval-plugin-<version>-all.jar`.
+JDK 17 (Groovy 3.0.9 does not run on JDK 21). The plugin jar is `build/libs/morpheus-cost-approval-plugin-<version>-all.jar`.
 Upload it under *Administration > Integrations > Plugins*.
 
 ## License

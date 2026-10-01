@@ -82,8 +82,8 @@ cause, instead of showing wrong numbers.
 ./gradlew clean test shadowJar
 ```
 
-The jar is `build/libs/morpheus-socket-report-plugin-<version>-all.jar`. JDK 11 or newer;
-the build targets Java 11.
+The jar is `build/libs/morpheus-socket-report-plugin-<version>-all.jar`. JDK 17 (Groovy 3.0.9 does not
+run on JDK 21); the build targets Java 11.
 
 ## Install
 

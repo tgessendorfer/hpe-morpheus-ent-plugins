@@ -23,23 +23,20 @@ report type `socket-usage-report` (*Socket Usage*, category *Inventory*), master
 - English and German labels; numbers in the viewer's locale, English without one.
 - A failed query of the internal tables ends the report as *failed* with a clear log entry.
 
-### Changes from the earlier private build
-
-- New plugin code, report type code and option codes; the earlier build cannot be upgraded in
-  place and is removed separately.
-- The default of 2 sockets for a host without a value is now an option.
-- Subtotals and the total divide the summed VM count once, instead of adding up per-row shares.
-- Two tenants with the same name are kept apart.
-
 ### Verified
 
-- 45 Spock unit tests: option parsing, ratio division and rounding, host defaults, aggregation,
+- 46 Spock unit tests: option parsing, ratio division and rounding, host defaults, aggregation,
   locale formatting, codes, manifest, message bundles.
+- Live on Morpheus 9.0.2 with the 1.1.0 release candidates: default options and `vmsPerSocket=10`,
+  93 numbers each, equal to a reference implementation run side by side; the socket total equals
+  `GET /api/license`. Report and options in English and German.
+- Not yet uploaded: this release jar itself. The release candidates were replaced in place by
+  later builds with the same plugin id, so 1.1.0 is expected to install over them the same way.
 
 ### Not yet verified
 
-- Install and run on a live 9.0.2 appliance with this build, including the German UI and the
-  comparison with `GET /api/license`.
-- Any appliance version other than 9.0.2.
+- Any appliance version other than 9.0.2. The counting rule is measured, not documented by HPE.
 
 Plugin API 1.4.2, minimum appliance 9.0.2.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/socket-report-v1.1.0
