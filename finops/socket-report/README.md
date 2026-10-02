@@ -20,14 +20,17 @@ broken down per tenant and per cloud and tenant.
 - **Per cloud and tenant:** cloud, cloud type, tenant, hosts, host sockets, hosts counted with
   the default socket value, VMs on hosts, VMs without a host, VM sockets and sockets.
 
-Numbers follow the viewer's language (`1,234.567` in English, `1.234,567` in German); without
-a request locale the report uses English. Labels come in English and German.
+Texts and numbers follow one language (`1,234.567` in English, `1.234,567` in German). Labels
+come in English and German; any other language shows English texts with that language's number
+format.
 
-**Which language counts:** the plugin uses the locale of the web request, i.e. the browser's
-language (`Accept-Language`), not the language chosen in the Morpheus UI. Measured on 9.0.2: with
-Morpheus set to German and the browser to English, the Morpheus menus are German but the plugin
-content and numbers are English, and vice versa. Set the browser language to the language the
-viewers use in Morpheus.
+**Which language counts (since 1.2.0):** the language chosen in the Morpheus user settings, the
+same one the Morpheus menus use. Plugin API 1.4.2 does not tell a report which user views it, so
+the report uses the setting of the user who ran it. When that user has no setting, or the
+setting cannot be read, the report falls back to the browser language (`Accept-Language`) and,
+without a web request, to English. Up to 1.1.1 the report always followed the browser language:
+measured on 9.0.2, with Morpheus set to English and the browser to German, the Morpheus menus
+were English but the report was German.
 
 ## Counting rule
 
@@ -68,6 +71,7 @@ report runs, with a warning in the appliance log.
 
 | Plugin version | Plugin API | Min. appliance | Tested appliance | Internal tables read |
 |---|---|---|---|---|
+| 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0 release candidate, master tenant) | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account`, `user` (language setting) |
 | 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0, 1.1.1) | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account` |
 
@@ -80,6 +84,12 @@ cause, instead of showing wrong numbers.
 - The counting rule and both defaults are measured on 9.0.2, not documented by HPE.
 - The report counts the servers in the database at the time it runs. It has no history.
 - No currency or cost figures: sockets only.
+- The report shows in the language of the user who ran it, not of the user who views it: Plugin
+  API 1.4.2 hands a report's rendering no viewing user. Viewers with another language see the
+  runner's language.
+- The create dialog is unchanged: Morpheus itself translates the option labels and help texts,
+  and the validation messages follow the browser language as before, because validation gets
+  no user.
 
 ## Build
 
@@ -92,7 +102,9 @@ run on JDK 21); the build targets Java 11.
 
 ## Install
 
-Administration > Integrations > Plugins > Add, then upload the `-all.jar`. Run the report
+Download `morpheus-socket-report-plugin-1.2.0-all.jar` from the release
+[socket-report-v1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/socket-report-v1.2.0),
+then Administration > Integrations > Plugins > Add and upload the `-all.jar`. Run the report
 from Operations > Reports, type *Socket Usage*.
 
 ## License

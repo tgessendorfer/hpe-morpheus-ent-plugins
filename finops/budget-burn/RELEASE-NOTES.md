@@ -6,6 +6,68 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.0
+
+**The page now speaks the viewer's Morpheus language: texts and number formats follow the
+user's own language setting in Morpheus, not the browser.** Plugin API 1.4.2, minimum appliance
+9.0.2; plugin code, provider code and the page layout are unchanged.
+
+### Why
+
+On Morpheus 9.0.2 a user with Morpheus set to English and a browser sending German saw the
+Morpheus menus in English but the Budget Burn page in German, with German number formats.
+Morpheus takes the UI language from the user's own setting (*Locale* in the user settings, for
+example `en-US`, stored in the user record), while the plugin used the locale of the web request,
+which is the browser's `Accept-Language`. Plugin API 1.4.2 offers no language on its `User`
+model, so the plugin now reads the setting itself.
+
+### Changes
+
+- **Language from the user's Morpheus setting.** The page reads the viewer's setting with one
+  parameterised query (`SELECT locale FROM user WHERE id = ?`) over the read-only report
+  connection it already uses, and accepts `en-US`, `de`, `de_DE` and the like. **Behaviour
+  change:** a user set to English sees the page in English even when the browser asks for
+  German, and a user set to German sees it in German with an English browser. Headings, column
+  names, scope and status texts, the error message and every amount and percentage
+  (`1,234.56` / `1.234,56`) follow that setting.
+- **Fallback.** When the setting is empty, names no valid language or cannot be read, the page
+  uses the browser language as before, and English when there is no web request. A failed read
+  is logged at debug level only and never breaks the page. The setting is read in a query of its
+  own, so a change to the user record can at worst bring back the browser language, not an
+  error page.
+- **Texts in English and German only, as before.** Any other language setting gets the English
+  texts, with numbers formatted in that language.
+- **The page texts come with the page data.** The template no longer uses Morpheus' `i18n`
+  helper, which always uses the browser language; the provider resolves the texts from the
+  plugin's own bundles (`i18n/messages.properties`, `i18n/messages_de.properties`) for the
+  viewer's language and passes them to the template. The bundles and their keys are unchanged.
+  The page's root element carries a `lang` attribute (`en` or `de`).
+- The month key of the invoice query is built from year and month directly instead of through
+  `Date.format`; the value (`yyyyMM`) is the same.
+
+### Verified
+
+- New unit tests (Spock): parsing of the setting (`en-US`, `en_US`, `de`, `de_DE`; blank, empty,
+  `null` and invalid values give no locale); an `en-US` setting with a German browser gives
+  English, a `de` setting gives German, a missing, blank or invalid setting and a failing query
+  give the browser language, no web request gives English; the language query is the
+  parameterised `SELECT locale FROM user WHERE id = ?`; the page data of a budget is in English
+  (`1,234.50`) for `en-US` and in German (`1.234,50`) for `de-DE` with a German browser; the error
+  message follows the setting; the template rendered with the plugin API's Handlebars renderer is
+  in the viewer's language, including the currency mismatch branches and the empty list; the
+  template uses no `i18n` helper.
+- Local build with JDK 17 and Gradle 9.8.0: 121 tests, 0 failures, no deprecation warnings,
+  one jar `morpheus-budget-burn-plugin-1.2.0-all.jar`.
+- On Morpheus 9.0.2 (build 9.0.2-2) with a release candidate built from this source, as a master
+  tenant user whose Morpheus setting is `en-US` while the browser sends German: the page renders in
+  English with the same figures as 1.1.1 (number format with a decimal point).
+
+### Not yet verified
+
+- A user with a German setting, and a sub-tenant user.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.1.1...budget-burn-v1.2.0
+
 ## 1.1.1
 
 **Fix release: a budget of 0, the year-to-date budget and a failed connection release are

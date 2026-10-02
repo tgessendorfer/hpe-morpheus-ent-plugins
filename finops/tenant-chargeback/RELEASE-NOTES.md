@@ -6,6 +6,87 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.0
+
+**The report page follows the user's Morpheus language setting, and server invoices appear under
+their real group.** Plugin API 1.4.2, minimum appliance 9.0.2, no new options.
+
+### Changes
+
+- **Language from the Morpheus user setting.** On Morpheus 9.0.2 a UI set to English showed the
+  report in German: Morpheus takes its own language from the user's setting (*User Settings*,
+  stored as `user.locale`, e.g. `en-US`), while the plugin used the locale of the web request,
+  which is the browser's `Accept-Language`. Texts and number formats of the report page now follow
+  the user's setting, read with one parameterised query (`SELECT locale FROM user WHERE id = ?`)
+  over the read-only report connection. When the setting is empty or not a known language, the
+  browser's language counts as before; without a web request, English. Texts exist in English and
+  German; other languages get English texts and their own number format.
+- **Whose setting:** plugin API 1.4.2 passes the report page no viewing user and offers no current
+  user, so the setting of the user who ran the report (the report result's creator) is used.
+  Another user opening the same result sees it in the creator's language.
+- **Texts resolved by the plugin.** The template's `i18n` helper always uses the browser's
+  language, so the page texts now come from the plugin's own bundles in the resolved language and
+  are passed to the template. The bundle files are read directly, without a fallback to the
+  appliance's system locale, so an English setting gives English on any appliance. Of all files
+  named `i18n/messages*.properties` on the class path, the plugin takes the first that carries its
+  own keys, so another bundle of the same name found first by the class loader cannot replace its
+  texts.
+- **A failed lookup never breaks the page.** A setting that cannot be read, or a report result
+  without a creator, writes one debug line to the appliance log and falls back to the browser's
+  language.
+- **Group names looked up by group id.** On 9.0.2 server invoices carry a group id but an empty
+  group name, so 1.1.2 listed them as *Servers without a group*. The query now joins the group
+  table (`LEFT JOIN compute_site`) and takes the invoice's group name, or else the name of the
+  group with that id. Rows stay keyed by group id, so two groups with the same name still get a
+  row each. *Servers without a group* now holds only lines without a group id, or whose group no
+  longer exists, still as one row per tenant and currency.
+- **Internal tables read:** `compute_site` and `user` in addition to `account_invoice` and
+  `account`.
+
+### Behaviour changes from 1.1.2
+
+- **Server invoices move from *Servers without a group* into their group's row.** A group's row
+  now counts its server invoices as well, so its resources and amounts grow, and the
+  *Servers without a group* row shrinks or disappears. The per-tenant and per-currency totals are
+  unchanged: no invoice is added or dropped, only assigned to another row of the same tenant and
+  currency.
+- **The report page language can change.** A user whose Morpheus setting differs from the
+  browser's language now sees the page in the language of the setting (of the user who ran the
+  report). Users without a setting see no change.
+- Validation messages of the report form still follow the browser's language, since that call
+  carries no user. Option labels and help texts are looked up by Morpheus itself, unchanged.
+- The CSV export is unchanged in format; its group rows change as described above.
+
+### Verified
+
+- Unit tests (Spock), 170 in total, 0 failures. New tests cover the language resolution (an
+  `en-US` setting with a German browser gives English texts and numbers, a `de` setting gives
+  German, an empty, missing or invalid setting gives the browser's language, no web request gives
+  English, a failed lookup falls back quietly), that the query takes the user id as a parameter,
+  that English texts do not depend on the JVM's default locale, that a foreign bundle of the same
+  name ahead of the plugin's own is skipped, that a missing German text falls back to English, that
+  a report result without a creator gives the browser's language, and that the page model formats
+  numbers and texts in the resolved locale. For the group lookup they check the query text and
+  model its result: a nameless line with an existing group id joins that group's named lines, an
+  id missing from the group table and a missing id give *Servers without a group*, two groups with
+  the same name stay apart, and the tenant and currency totals equal those of the 1.1.2 query.
+- Local build with JDK 17 and Gradle 9.8.0: one jar,
+  `morpheus-tenant-chargeback-plugin-1.2.0-all.jar`, no deprecation warnings.
+- On Morpheus 9.0.2 (build 9.0.2-2) with a release candidate built from this source, as a master
+  tenant user whose Morpheus setting is `en-US` while the browser sends German: a report result
+  for 2026-09 renders in English with the same tenant and total figures as 1.1.2. Server invoices
+  with a group id now show under their group (for example 2 resources under one group, 3 under
+  another) and *Servers without a group* keeps only the lines without a group id; every tenant and
+  currency adds up to the same amounts as before. Within a tenant the currency rows may come in a
+  different order than in 1.1.2.
+
+### Not yet verified
+
+- A user with a German setting, and a result opened by a user other than its creator. The
+  creator is used because the plugin API gives the page no viewing user.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.1.2...tenant-chargeback-v1.2.0
+
 ## 1.1.2
 
 **Fix release: servers without a group are one row per tenant and currency again.** Plugin API

@@ -66,11 +66,16 @@ names, scope and status texts follow the viewer's language, and numbers are form
 viewer's locale (e.g. `1,234.56` or `1.234,56`). The menu entry and the provider description stay
 English, since plugin API 1.4.2 does not localize them.
 
-**Which language counts:** the plugin uses the locale of the web request, i.e. the browser's
-language (`Accept-Language`), not the language chosen in the Morpheus UI. Measured on 9.0.2: with
-Morpheus set to German and the browser to English, the Morpheus menus are German but the plugin
-content and numbers are English, and vice versa. Set the browser language to the language the
-viewers use in Morpheus.
+**Which language counts (since 1.2.0):** the viewer's own language setting in Morpheus (the
+user's *Locale*, e.g. `en-US`), which is also the language of the Morpheus UI. So a user set to
+English sees the page in English even when the browser asks for German, and vice versa. Only
+when that setting is empty or not a valid language, or cannot be read, does the plugin use the
+locale of the web request (the browser's `Accept-Language`), and English without a request.
+Texts exist in English and German; any other language gets English texts with numbers in that
+language's format.
+
+Up to 1.1.1 the plugin used the browser's language only, so with Morpheus set to English and the
+browser to German the menus were English but the plugin content and numbers German.
 
 ## Options
 
@@ -84,6 +89,9 @@ None. The page has no settings; budgets are managed in Morpheus under
   already show (or not yet show) the next month compared with the viewer's time zone.
 - The **burn rate** is a plain average over the elapsed days; it does not weight weekdays.
 - Spend is read from Morpheus invoices; it is as current as the last invoice / costing run.
+- **Language from the user record.** The language setting is read from the internal `user`
+  table (column `locale`); if that read fails, the page falls back to the browser language
+  instead of failing.
 - **Reads internal database tables** (see the matrix below) through the read-only report
   connection. They are not a public API: the plugin is tested on Morpheus 9.0.2 only and may
   break on an upgrade. A failed query shows a short error on the page; details go to the
@@ -93,6 +101,7 @@ None. The page has no settings; budgets are managed in Morpheus under
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0 release candidate, master tenant) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 | 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 as master) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 
@@ -101,7 +110,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 ## Install
 
 Download `morpheus-budget-burn-plugin-<version>-all.jar` from the
-[release budget-burn-v1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/budget-burn-v1.1.1) (tag
+[release budget-burn-v1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/budget-burn-v1.2.0) (tag
 `budget-burn-v<version>`), then upload it under *Administration → Integrations → Plugins →
 Add*. Updating to a newer version with the same plugin code replaces the plugin in place.
 

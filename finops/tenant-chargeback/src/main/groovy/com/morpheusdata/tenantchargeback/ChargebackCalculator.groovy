@@ -21,8 +21,8 @@ import java.text.SimpleDateFormat
 
 /**
  * Pure logic of the chargeback report: option parsing, month handling, currency resolution,
- * rounding, aggregation and locale-aware formatting. No Morpheus or database access, so all
- * of it is covered by unit tests.
+ * locale resolution, rounding, aggregation and locale-aware formatting. No Morpheus or database
+ * access, so all of it is covered by unit tests.
  *
  * Money rules:
  * - Every invoice line is rounded to cents first; all totals are sums of rounded lines, so the
@@ -171,6 +171,37 @@ class ChargebackCalculator {
 		f.format(num(v))
 	}
 
+	/** Languages the plugin ships message bundles for; any other language gets English texts. */
+	static final List<String> MESSAGE_LANGUAGES = ['en', 'de']
+
+	/** ISO 639 two-letter language codes, to tell a language setting from garbage. */
+	private static final Set<String> ISO_LANGUAGES = Locale.getISOLanguages() as Set<String>
+
+	/**
+	 * A Morpheus user language setting (column user.locale, e.g. 'en-US', 'de' or 'de_DE') as a
+	 * Locale, or null when it is empty or not a known language.
+	 */
+	static Locale parseLocaleSetting(def setting) {
+		String s = setting?.toString()?.trim()
+		if(!s) return null
+		Locale l = Locale.forLanguageTag(s.replace('_', '-'))
+		(l.language && ISO_LANGUAGES.contains(l.language)) ? l : null
+	}
+
+	/**
+	 * Locale for messages and numbers: the user's Morpheus language setting, else the locale of the
+	 * web request (the browser's Accept-Language), else English.
+	 */
+	static Locale resolveLocale(def userSetting, Locale requestLocale) {
+		parseLocaleSetting(userSetting) ?: requestLocale ?: Locale.ENGLISH
+	}
+
+	/** The bundle language for messages: German for any German locale, English for everything else. */
+	static Locale messageLocale(Locale locale) {
+		String lang = locale?.language
+		(lang && lang != 'en' && lang in MESSAGE_LANGUAGES) ? Locale.forLanguageTag(lang) : Locale.ENGLISH
+	}
+
 	private static Map newSum() {
 		[cost: 0G, price: 0G, margin: 0G, invoice: 0G, resources: 0]
 	}
@@ -181,9 +212,10 @@ class ChargebackCalculator {
 	 * for servers without a group), currency (raw, may be empty), resources, cost and price;
 	 * tenantId is optional and keeps two tenants with the same name apart, grpId likewise keeps
 	 * two groups with the same name apart. Without grpId the group name is the key. A row without
-	 * a group name belongs to the one line for servers without a group, whatever its grpId: server
-	 * invoices can carry a group id with an empty group name, and each such id would otherwise
-	 * show as a line of its own that reads the same.
+	 * a group name belongs to the one line for servers without a group, whatever its grpId: the
+	 * query looks a missing name up by group id, so a row arrives here without a name only when its
+	 * group id is missing or no longer exists, and each such id would otherwise show as a line of
+	 * its own that reads the same.
 	 *
 	 * Rows whose raw currency is empty are resolved with {@link #resolveCurrency} and merged with
 	 * rows that already carry that currency, so a group never shows twice for one currency.

@@ -6,6 +6,64 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 1.2.0
+
+**The reason written into a request now follows the requesting user's Morpheus language setting
+instead of always being English.** Plugin code, provider code, option codes, package, plugin API
+1.4.2 and minimum appliance 9.0.2 are unchanged; no new options.
+
+### Changed
+
+- **Language from the user's setting, not the browser.** On Morpheus 9.0.2 the UI language comes
+  from the user's own setting (*User Settings*, stored per user, e.g. `en-US`), while the locale of
+  the web request that plugins see is the browser language (`Accept-Language`). A user with an
+  English Morpheus UI and a German browser therefore saw German plugin content in the other FinOps
+  plugins. Plugin API 1.4.2 offers no user locale, so the setting is now read from the internal
+  table `user` (column `locale`) with a parameterised query over the read-only report connection.
+- **Who the user is.** The approval call carries no user either. The internal reference objects
+  Morpheus 9.0.2 puts into `Request.refs` point back to the internal request, which holds
+  `requestByUserId`; the plugin reads it by property name, as it already does for the references.
+- **Order:** the requesting user's setting, else the browser language of the web request, else
+  English. Messages exist in English and German; another language gets the English text, with
+  numbers in that language's format. When the requesting user cannot be determined, the texts stay
+  English as before.
+- **Quiet failures.** A lookup that fails writes one debug line and falls back; it never changes or
+  delays the decision.
+
+### Behaviour changes from 1.1.1
+
+- **A requester whose Morpheus language is German gets the request name and message in German**,
+  with German number formats (*Über der Kostenschwelle von 1.000,00 EUR/Monat (angefragt
+  1.234,50 EUR). ...*). In 1.1.1 every text was English.
+- A requester without a language setting gets the browser language of the web request, if the
+  approval runs in one; otherwise English, as before.
+- The plugin now also reads the internal table `user` (column `locale`, one row by id) once per
+  approval request.
+
+### Verified
+
+- New unit tests (Spock): `en-US` setting with a German browser gives English; `de`, `de-DE`,
+  `de_DE` give German; blank, missing and unparsable settings fall back to the browser; no web
+  request gives English; the setting is read with `SELECT locale FROM user WHERE id = ?` and the id
+  as parameter; the requesting user is found through the internal request behind the references;
+  the request name and message are rendered in the resolved language and number format (English
+  and German); without a requesting user nothing is looked up and the texts stay English; an
+  unreadable setting never breaks the decision.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --warning-mode all`, 103 tests,
+  0 failures, no deprecation warnings, one `morpheus-cost-approval-plugin-1.2.0-all.jar`.
+- On Morpheus 9.0.2 (build 9.0.2-2) with a release candidate built from this source: an *Approve
+  Provision* policy on one cloud with an integration threshold written as `10,00` EUR; a request
+  for 12.50 EUR per month by a user whose Morpheus setting is `en-US` was rejected, the instance
+  became `denied` at the next monitor run (about 4 minutes), and approval and item show the English
+  reason *Above cost threshold of 10.00 EUR/month (requested 12.50 EUR). Please contact your
+  provider for approval.*
+
+### Not yet verified
+
+- A requesting user with a German setting (expected: the German reason).
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.1.1...cost-approval-v1.2.0
+
 ## 1.1.1
 
 **Fix release: a threshold with a decimal comma is read instead of silently ignored, and a

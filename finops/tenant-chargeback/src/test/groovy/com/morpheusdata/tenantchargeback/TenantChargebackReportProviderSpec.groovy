@@ -1,6 +1,9 @@
 package com.morpheusdata.tenantchargeback
 
 import com.morpheusdata.model.OptionType
+import com.morpheusdata.model.ReportResult
+import com.morpheusdata.model.ReportResultRow
+import com.morpheusdata.model.User
 import com.morpheusdata.response.ServiceResponse
 import spock.lang.Specification
 import spock.lang.Unroll
@@ -45,18 +48,29 @@ class TenantChargebackReportProviderSpec extends Specification {
 	}
 
 	@Unroll
-	def "every i18n key in the template exists in #bundle"() {
+	def "every text key of the template exists in #bundle"() {
 		given:
 		Properties p = load("i18n/${bundle}.properties")
-		String hbs = getClass().classLoader.getResourceAsStream('renderer/hbs/tenantChargeback.hbs').getText('UTF-8')
-		List<String> keys = (hbs =~ /\{\{i18n '([^']+)'\}\}/).collect { it[1] }.unique()
 
 		expect:
-		keys.size() > 10
-		keys.findAll { !p.getProperty(it)?.trim() } == []
+		TenantChargebackReportProvider.TEXT_KEYS.size() > 10
+		TenantChargebackReportProvider.TEXT_KEYS.findAll { !p.getProperty("tenant-chargeback-report.${it}".toString())?.trim() } == []
 
 		where:
 		bundle << ['messages', 'messages_de']
+	}
+
+	def "the template takes its texts from the model, never from the browser-language i18n helper"() {
+		given:
+		String hbs = getClass().classLoader.getResourceAsStream('renderer/hbs/tenantChargeback.hbs').getText('UTF-8')
+		List<String> used = (hbs =~ /\{\{(?:\.\.\/)?t\.([A-Za-z_]+)\}\}/).collect { it[1] }.unique()
+		Set<String> known = TenantChargebackReportProvider.texts(Locale.ENGLISH).keySet()
+
+		expect:
+		!hbs.contains('{{i18n')
+		used.size() > 10
+		used.findAll { !known.contains(it) } == []
+		hbs.contains('{{noGroupText}}')
 	}
 
 	def "the template shows no literal German or English text outside i18n calls"() {
@@ -120,7 +134,164 @@ class TenantChargebackReportProviderSpec extends Specification {
 		expect:
 		groupBy.contains('i.site_id')
 		!groupBy.contains('site_name')
+		!groupBy.contains('cs.')
 		TenantChargebackReportProvider.INVOICE_SQL.contains('i.site_id AS grp_id')
+	}
+
+	def "the invoice query looks a missing group name up in compute_site by group id"() {
+		given:
+		String q = TenantChargebackReportProvider.INVOICE_SQL.replaceAll(/\s+/, ' ')
+
+		expect: 'a LEFT JOIN, so lines without a group or with a deleted group are kept'
+		q.contains('LEFT JOIN compute_site cs ON cs.id = i.site_id')
+		q.contains("MAX(COALESCE(NULLIF(TRIM(i.site_name), ''), cs.name)) AS grp")
+		!q.contains(' JOIN compute_site cs ON cs.name')
+	}
+
+	def "the language setting query is parameterised"() {
+		expect:
+		TenantChargebackReportProvider.USER_LOCALE_SQL == 'SELECT locale FROM user WHERE id = ?'
+	}
+
+	def "the viewer locale reads the creator's setting with the user id as a parameter"() {
+		given:
+		List calls = []
+		TenantChargebackReportProvider p = stub(setting: 'en-US', browser: Locale.forLanguageTag('de-DE'), calls: calls)
+
+		when:
+		Locale l = p.viewerLocale(result(42L))
+
+		then: 'en-US wins over the German browser'
+		l == Locale.forLanguageTag('en-US')
+		calls == [[TenantChargebackReportProvider.USER_LOCALE_SQL, [42L]]]
+	}
+
+	@Unroll
+	def "setting #setting with browser #browser and user #userId gives #expected"() {
+		given:
+		List calls = []
+		TenantChargebackReportProvider p = stub(setting: setting, browser: browser, calls: calls)
+
+		expect:
+		p.viewerLocale(result(userId)) == expected
+		calls.size() == (userId != null ? 1 : 0)
+
+		where:
+		setting   | browser                        | userId | expected
+		'en-US'   | Locale.forLanguageTag('de-DE') | 1L     | Locale.forLanguageTag('en-US')
+		'de'      | Locale.forLanguageTag('en-US') | 1L     | Locale.GERMAN
+		null      | Locale.forLanguageTag('de-DE') | 1L     | Locale.forLanguageTag('de-DE')
+		''        | Locale.forLanguageTag('de-DE') | 1L     | Locale.forLanguageTag('de-DE')
+		'garbage' | Locale.forLanguageTag('de-DE') | 1L     | Locale.forLanguageTag('de-DE')
+		'de'      | Locale.forLanguageTag('en-US') | null   | Locale.forLanguageTag('en-US')
+		null      | null                           | 1L     | Locale.ENGLISH
+		null      | null                           | null   | Locale.ENGLISH
+	}
+
+	def "a failed language lookup falls back to the browser language and does not throw"() {
+		given:
+		TenantChargebackReportProvider p = new TenantChargebackReportProvider(new TenantChargebackPlugin(), null) {
+			@Override protected Map queryFirstRow(String query, List params) { throw new IllegalStateException('no connection') }
+			@Override Locale browserLocale() { Locale.forLanguageTag('de-DE') }
+		}
+
+		expect:
+		p.viewerLocale(result(7L)) == Locale.forLanguageTag('de-DE')
+		p.userLocaleSetting(7L) == null
+	}
+
+	def "without a Morpheus context the lookup fails quietly and the page is English"() {
+		expect:
+		provider.viewerLocale(result(7L)) == Locale.ENGLISH
+		provider.viewerLocale(null) == Locale.ENGLISH
+	}
+
+	def "texts come from the plugin bundles, English for en-US even when the JVM default is German"() {
+		given:
+		Locale saved = Locale.default
+		Locale.default = Locale.GERMAN
+
+		when:
+		Map<String, String> en = TenantChargebackReportProvider.texts(Locale.forLanguageTag('en-US'))
+		Map<String, String> de = TenantChargebackReportProvider.texts(Locale.forLanguageTag('de-DE'))
+		Map<String, String> fr = TenantChargebackReportProvider.texts(Locale.FRENCH)
+
+		then:
+		en.col_cost == 'Cost'
+		en.noGroup == 'Servers without a group'
+		de.col_cost == 'Kosten'
+		de.section_currency == 'Summe je W\u00e4hrung'
+		fr.col_cost == 'Cost'
+		en.keySet() == TenantChargebackReportProvider.TEXT_KEYS.collect { it.replace('.', '_') } as Set
+
+		cleanup:
+		Locale.default = saved
+	}
+
+	def "a bundle of the same name found first on the class path is skipped for the plugin's own"() {
+		given: 'a foreign i18n/messages.properties ahead of the plugin one, as a parent-first class loader would order them'
+		File foreign = File.createTempFile('foreign-messages', '.properties')
+		foreign.text = 'default.title=Other\n'
+		URL own = TenantChargebackReportProvider.classLoader.getResource('i18n/messages.properties')
+
+		when:
+		Properties p = TenantChargebackReportProvider.ownBundle([foreign.toURI().toURL(), own])
+
+		then:
+		p.getProperty(TenantChargebackReportProvider.BUNDLE_MARKER_KEY) == 'Tenant Chargeback'
+		TenantChargebackReportProvider.ownBundle([foreign.toURI().toURL()]).isEmpty()
+
+		cleanup:
+		foreign?.delete()
+	}
+
+	def "a key missing from the German bundle falls back to English, then to the default text"() {
+		expect:
+		TenantChargebackReportProvider.text('tenant-chargeback-report.col.cost', 'x', Locale.GERMAN) == 'Kosten'
+		TenantChargebackReportProvider.text('no.such.key', 'Fallback', Locale.GERMAN) == 'Fallback'
+		TenantChargebackReportProvider.text('no.such.key', 'Fallback', null) == 'Fallback'
+	}
+
+	def "a report result without a creator uses the browser language"() {
+		given:
+		List calls = []
+		TenantChargebackReportProvider p = stub(setting: 'en-US', browser: Locale.forLanguageTag('de-DE'), calls: calls)
+
+		expect:
+		p.viewerLocale(new ReportResult(createdBy: new User())) == Locale.forLanguageTag('de-DE')
+		calls.isEmpty()
+	}
+
+	def "the page model formats numbers and texts in the resolved locale"() {
+		given:
+		Map<String, List<ReportResultRow>> rows = [
+			main  : [new ReportResultRow(dataMap: [tenant: 'Tenant A', group: '', noGroup: true, resources: '2', currency: 'EUR',
+				cost: '1234.50', price: '2000.00', margin: '765.50', markupPercent: '7.5', invoice: '2150.00'])],
+			header: [new ReportResultRow(dataMap: [tenant: 'Tenant A', currency: 'EUR', resources: '2', cost: '1234.50',
+				price: '2000.00', margin: '765.50', marginPct: '38.3', invoice: '2150.00'])],
+			footer: [new ReportResultRow(dataMap: [kind: 'meta', month: '2026-09', current: false, markupPercent: '7.5', tenants: '1', currencies: 'EUR']),
+				new ReportResultRow(dataMap: [kind: 'total', currency: 'EUR', resources: '2', cost: '1234.50', price: '2000.00',
+					margin: '765.50', marginPct: '38.3', invoice: '2150.00'])]
+		]
+		TenantChargebackReportProvider en = stub(setting: 'en-US', browser: Locale.forLanguageTag('de-DE'), calls: [])
+		TenantChargebackReportProvider de = stub(setting: 'de-DE', browser: Locale.US, calls: [])
+
+		when:
+		Map e = TenantChargebackReportProvider.pageModel(rows, en.viewerLocale(result(1L)))
+		Map d = TenantChargebackReportProvider.pageModel(rows, de.viewerLocale(result(1L)))
+
+		then:
+		e.rows[0].costText == '1,234.50'
+		e.rows[0].noGroupText == 'Servers without a group'
+		e.tenants[0].marginPctText == '38.3'
+		e.totals[0].invoiceText == '2,150.00'
+		e.footer.markupPercentText == '7.5'
+		e.t.col_invoice == 'Invoice Amount'
+		d.rows[0].costText == '1.234,50'
+		d.rows[0].noGroupText == 'Server ohne Gruppe'
+		d.footer.markupPercentText == '7,5'
+		d.t.col_invoice == 'Rechnungsbetrag'
+		d.rows[0].cost == '1234.50'
 	}
 
 	def "without a web request messages fall back to English and the locale to ENGLISH"() {
@@ -144,6 +315,21 @@ class TenantChargebackReportProviderSpec extends Specification {
 		en.marginPctText == '38.3'
 		!en.noGroup
 		en.cost == '1234.50'
+	}
+
+	/** A provider whose language setting and browser locale are given; records the queries it runs. */
+	private static TenantChargebackReportProvider stub(Map m) {
+		new TenantChargebackReportProvider(new TenantChargebackPlugin(), null) {
+			@Override protected Map queryFirstRow(String query, List params) {
+				m.calls << [query, params]
+				[locale: m.setting]
+			}
+			@Override Locale browserLocale() { m.browser as Locale }
+		}
+	}
+
+	private static ReportResult result(Long userId) {
+		new ReportResult(createdBy: userId != null ? new User(id: userId) : null)
 	}
 
 	private static Properties load(String path) {

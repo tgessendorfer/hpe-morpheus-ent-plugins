@@ -76,7 +76,7 @@ class SocketUsageReportProvider extends AbstractReportProvider {
 				helpText: 'Sockets counted for a hypervisor host that reports no socket count. Measured on Morpheus 9.0.2: 2. May change with other versions.')
 		]
 		// Labels and help texts resolve through the plugin's i18n bundles in
-		// src/main/resources/i18n, in the viewer's language; the literal texts above
+		// src/main/resources/i18n, in the language Morpheus picks for the form; the literal texts above
 		// stay as the fallback.
 		optionTypes.each { OptionType optionType ->
 			optionType.fieldCode = "${optionType.code}.label".toString()
@@ -174,9 +174,10 @@ class SocketUsageReportProvider extends AbstractReportProvider {
 
 	@Override
 	HTMLResponse renderTemplate(ReportResult reportResult, Map<String, List<ReportResultRow>> reportRowsBySection) {
-		Locale locale = viewerLocale()
+		Locale locale = contentLocale(reportResult)
 		ViewModel<Map> model = new ViewModel<>()
 		model.object = [
+			text   : ContentLocale.texts(locale),
 			rows   : reportRowsBySection.main?.collect { SocketMath.localize(it.dataMap, locale) } ?: [],
 			tenants: reportRowsBySection.header?.collect { SocketMath.localize(it.dataMap, locale) } ?: [],
 			footer : SocketMath.localize(reportRowsBySection.footer?.getAt(0)?.dataMap ?: [:], locale)
@@ -184,7 +185,49 @@ class SocketUsageReportProvider extends AbstractReportProvider {
 		return getRenderer().renderTemplate('hbs/socketUsageReport', model)
 	}
 
-	/** Locale of the viewing user's request; English when there is no request or no locale. */
+	/*
+	 * Language of the rendered report: the Morpheus language setting of the user, then the
+	 * browser language of the request, then English (see ContentLocale). The template gets its
+	 * texts from the model instead of the {{i18n}} helper, because that helper always uses the
+	 * request locale. Plugin API 1.4.2 hands renderTemplate no viewing user, so the user is the
+	 * one who ran the report (ReportResult.createdBy); without one the browser language applies
+	 * as before 1.2.0.
+	 */
+	Locale contentLocale(ReportResult reportResult) {
+		Locale browser = viewerLocale()
+		Long userId = null
+		try {
+			userId = reportResult?.createdBy?.id
+		} catch (Exception ignored) {
+			// no user on the result: the browser language applies
+		}
+		return ContentLocale.resolve(userId != null ? userLocale(userId) : null, browser)
+	}
+
+	/** The parsed Morpheus language setting of a user; null when it is empty, unparsable or cannot be read. */
+	Locale userLocale(Long userId) {
+		Object raw
+		try {
+			raw = readUserSetting(userId)
+		} catch (Exception e) {
+			log.debug("Socket usage report: language setting of user ${userId} not readable, using the browser language: ${e.message}")
+			return null
+		}
+		Locale parsed = ContentLocale.parse(raw)
+		if (parsed == null && raw != null && raw.toString().trim()) {
+			log.debug("Socket usage report: language setting of user ${userId} is not a language tag, using the browser language.")
+		}
+		return parsed
+	}
+
+	/** The raw language setting of a user, read over the report's read-only database connection. */
+	Object readUserSetting(Long userId) {
+		Object raw = null
+		withDbConnection { Connection c -> raw = ContentLocale.lookupSetting(new Sql(c), userId) }
+		return raw
+	}
+
+	/** Locale of the viewing user's request (browser language); English when there is no request or no locale. */
 	Locale viewerLocale() {
 		try {
 			return morpheus?.webRequest?.locale ?: Locale.ENGLISH
@@ -193,6 +236,10 @@ class SocketUsageReportProvider extends AbstractReportProvider {
 		}
 	}
 
+	/*
+	 * Validation messages are shown while a report is created; validateOptions gets no user,
+	 * so they follow the browser language as before 1.2.0.
+	 */
 	private String message(String key, String fallback) {
 		try {
 			def web = morpheus?.webRequest

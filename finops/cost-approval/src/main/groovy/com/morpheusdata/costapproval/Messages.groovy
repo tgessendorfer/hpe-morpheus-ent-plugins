@@ -19,9 +19,10 @@ import java.text.MessageFormat
 
 /**
  * Reads the plugin's own i18n bundles (src/main/resources/i18n). Plugin API 1.4.2 offers
- * no message lookup for provider code, and the approval calls carry no user locale, so
- * texts written into a request use {@link #DEFAULT_LOCALE}. Form labels are translated by
- * Morpheus itself through OptionType.fieldCode and helpTextI18nCode.
+ * no message lookup for provider code. Texts written into a request use the locale of the
+ * requesting user ({@link UserLocale}), else {@link #DEFAULT_LOCALE}; a language without a
+ * bundle gets the English text. Form labels are translated by Morpheus itself through
+ * OptionType.fieldCode and helpTextI18nCode.
  */
 class Messages {
 

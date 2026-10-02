@@ -36,9 +36,12 @@ One row per active sub-tenant (`account.master_account = 0`, `active = 1`), orde
   that is empty too, `USD`. A tenant without invoices is listed with zeros in that fallback currency.
 - **Rounding:** each tenant's amount per currency and month is summed, then rounded to cents
   (half up). Margins and totals are computed from these rounded amounts.
-- **Numbers and language** follow the viewer's browser language (`Accept-Language`), not the
-  language chosen in the Morpheus UI: `1,234.56` in English, `1.234,56` in German. Without a
-  request locale the page uses English. Amounts always carry their ISO currency code.
+- **Numbers and language** follow the viewer's own language setting in Morpheus (user settings,
+  stored as `user.locale`, e.g. `en-US`), the same setting the Morpheus UI uses: `1,234.56` in
+  English, `1.234,56` in German. If that setting is empty or unreadable, the page falls back to the
+  browser language (`Accept-Language`), and without a request to English. Texts exist in English and
+  German; any other language gets English texts with that language's number format. Amounts always
+  carry their ISO currency code.
 
 ## Who sees it
 
@@ -56,7 +59,7 @@ and invoices in Morpheus.
 ## Install
 
 1. Download `morpheus-msp-tenant-overview-plugin-<version>-all.jar` from the
-   [release msp-tenant-overview-v1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/msp-tenant-overview-v1.1.1) (tag
+   [release msp-tenant-overview-v1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/msp-tenant-overview-v1.2.0) (tag
    `msp-tenant-overview-v<version>`) and check it against `SHA256SUMS`.
 2. *Administration > Integrations > Plugins > Add*, upload the jar.
 3. Open *Operations > Analytics* in the master tenant and pick **MSP Tenant Overview**.
@@ -71,6 +74,10 @@ and invoices in Morpheus.
   Morpheus' costing do not appear.
 - **Provider name** (*MSP Tenant Overview*) in the Analytics menu is not translated; the page
   content is.
+- **Language setting read from an internal table.** Plugin API 1.4.2 does not expose the user's
+  language, so the page reads `user.locale` itself (one parameterised query on the read-only
+  connection). If that fails, the page still loads, in the browser language. Since 1.2.0 the page
+  texts no longer use the template's `i18n` helper, which follows the browser.
 - **Internal tables** (`user`, `account`, `compute_site`, `instance`, `compute_server`,
   `account_invoice`) may change with a Morpheus upgrade. A failing query shows *Tenant data could
   not be loaded* and logs the cause instead of a stack trace on the page.
@@ -79,6 +86,7 @@ and invoices in Morpheus.
 
 | Plugin version | Plugin API | Min appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.2.0 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.2.0 release candidate, master tenant) | `user` (incl. `locale`), `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
 | 1.1.1 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.1.0; 1.1.1 as master) | `user`, `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
 | 1.1.0 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 | `user`, `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
 
@@ -104,8 +112,9 @@ Requires JDK 17 (Groovy 3.0.9) and the bundled Gradle wrapper (Gradle 9.8.0, che
 ```
 
 The Spock tests cover the plugin identity (code, repo link, provider, message bundles), the
-currency fallback, grouping per currency, rounding, percentages, locale-aware number formats and
-the rendered template (no `- %` for tenants without revenue).
+currency fallback, grouping per currency, rounding, percentages, locale-aware number formats, the
+choice of language (user setting over browser, with its fallbacks) and the rendered template (no
+`- %` for tenants without revenue).
 
 ## Translations
 

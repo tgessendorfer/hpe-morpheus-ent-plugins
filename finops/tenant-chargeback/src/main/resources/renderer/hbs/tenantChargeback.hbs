@@ -1,41 +1,41 @@
 <div class="intro-stats finops-chargeback">
-  <h2>{{i18n 'tenant-chargeback-report.title'}} {{footer.month}}{{#if footer.isCurrent}} ({{i18n 'tenant-chargeback-report.currentMonth'}}){{/if}}</h2>
+  <h2>{{t.title}} {{footer.month}}{{#if footer.isCurrent}} ({{t.currentMonth}}){{/if}}</h2>
   <div class="count-stats">
-    <div class="stats-container"><span class="big-stat">{{footer.tenants}}</span><span class="stat-label">{{i18n 'tenant-chargeback-report.tenants'}}</span></div>
+    <div class="stats-container"><span class="big-stat">{{footer.tenants}}</span><span class="stat-label">{{t.tenants}}</span></div>
     {{#each totals}}
-    <div class="stats-container"><span class="big-stat">{{invoiceText}} {{currency}}</span><span class="stat-label">{{i18n 'tenant-chargeback-report.invoiceTotal'}} ({{i18n 'tenant-chargeback-report.inclMarkup'}} {{../footer.markupPercentText}} %)</span></div>
+    <div class="stats-container"><span class="big-stat">{{invoiceText}} {{currency}}</span><span class="stat-label">{{../t.invoiceTotal}} ({{../t.inclMarkup}} {{../footer.markupPercentText}} %)</span></div>
     {{/each}}
   </div>
 </div>
-<h3>{{i18n 'tenant-chargeback-report.section.currency'}}</h3>
+<h3>{{t.section_currency}}</h3>
 <table class="table table-condensed finops-table">
-  <thead><tr><th>{{i18n 'tenant-chargeback-report.col.currency'}}</th><th>{{i18n 'tenant-chargeback-report.col.resources'}}</th><th>{{i18n 'tenant-chargeback-report.col.cost'}}</th><th>{{i18n 'tenant-chargeback-report.col.price'}}</th><th>{{i18n 'tenant-chargeback-report.col.margin'}}</th><th>{{i18n 'tenant-chargeback-report.col.marginPct'}}</th><th>{{i18n 'tenant-chargeback-report.col.invoice'}}</th></tr></thead>
+  <thead><tr><th>{{t.col_currency}}</th><th>{{t.col_resources}}</th><th>{{t.col_cost}}</th><th>{{t.col_price}}</th><th>{{t.col_margin}}</th><th>{{t.col_marginPct}}</th><th>{{t.col_invoice}}</th></tr></thead>
   <tbody>
   {{#each totals}}
     <tr><td>{{currency}}</td><td>{{resources}}</td><td>{{costText}}</td><td>{{priceText}}</td><td>{{marginText}}</td><td>{{marginPctText}}</td><td><strong>{{invoiceText}}</strong></td></tr>
   {{else}}
-    <tr><td colspan="7">{{i18n 'tenant-chargeback-report.empty'}}</td></tr>
+    <tr><td colspan="7">{{t.empty}}</td></tr>
   {{/each}}
   </tbody>
 </table>
-<h3>{{i18n 'tenant-chargeback-report.section.tenant'}}</h3>
+<h3>{{t.section_tenant}}</h3>
 <table class="table table-condensed finops-table">
-  <thead><tr><th>{{i18n 'tenant-chargeback-report.col.tenant'}}</th><th>{{i18n 'tenant-chargeback-report.col.currency'}}</th><th>{{i18n 'tenant-chargeback-report.col.resources'}}</th><th>{{i18n 'tenant-chargeback-report.col.cost'}}</th><th>{{i18n 'tenant-chargeback-report.col.price'}}</th><th>{{i18n 'tenant-chargeback-report.col.margin'}}</th><th>{{i18n 'tenant-chargeback-report.col.marginPct'}}</th><th>{{i18n 'tenant-chargeback-report.col.invoice'}}</th></tr></thead>
+  <thead><tr><th>{{t.col_tenant}}</th><th>{{t.col_currency}}</th><th>{{t.col_resources}}</th><th>{{t.col_cost}}</th><th>{{t.col_price}}</th><th>{{t.col_margin}}</th><th>{{t.col_marginPct}}</th><th>{{t.col_invoice}}</th></tr></thead>
   <tbody>
   {{#each tenants}}
     <tr><td>{{tenant}}</td><td>{{currency}}</td><td>{{resources}}</td><td>{{costText}}</td><td>{{priceText}}</td><td>{{marginText}}</td><td>{{marginPctText}}</td><td><strong>{{invoiceText}}</strong></td></tr>
   {{else}}
-    <tr><td colspan="8">{{i18n 'tenant-chargeback-report.empty'}}</td></tr>
+    <tr><td colspan="8">{{t.empty}}</td></tr>
   {{/each}}
   </tbody>
 </table>
-<h3>{{i18n 'tenant-chargeback-report.section.group'}}</h3>
+<h3>{{t.section_group}}</h3>
 <table class="table table-condensed finops-table">
-  <thead><tr><th>{{i18n 'tenant-chargeback-report.col.tenant'}}</th><th>{{i18n 'tenant-chargeback-report.col.group'}}</th><th>{{i18n 'tenant-chargeback-report.col.currency'}}</th><th>{{i18n 'tenant-chargeback-report.col.resources'}}</th><th>{{i18n 'tenant-chargeback-report.col.cost'}}</th><th>{{i18n 'tenant-chargeback-report.col.price'}}</th><th>{{i18n 'tenant-chargeback-report.col.margin'}}</th><th>{{i18n 'tenant-chargeback-report.col.invoice'}}</th></tr></thead>
+  <thead><tr><th>{{t.col_tenant}}</th><th>{{t.col_group}}</th><th>{{t.col_currency}}</th><th>{{t.col_resources}}</th><th>{{t.col_cost}}</th><th>{{t.col_price}}</th><th>{{t.col_margin}}</th><th>{{t.col_invoice}}</th></tr></thead>
   <tbody>
   {{#each rows}}
-    <tr><td>{{tenant}}</td><td>{{#if noGroup}}<em>{{i18n 'tenant-chargeback-report.noGroup'}}</em>{{else}}{{group}}{{/if}}</td><td>{{currency}}</td><td>{{resources}}</td><td>{{costText}}</td><td>{{priceText}}</td><td>{{marginText}}</td><td>{{invoiceText}}</td></tr>
+    <tr><td>{{tenant}}</td><td>{{#if noGroup}}<em>{{noGroupText}}</em>{{else}}{{group}}{{/if}}</td><td>{{currency}}</td><td>{{resources}}</td><td>{{costText}}</td><td>{{priceText}}</td><td>{{marginText}}</td><td>{{invoiceText}}</td></tr>
   {{/each}}
   </tbody>
 </table>
-<p class="text-muted">{{i18n 'tenant-chargeback-report.footnote'}}</p>
+<p class="text-muted">{{t.footnote}}</p>

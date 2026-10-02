@@ -37,16 +37,22 @@ master currency) are merged.
 
 ### Number format and language
 
-Numbers follow the viewer's locale (`1,234.56` in English, `1.234,56` in German), with English as
-the fallback when the request carries no locale. Every amount is shown with its ISO currency code.
-The tab content is translated in English (default) and German through the plugin's
-`i18n/messages*.properties`.
+The tab content (texts and number formats) follows the **language set in the viewer's own Morpheus
+user settings**, the same setting the Morpheus UI uses (since 1.2.0):
 
-**Which language counts:** the plugin uses the locale of the web request, i.e. the browser's
-language (`Accept-Language`), not the language chosen in the Morpheus UI. Measured on 9.0.2: with
-Morpheus set to German and the browser to English, the Morpheus menus are German but the plugin
-content and numbers are English, and vice versa. Set the browser language to the language the
-viewers use in Morpheus.
+1. the viewing user's Morpheus language setting (for example `en-US` or `de`),
+2. else the browser language of the web request (`Accept-Language`), when the setting is empty or
+   not a known language, or cannot be read,
+3. else English.
+
+Numbers are formatted in that locale (`1,234.56` in English, `1.234,56` in German). Every amount is
+shown with its ISO currency code. Texts exist in English (default) and German, in the plugin's
+`i18n/messages*.properties`; any other language setting gets English texts with the numbers of
+that locale. A user set to English sees English even when the browser asks for German, and the
+other way round.
+
+Up to 1.1.1 the plugin used the browser language only, so plugin content and Morpheus UI could be
+in different languages (measured on 9.0.2: Morpheus UI in English, plugin content in German).
 
 ## Who sees it
 
@@ -59,7 +65,7 @@ viewers use in Morpheus.
 ## Install
 
 1. Download `morpheus-instance-showback-plugin-<version>-all.jar` from the
-   [release instance-showback-v1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/instance-showback-v1.1.1) (tag
+   [release instance-showback-v1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/instance-showback-v1.2.0) (tag
    `instance-showback-v<version>`) and check it against `SHA256SUMS`.
 2. *Administration > Integrations > Plugins > Add*, upload the jar.
 3. Open any instance: the tab **Costs** appears next to the built-in tabs.
@@ -69,13 +75,22 @@ that there is no cost data yet.
 
 ## Known limits
 
-- **Internal tables.** The plugin reads `account_invoice` and `account` over the plugin API's
+- **Internal tables.** The plugin reads `account_invoice`, `account` and `user` over the plugin API's
   read-only database connection. These tables are internal to Morpheus, not a public API: the
   plugin is tested on 9.0.2 only and may break on an upgrade. A failed query shows an error
   message in the tab and logs the cause; it does not break the page.
 - **Current month = JVM time zone.** Which month counts as current, and the day counter, follow the
   time zone of the appliance JVM, not the viewer's. Morpheus 9.0.2 runs its JVM in UTC. The footer
   time of the last cost run is always shown in UTC (since 1.1.1).
+- **Language setting read from an internal table.** The viewer's language comes from the
+  `locale` column of Morpheus' internal `user` table (plugin API 1.4.2 has no locale on `User`),
+  read with a parameterised query on the same read-only connection. If it cannot be read, the tab
+  falls back to the browser language, logs one debug line and still renders.
+- **Viewer handed from `show()` to the content.** `renderTemplate()` gets no user in plugin API
+  1.4.2. Morpheus 9.0.2 calls `show()` and then `renderTemplate()` for the tab in the same request,
+  so the plugin keeps the user id from `show()` for that render. If a Morpheus version renders the
+  tab without calling `show()` first on the same request thread, the tab has no user in context and
+  falls back to the browser language, as up to 1.1.1.
 - **Tab title in English.** `getName()` has no request context in plugin API 1.4.2, so the tab is
   titled *Costs* in every language; its content is translated.
 - **No conversion.** Mixed-currency instances show one row per currency; there is no total.
@@ -88,6 +103,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 
 | Plugin version | Plugin API | Min. appliance | Tested appliance | Internal tables read |
 |---|---|---|---|---|
+| 1.2.0 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | 9.0.2 (1.2.0 release candidate, master tenant) | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`), `user` (`id`, `locale`) |
 | 1.1.1 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | 9.0.2 (1.1.0; 1.1.1 as master) | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`) |
 | 1.1.0 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`) |
 
@@ -112,7 +128,9 @@ SHA-256 checksum). Run it in `finops/instance-showback`.
 
 The unit tests cover the currency rule, grouping per month and currency, rounding, locale-aware
 number formatting, bar scaling, the month list across year boundaries, the UTC footer time under a
-non-UTC JVM time zone, the plugin identity
+non-UTC JVM time zone, the choice of the content language (Morpheus setting before browser
+language before English, with the parameterised lookup and its quiet fallback), the rendered
+template in that language, the plugin identity
 (code, repository URL, provider) and the completeness of the message bundles.
 
 ## License

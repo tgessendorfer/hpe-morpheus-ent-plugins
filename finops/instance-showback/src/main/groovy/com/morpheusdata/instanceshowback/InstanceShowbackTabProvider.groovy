@@ -39,6 +39,9 @@ import java.sql.Connection
  *
  * The tab only reads the invoices of the instance it is shown on. show() returns true,
  * so visibility relies on Morpheus' own access check for the instance detail page.
+ *
+ * Content language and number format follow the viewing user's Morpheus language setting
+ * (see {@link ShowbackLocale}); when no user came through show(), the browser language.
  */
 @Slf4j
 class InstanceShowbackTabProvider extends AbstractInstanceTabProvider {
@@ -66,10 +69,28 @@ class InstanceShowbackTabProvider extends AbstractInstanceTabProvider {
 	@Override String getCode() { PROVIDER_CODE }
 	@Override String getName() { TAB_NAME }
 
-	@Override
-	Boolean show(Instance instance, User user, Account account) { true }
+	/**
+	 * Id of the viewing user, handed from show() to renderTemplate(). renderTemplate() gets
+	 * no user, but Morpheus calls show() and then renderTemplate() for the same tab in the
+	 * same request (InstancesController.show, 9.0.2), so the id travels on the thread.
+	 */
+	private final ThreadLocal<Long> viewerId = new ThreadLocal<>()
 
-	/** The viewer's locale, or null outside a web request. */
+	@Override
+	Boolean show(Instance instance, User user, Account account) {
+		// Set on every call, so a value left over from an earlier request is replaced.
+		viewerId.set(user?.id)
+		true
+	}
+
+	/** The id stored by the last show() on this thread, once; null when there is none. */
+	protected Long takeViewerId() {
+		Long id = viewerId.get()
+		viewerId.remove()
+		id
+	}
+
+	/** The browser's locale from the web request, or null outside a web request. */
 	protected Locale requestLocale() {
 		try {
 			return morpheus?.webRequest?.locale
@@ -78,18 +99,17 @@ class InstanceShowbackTabProvider extends AbstractInstanceTabProvider {
 		}
 	}
 
-	/** A message from the plugin bundle in the viewer's language, else the English default. */
-	protected String message(String key, String defaultText, Locale locale) {
-		try {
-			return morpheus?.webRequest?.getMessage(key, null, defaultText, ShowbackCalculator.localeOrDefault(locale)) ?: defaultText
-		} catch (Throwable ignored) {
-			return defaultText
-		}
+	/** Sql over the read-only report connection. A method of its own so tests can stand in for the database. */
+	protected Sql openSql(Connection c) {
+		new Sql(c)
 	}
 
 	@Override
 	HTMLResponse renderTemplate(Instance instance) {
-		Locale locale = requestLocale()
+		Long userId = takeViewerId()
+		Locale request = requestLocale()
+		// Until the user's own setting is read: browser language, else English.
+		Locale locale = ShowbackLocale.resolve(null, request)
 		Calendar now = Calendar.instance
 		List<String> periods = ShowbackCalculator.lastPeriods(MONTHS, now)
 		List<Map> rows = []
@@ -97,7 +117,9 @@ class InstanceShowbackTabProvider extends AbstractInstanceTabProvider {
 		Connection c = null
 		try {
 			c = morpheus.report.getReadOnlyDatabaseConnection().blockingGet()
-			Sql sql = new Sql(c)
+			Sql sql = openSql(c)
+			// Content language: the viewer's Morpheus setting, else the browser language.
+			locale = ShowbackLocale.forUser(sql, userId, request)
 			// Grouped by month AND currency: amounts in different currencies are never added up.
 			String placeholders = periods.collect { '?' }.join(', ')
 			rows = sql.rows("""
@@ -116,7 +138,7 @@ class InstanceShowbackTabProvider extends AbstractInstanceTabProvider {
 			masterCurrency = sql.firstRow('SELECT currency FROM account WHERE master_account = 1 ORDER BY id LIMIT 1')?.currency as String
 		} catch (Exception e) {
 			log.error("Instance showback tab: loading invoices for instance ${instance?.id} failed: ${e.message}", e)
-			return HTMLResponse.error(message("${PROVIDER_CODE}.loadError".toString(),
+			return HTMLResponse.error(ShowbackLocale.text('loadError',
 				'Cost data could not be loaded. The appliance log has the details.', locale))
 		} finally {
 			if (c) morpheus.report.releaseDatabaseConnection(c).blockingAwait()

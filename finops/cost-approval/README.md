@@ -23,7 +23,7 @@ stay pending until the instance is deleted.
 Prices and thresholds are rounded half-up to cents before they are compared: 50.004 passes a
 threshold of 50, 50.005 does not. The request name shown in Morpheus explains the decision:
 
-| Case | Request name (English, default) |
+| Case | Request name (English) |
 |---|---|
 | Approved | *Approved automatically (12.50 EUR <= 50.00 EUR per month)* |
 | Above the threshold | *Above cost threshold of 20.00 EUR/month (requested 32.00 EUR). Please contact your provider for approval.* |
@@ -33,6 +33,14 @@ threshold of 50, 50.005 does not. The request name shown in Morpheus explains th
 The German texts are in `messages_de.properties`, e.g. *Über der Kostenschwelle von 20,00 EUR/Monat
 (angefragt 32,00 EUR). Bitte wenden Sie sich für eine Freigabe an Ihren Provider.* External request
 ids start with `ca-`.
+
+**Language of the request name** (since 1.2.0): the Morpheus language setting of the user who
+asked (*User Settings*, the same setting the Morpheus UI follows), not the browser language. A user
+without a setting gets the browser language of the web request, and English when there is none.
+When the requesting user cannot be determined, the texts stay English as in 1.1.x. Texts exist in
+English and German; any other language gets the English text, with numbers formatted for that
+language. The text is written once, when the request is decided, and is not translated again for
+other viewers.
 
 ## Who sees it
 
@@ -72,8 +80,8 @@ Morpheus 9.0.2 lists the integration fields as `cm.plugin.costThreshold` and
 dotted key, and under the plain field name, so integrations created in the UI and over the API both
 work.
 
-Form labels and help texts are in English and German (`src/main/resources/i18n`). Texts written into
-a request are English, since the approval call carries no user locale.
+Form labels and help texts are in English and German (`src/main/resources/i18n`); Morpheus renders
+them itself. Texts written into a request follow the requesting user's language setting (see above).
 
 ## Known limits
 
@@ -89,11 +97,18 @@ a request are English, since the approval call carries no user locale.
 - `PUT /api/integrations/{id}` replaces the whole option map: send threshold and currency together.
 - The tenant and master tenant currency fallback reads the internal table `account` through the
   read-only report connection.
+- **Requesting user and language.** The approval call of plugin API 1.4.2 carries no user. The
+  plugin finds the requesting user through the internal request behind `Request.refs`
+  (`requestByUserId`, Morpheus 9.0.2) and reads the language setting from the internal table `user`
+  (column `locale`) through the read-only report connection. If either is not available, the texts
+  are English (no user) or follow the browser (no setting); a failed lookup writes one debug line
+  and never affects the decision.
 
 ## Compatibility
 
 | Plugin version | Plugin API | Min appliance | Tested appliance | Internal DB tables read |
 |---|---|---|---|---|
+| [1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.2.0) | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0 release candidate, master tenant) | `account` (`currency`, `master_account`), only when no currency is known; `user` (`locale`) of the requesting user |
 | [1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.1.1) | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 loads, not run) | `account` (`currency`, `master_account`), only when no currency is known |
 | [1.1.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.1.0) | 1.4.2 | 9.0.2 | 9.0.2 | `account` (`currency`, `master_account`), only when no currency is known |
 

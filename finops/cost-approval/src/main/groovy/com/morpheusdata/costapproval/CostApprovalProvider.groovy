@@ -49,6 +49,10 @@ import java.util.concurrent.ConcurrentHashMap
  * integration only, never the request, so the decision cannot be recomputed there. The
  * pending reports are therefore kept in memory per integration id and are lost on a
  * restart; the approval in the createApprovalRequest response is not affected.
+ *
+ * Language of the request name and message: the Morpheus language setting of the user who
+ * asked (see {@link UserLocale}), else the browser language of the web request, else English.
+ * When the requesting user cannot be found, the texts stay English as before 1.2.0.
  */
 @Slf4j
 class CostApprovalProvider implements ApprovalProvider {
@@ -142,7 +146,7 @@ class CostApprovalProvider implements ApprovalProvider {
 		CostApprovalLogic.Decision decision = CostApprovalLogic.decide(price, reqCur,
 			CostApprovalLogic.refCurrencies(refs), limit, limitCur)
 
-		Locale locale = Messages.DEFAULT_LOCALE
+		Locale locale = requesterLocale(request)
 		String reqId = "${REQUEST_ID_PREFIX}${UUID.randomUUID().toString().take(8)}".toString()
 		String name = CostApprovalLogic.requestName(decision, locale)
 		RequestReference.ApprovalStatus status = decision.approved ?
@@ -211,6 +215,48 @@ class CostApprovalProvider implements ApprovalProvider {
 	private static Map integrationConfig(AccountIntegration integration) {
 		Map cfg = config(integration)
 		return cfg ?: CostApprovalLogic.parseJson(integration?.serviceConfig)
+	}
+
+	/**
+	 * The locale for the texts written into the request: the requesting user's own setting, else
+	 * the browser locale, else English. Without a known requesting user the texts stay in
+	 * {@link Messages#DEFAULT_LOCALE}: the approval call need not run in that user's web request.
+	 */
+	protected Locale requesterLocale(Object request) {
+		Long userId = UserLocale.requestingUserId(request)
+		if (userId == null) {
+			return Messages.DEFAULT_LOCALE
+		}
+		return UserLocale.resolve(userLocaleSetting(userId), { browserLocale() })
+	}
+
+	/** The locale of the current web request (the browser language); throws when there is none. */
+	protected Locale browserLocale() {
+		return morpheus?.webRequest?.locale
+	}
+
+	/**
+	 * The user's Morpheus language setting from the internal table user, read through the
+	 * read-only report connection; null when unset or not readable. A failure logs one line and
+	 * never stops the decision.
+	 */
+	protected String userLocaleSetting(Long userId) {
+		def conn = null
+		try {
+			conn = morpheus?.report?.getReadOnlyDatabaseConnection()?.blockingGet()
+			return conn ? UserLocale.setting(new Sql(conn), userId) : null
+		} catch (Exception e) {
+			log.debug("Cost threshold approval: language setting of user ${userId} not readable: ${e.message}")
+			return null
+		} finally {
+			if (conn) {
+				try {
+					morpheus.report.releaseDatabaseConnection(conn).blockingAwait()
+				} catch (Exception ignored) {
+					// nothing more to do
+				}
+			}
+		}
 	}
 
 	/**

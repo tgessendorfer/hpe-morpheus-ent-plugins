@@ -37,7 +37,7 @@ class ShowbackCalculator {
 	/** Last resort when neither the invoice row nor the master tenant names a currency. */
 	static final String DEFAULT_CURRENCY = 'USD'
 
-	/** Number format when the request carries no locale. */
+	/** Number format when no locale is given. */
 	static final Locale DEFAULT_LOCALE = Locale.ENGLISH
 
 	static final List<String> AMOUNT_FIELDS = ['price', 'running', 'compute', 'storage', 'license']
@@ -187,7 +187,8 @@ class ShowbackCalculator {
 	 *                 running, compute, storage, license, plan, updated); currency may be null
 	 * @param periods  from {@link #lastPeriods}, current month first
 	 * @param masterCurrency currency of the master tenant, may be null
-	 * @param locale   viewer locale for number formatting, may be null
+	 * @param locale   content locale (see {@link ShowbackLocale#resolve}) for number formats
+	 *                 and the messages in t, may be null (English)
 	 * @param now      clock for the day-of-month counter
 	 */
 	static Map buildModel(List<Map> rows, List<String> periods, def masterCurrency, Locale locale, Calendar now) {
@@ -223,7 +224,8 @@ class ShowbackCalculator {
 			day          : now.get(Calendar.DAY_OF_MONTH),
 			days         : now.getActualMaximum(Calendar.DAY_OF_MONTH),
 			history      : history,
-			updated      : utcText(updated)
+			updated      : utcText(updated),
+			t            : ShowbackLocale.messages(locale)
 		]
 	}
 }

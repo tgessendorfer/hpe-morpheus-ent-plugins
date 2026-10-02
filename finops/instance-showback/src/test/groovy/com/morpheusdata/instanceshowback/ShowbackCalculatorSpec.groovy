@@ -266,16 +266,17 @@ class ShowbackCalculatorSpec extends Specification {
 		order << ['later first', 'earlier first']
 	}
 
-	def "every i18n key used by the template exists in the English bundle"() {
+	def "every message the template uses exists in the English bundle, and none goes through the i18n helper"() {
 		given:
 		String hbs = ShowbackCalculatorSpec.classLoader.getResourceAsStream('renderer/hbs/instanceShowback.hbs').text
 		Properties en = new Properties()
 		ShowbackCalculatorSpec.classLoader.getResourceAsStream('i18n/messages.properties').withCloseable { en.load(it) }
-		Set<String> used = (hbs =~ /\{\{i18n '([^']+)'\}\}/).collect { it[1] } as Set
+		Set<String> used = (hbs =~ /\{\{(?:\.\.\/)?t\.([A-Za-z]+)\}\}/).collect { 'instance-showback-tab.' + it[1] } as Set
 
 		expect:
 		!used.isEmpty()
-		used.every { it.startsWith('instance-showback-tab.') }
+		// The helper takes the browser language, not the user's Morpheus setting.
+		!hbs.contains('{{i18n')
 		en.stringPropertyNames().containsAll(used)
 	}
 }

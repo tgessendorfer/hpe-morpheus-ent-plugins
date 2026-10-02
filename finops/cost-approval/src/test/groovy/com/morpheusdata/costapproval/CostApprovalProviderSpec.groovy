@@ -285,4 +285,86 @@ class CostApprovalProviderSpec extends Specification {
 		over.references*.status == [RequestReference.ApprovalStatus.rejected]
 		over.externalRequestName == 'Above cost threshold of 10.00 EUR/month (requested 16.00 EUR). Please contact your provider for approval.'
 	}
+
+	/** Provider whose user setting and browser locale are fixed; records the user ids looked up. */
+	static class LocaleProvider extends CostApprovalProvider {
+		Map<Long, String> settings = [:]
+		Locale browser
+		List<Long> looked = []
+
+		LocaleProvider() { super(null, null) }
+
+		@Override
+		protected String userLocaleSetting(Long userId) {
+			looked << userId
+			return settings[userId]
+		}
+
+		@Override
+		protected Locale browserLocale() { browser }
+	}
+
+	static class DomainRequest {
+		Long requestByUserId
+	}
+
+	static class UserRef extends DomainRef {
+		DomainRequest request
+	}
+
+	private static Request userRequest(Long userId, Double price) {
+		new Request(refs: [new UserRef(id: 1, refId: 47L, refType: 'instance', name: 'web-1', pricePerMonth: price,
+			currency: 'EUR', request: new DomainRequest(requestByUserId: userId))])
+	}
+
+	def "the request name follows the requesting user's setting, not the browser"() {
+		given:
+		LocaleProvider p = new LocaleProvider(settings: [5L: 'en-US', 6L: 'de-DE'], browser: Locale.GERMANY)
+		def ai = integration(7, [costThreshold: '1000'])
+
+		when:
+		def english = p.createApprovalRequest([], userRequest(5L, 1234.5d), ai, null, [:])
+		def german = p.createApprovalRequest([], userRequest(6L, 1234.5d), ai, null, [:])
+
+		then:
+		p.looked == [5L, 6L]
+		english.externalRequestName == 'Above cost threshold of 1,000.00 EUR/month (requested 1,234.50 EUR). Please contact your provider for approval.'
+		english.msg == 'Rejected: above cost threshold'
+		german.externalRequestName == '\u00dcber der Kostenschwelle von 1.000,00 EUR/Monat (angefragt 1.234,50 EUR). Bitte wenden Sie sich f\u00fcr eine Freigabe an Ihren Provider.'
+		german.msg == 'Abgelehnt: Kostenschwelle \u00fcberschritten'
+		german.references*.externalName == [german.externalRequestName]
+	}
+
+	def "a user without a setting gets the browser language, without a browser English"() {
+		given:
+		def ai = integration(7, [costThreshold: '50'])
+
+		expect:
+		new LocaleProvider(browser: Locale.GERMANY).createApprovalRequest([], userRequest(8L, 10d), ai, null, [:])
+			.externalRequestName == 'Automatisch freigegeben (10,00 EUR <= 50,00 EUR pro Monat)'
+		new LocaleProvider(browser: null).createApprovalRequest([], userRequest(8L, 10d), ai, null, [:])
+			.externalRequestName == 'Approved automatically (10.00 EUR <= 50.00 EUR per month)'
+	}
+
+	def "without a requesting user the texts stay English and no setting is looked up"() {
+		given:
+		LocaleProvider p = new LocaleProvider(browser: Locale.GERMANY)
+
+		when:
+		def rsp = p.createApprovalRequest([], request(10G, 'EUR'), integration(7, [costThreshold: '50']), null, [:])
+
+		then:
+		p.looked == []
+		rsp.externalRequestName == 'Approved automatically (10.00 EUR <= 50.00 EUR per month)'
+	}
+
+	def "an unreadable language setting falls back quietly and never breaks the decision"() {
+		given: 'no Morpheus context: the report connection and the web request are not available'
+		def rsp = provider.createApprovalRequest([], userRequest(5L, 10d), integration(7, [costThreshold: '50']), null, [:])
+
+		expect:
+		provider.userLocaleSetting(5L) == null
+		rsp.references*.status == [RequestReference.ApprovalStatus.approved]
+		rsp.externalRequestName == 'Approved automatically (10.00 EUR <= 50.00 EUR per month)'
+	}
 }

@@ -6,6 +6,57 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.0
+
+**The page now follows the viewer's Morpheus language setting instead of the browser language.**
+Built against plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and options are
+unchanged.
+
+### What changed
+
+- **Language from the user setting.** On Morpheus 9.0.2 a user whose Morpheus language was English
+  saw this page in German, because the browser sent `Accept-Language: de-DE`. Morpheus takes its UI
+  language from the user's own setting (`user.locale`, e.g. `en-US`, also shown by
+  `GET /api/user-settings`), while the page took the request locale, which is the browser's. Plugin
+  API 1.4.2 has no locale on `User`, so the provider now reads the setting itself with
+  `SELECT locale FROM user WHERE id = ?` (parameterised, on the read-only report connection) and
+  uses it for texts and number formats.
+- **Fallback chain.** An empty, missing or unparsable setting falls back to the browser language,
+  and without a web request to English. A failed lookup logs one debug line and never breaks the
+  page.
+- **Texts resolved by the provider.** The template's `i18n` helper looks up messages in the
+  browser's locale, so the template now gets every label from the provider, read from the plugin's
+  own English and German bundles. Any language other than German gets English texts; number formats
+  follow the full locale as before.
+
+### Behaviour changes from 1.1.1
+
+- **English Morpheus setting, German browser:** the page is English (`1,234.56`, *Revenue*), where
+  1.1.1 showed German (`1.234,56`, *Umsatz*).
+- **German Morpheus setting, English browser:** the page is German, where 1.1.1 showed English.
+- **No setting stored:** unchanged, the browser language as in 1.1.1.
+- **Error messages** (*Only the provider (master) tenant can open this page.*) follow the same rule.
+
+### Verified
+
+- `./gradlew clean test shadowJar --warning-mode all` with JDK 17 and Gradle 9.8.0: 66 tests, 0
+  failures, no deprecation warnings, one jar `morpheus-msp-tenant-overview-plugin-1.2.0-all.jar`.
+- New Spock tests: an `en-US` setting with a German browser gives English, a `de` setting with an
+  English browser gives German, an empty, blank or unparsable setting falls back to the browser,
+  no request gives English, a failing lookup is quiet; the lookup runs the parameterised query with
+  the user id as its only parameter; `loadData` formats amounts and labels in the setting's
+  language, and the rendered template shows the labels in loops, the footer and the empty list.
+  Ignoring the setting makes 8 of these tests fail.
+- On Morpheus 9.0.2 (build 9.0.2-2) with a release candidate built from this source, as a master
+  tenant user whose Morpheus setting is `en-US` while the browser sends German: the page renders in
+  English with the same figures as 1.1.1.
+
+### Not yet verified
+
+- A user with a German setting, and that a sub-tenant user still sees no menu entry.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.1.1...msp-tenant-overview-v1.2.0
+
 ## 1.1.1
 
 **Fix release: tenants without revenue no longer show `(- %)` next to their margin.** Built against

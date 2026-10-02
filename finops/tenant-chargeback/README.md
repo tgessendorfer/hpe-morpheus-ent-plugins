@@ -22,9 +22,10 @@ For one month (`account_invoice` with `period_interval = 'month'`):
 - **Total per currency:** resources, cost, list price, margin, margin % and invoice amount.
 - **Per tenant:** the same figures per tenant and currency.
 - **Per tenant and group:** one row per tenant, group and currency. Groups are told apart by
-  their id, so two groups with the same name in one tenant get a row each. Servers that belong to
-  no group are shown as one row per tenant and currency, *Servers without a group*; that includes
-  server invoices that carry a group id but no group name (see *Known limits*).
+  their id, so two groups with the same name in one tenant get a row each. An invoice line that
+  carries a group id but no group name (server invoices on 9.0.2 do) gets the name from the group
+  table (`compute_site`) and counts towards that group. Lines without a group id, or whose group
+  no longer exists, are shown as one row per tenant and currency, *Servers without a group*.
 
 Counted are the invoices of **instances** and of **servers that belong to no instance**. The
 summary invoices Morpheus keeps per tenant, group, cloud and user are left out; they would count
@@ -81,17 +82,33 @@ with the same precision. Header rows (per tenant) add `marginPct`; footer rows c
 
 ## Language and number format
 
-English is the default; German is included (`i18n/messages_de.properties`). Option labels and
-help texts, headings, column names and messages follow the viewer's language, and numbers on the
-page are formatted in the viewer's locale (e.g. `1,234.56` or `1.234,56`). The report name and
-description in the report list stay English, since plugin API 1.4.2 stores them when the plugin
-registers.
+English is the default; German is included (`i18n/messages_de.properties`). Headings, column
+names and messages on the report page are shown in the user's language, and numbers are formatted
+in the user's locale (e.g. `1,234.56` or `1.234,56`). The report name and description in the
+report list stay English, since plugin API 1.4.2 stores them when the plugin registers.
 
-**Which language counts:** the plugin uses the locale of the web request, i.e. the browser's
-language (`Accept-Language`), not the language chosen in the Morpheus UI. Measured on 9.0.2: with
-Morpheus set to German and the browser to English, the Morpheus menus are German but the plugin
-content and numbers are English, and vice versa. Set the browser language to the language the
-viewers use in Morpheus.
+**Which language counts** (since 1.2.0):
+
+1. the user's own Morpheus language setting (*User Settings*, stored as `user.locale`, e.g.
+   `en-US`), read with one parameterised query over the read-only report connection;
+2. if that setting is empty or not a known language, the browser's language (`Accept-Language`
+   of the web request);
+3. without a web request, English.
+
+Texts come in English or German; any other language gets English texts, while numbers still use
+that locale's format. An `en-US` setting therefore gives an English page even when the browser
+sends German. Up to 1.1.2 the plugin used the browser's language only, so a Morpheus UI set to
+English could show the report in German.
+
+The report page gets no viewing user from the plugin API, so the setting of the **user who ran
+the report** (the report result's creator) is used. Another user who opens the same result sees
+it in the creator's language. If the setting cannot be read, or the report result has no
+creator, the plugin writes one debug line to the appliance log and falls back to the browser's
+language; the page is never broken by it.
+
+Validation messages of the report form (a wrong month or markup) follow the browser's language,
+since that call carries no user. The option labels and help texts of the form are looked up by
+Morpheus itself through their i18n codes, not by the plugin.
 
 ## Known limits
 
@@ -100,10 +117,13 @@ viewers use in Morpheus.
 - Amounts are as current as the last Morpheus costing run.
 - Two groups with the same name in one tenant are two rows with the same name; the CSV export
   carries no group id to tell them apart, only their order.
-- Server invoices that carry a group id but no group name count as *Servers without a group*,
-  unless other invoices of that group id in the same tenant and currency carry its name: the query
-  sums per group id and takes the name it finds, so those server invoices count towards that
-  group. The group name is not looked up from the group table.
+- A group name comes from the invoice line when it carries one, else from the group table by
+  group id. If the lines of one group id carry different names (a group renamed during the month),
+  the row shows the alphabetically last of them. Invoices of a group that has since been deleted
+  and that carry no name count as *Servers without a group*.
+- **Language of the report page:** the language setting of the user who ran the report, not of
+  the user who views it (see *Language and number format*). Validation messages follow the
+  browser's language.
 - The tenant currency is not used for the currency rule; an invoice line without a currency
   falls back to the master tenant's currency.
 - **Reads internal database tables** (see the matrix below) through the read-only report
@@ -115,6 +135,7 @@ viewers use in Morpheus.
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0 release candidate, master tenant) | `account_invoice`, `account`, `compute_site`, `user` |
 | 1.1.2 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0, 1.1.2) | `account_invoice`, `account` |
 | 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 run: split no-group rows, fixed in 1.1.2) | `account_invoice`, `account` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `account_invoice`, `account` |
@@ -124,7 +145,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 ## Install
 
 Download `morpheus-tenant-chargeback-plugin-<version>-all.jar` from the
-[release tenant-chargeback-v1.1.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.1.2) (tag
+[release tenant-chargeback-v1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.2.0) (tag
 `tenant-chargeback-v<version>`), then upload it under *Administration → Integrations → Plugins →
 Add*. Updating to a newer version with the same plugin code replaces the plugin in place and
 keeps existing report results. The report then appears under *Operations → Reports* in the

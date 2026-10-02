@@ -9,14 +9,19 @@ class BudgetBurnMessagesSpec extends Specification {
 
 	Properties en = load('i18n/messages.properties')
 
-	def "every literal i18n key in the template exists"() {
+	def "every text the template asks for exists"() {
 		given:
 		String hbs = BudgetBurnMessagesSpec.classLoader.getResourceAsStream('renderer/hbs/budgetBurn.hbs').text
-		List<String> keys = (hbs =~ /\{\{i18n '([^']+)'\}\}/).collect { it[1] as String }
+		List<String> keys = (hbs =~ /\{\{(?:\.\.\/)?text\.([^}]+)\}\}/).collect { "${BudgetBurnAnalyticsProvider.PROVIDER_CODE}.${it[1]}".toString() }
 
 		expect:
 		keys.size() > 10
 		keys.findAll { !en.containsKey(it) } == []
+	}
+
+	def "the template uses no i18n helper, which would follow the request locale"() {
+		expect:
+		!BudgetBurnMessagesSpec.classLoader.getResourceAsStream('renderer/hbs/budgetBurn.hbs').text.contains('{{i18n')
 	}
 
 	def "every scope and status key the provider computes exists"() {

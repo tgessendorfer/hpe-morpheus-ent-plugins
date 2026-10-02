@@ -477,4 +477,183 @@ class ChargebackCalculatorSpec extends Specification {
 		r.totals.isEmpty()
 		tenantCount(r.lines) == 0
 	}
+
+	// ------------------------------------------------------------------
+	// Group names looked up by group id (INVOICE_SQL joins compute_site)
+	// ------------------------------------------------------------------
+
+	/**
+	 * What INVOICE_SQL returns for the given invoice lines and group table: one row per tenant,
+	 * group id and currency, the group name being MAX(COALESCE(NULLIF(TRIM(site_name), ''), cs.name))
+	 * with cs from LEFT JOIN compute_site. With {@code join = false} it is the 1.1.2 query, MAX(site_name).
+	 */
+	private static List<Map> queryRows(List<Map> invoices, Map<Long, String> sites, boolean join = true) {
+		Map<List, Map> out = new LinkedHashMap<List, Map>()
+		invoices.each { Map i ->
+			String cur = i.currency?.toString()?.trim() ?: null
+			List key = [i.tenantId, i.siteId, cur]
+			String own = i.siteName?.toString()?.trim() ?: null
+			String name = join ? (own ?: (i.siteId != null ? sites[i.siteId as Long] : null)) : i.siteName
+			Map r = out.get(key)
+			if(r == null) {
+				r = [tenantId: i.tenantId, tenant: "Tenant ${i.tenantId}".toString(), isMaster: false, grpId: i.siteId, grp: null,
+					 currency: cur, resources: 0, cost: 0G, price: 0G]
+				out.put(key, r)
+			}
+			if(name != null && (r.grp == null || name > r.grp)) r.grp = name
+			r.resources += 1
+			r.cost += new BigDecimal(i.cost.toString())
+			r.price += new BigDecimal(i.price.toString())
+		}
+		out.values() as List<Map>
+	}
+
+	private static Map inv(Map m) {
+		[tenantId: 2, siteId: null, siteName: null, currency: 'USD', cost: '1', price: '2'] + m
+	}
+
+	private static final Map<Long, String> SITES = [1L: 'Group 1', 2L: 'Group 2', 7L: 'Group 7', 8L: 'Group 1']
+
+	def "a nameless server line with an existing group id joins that group's named lines"() {
+		when:
+		Map r = aggregate(queryRows([
+			inv(siteId: 1, siteName: 'Group 1', cost: '10', price: '20'),
+			inv(siteId: 1, siteName: '', cost: '1', price: '2'),
+			inv(siteId: 2, siteName: null, cost: '3', price: '4')
+		], SITES), 'EUR', 0G, false)
+
+		then: 'group 1 is one row with both lines, group 2 a row of its own; no line without a group'
+		r.lines*.group == ['Group 1', 'Group 2']
+		r.lines*.resources == [2, 1]
+		r.lines*.cost == [11G, 3G]
+		!r.lines.any { it.group == null }
+	}
+
+	def "a nameless line whose group id is not in compute_site is a server without a group"() {
+		when:
+		Map r = aggregate(queryRows([
+			inv(siteId: 99, siteName: '', cost: '1', price: '2'),
+			inv(siteId: 98, siteName: null, cost: '1', price: '2'),
+			inv(siteId: 7, siteName: null, cost: '5', price: '6')
+		], SITES), 'EUR', 0G, false)
+
+		then: 'the two missing ids are one no-group line, id 7 shows under its name'
+		r.lines*.group == [null, 'Group 7']
+		r.lines*.resources == [2, 1]
+	}
+
+	def "a nameless line without a group id is a server without a group"() {
+		when:
+		Map r = aggregate(queryRows([
+			inv(siteId: null, siteName: null, cost: '1', price: '2'),
+			inv(siteId: null, siteName: '  ', cost: '1', price: '2')
+		], SITES), 'EUR', 0G, false)
+
+		then:
+		r.lines.size() == 1
+		r.lines[0].group == null
+		r.lines[0].resources == 2
+	}
+
+	def "two groups with the same name stay apart by id after the lookup"() {
+		when:
+		Map r = aggregate(queryRows([
+			inv(siteId: 1, siteName: null, cost: '1', price: '2'),
+			inv(siteId: 8, siteName: null, cost: '3', price: '4')
+		], SITES), 'EUR', 0G, false)
+
+		then:
+		r.lines*.group == ['Group 1', 'Group 1']
+		r.lines*.cost == [1G, 3G]
+	}
+
+	def "the group lookup moves rows but leaves the tenant and currency totals unchanged"() {
+		given: 'the data shape seen on 9.0.2: nameless server lines with group ids, named instance lines'
+		List<Map> invoices = [
+			inv(tenantId: 2, siteId: 1, siteName: '', cost: '10.004', price: '12.5'),
+			inv(tenantId: 2, siteId: 2, siteName: '', cost: '3', price: '4.006'),
+			inv(tenantId: 2, siteId: 1, siteName: 'Group 1', cost: '7', price: '9'),
+			inv(tenantId: 3, siteId: 7, siteName: null, currency: 'EUR', cost: '1', price: '1.5'),
+			inv(tenantId: 3, siteId: 99, siteName: null, currency: 'EUR', cost: '2', price: '3'),
+			inv(tenantId: 3, siteId: null, siteName: null, currency: '', cost: '4', price: '6')
+		]
+
+		when:
+		Map before = aggregate(queryRows(invoices, SITES, false), 'EUR', 10G, false)
+		Map after = aggregate(queryRows(invoices, SITES), 'EUR', 10G, false)
+
+		then: '1.1.2 put every nameless id into the no-group row; now only id 99 and the line without an id'
+		before.lines.findAll { it.group == null }*.resources == [1, 3]
+		after.lines.findAll { it.group == null }*.resources == [2]
+		after.lines.collect { [it.tenantKey, it.group, it.resources] } == [
+			['2', 'Group 1', 2], ['2', 'Group 2', 1], ['3', 'Group 7', 1], ['3', null, 2]]
+
+		and: 'every tenant and currency adds up to the same figures'
+		after.tenants == before.tenants
+		after.totals == before.totals
+	}
+
+	// ------------------------------------------------------------------
+	// Locale: the user's Morpheus setting before the browser's language
+	// ------------------------------------------------------------------
+
+	@Unroll
+	def "language setting '#setting' parses to #expected"() {
+		expect:
+		parseLocaleSetting(setting) == expected
+
+		where:
+		setting      | expected
+		'en-US'      | Locale.forLanguageTag('en-US')
+		'en_US'      | Locale.forLanguageTag('en-US')
+		' de '       | Locale.GERMAN
+		'de-DE'      | Locale.forLanguageTag('de-DE')
+		null         | null
+		''           | null
+		'   '        | null
+		'garbage'    | null
+		'!!'         | null
+		'xx-YY'      | null
+		42           | null
+	}
+
+	@Unroll
+	def "setting '#setting' with browser #browser resolves to #expected"() {
+		expect:
+		resolveLocale(setting, browser) == expected
+
+		where:
+		setting   | browser                        | expected
+		'en-US'   | Locale.forLanguageTag('de-DE') | Locale.forLanguageTag('en-US')
+		'de'      | Locale.forLanguageTag('en-US') | Locale.GERMAN
+		'de_DE'   | null                           | Locale.forLanguageTag('de-DE')
+		null      | Locale.forLanguageTag('de-DE') | Locale.forLanguageTag('de-DE')
+		''        | Locale.forLanguageTag('de-DE') | Locale.forLanguageTag('de-DE')
+		'garbage' | Locale.forLanguageTag('de-DE') | Locale.forLanguageTag('de-DE')
+		null      | null                           | Locale.ENGLISH
+		'garbage' | null                           | Locale.ENGLISH
+	}
+
+	@Unroll
+	def "messages for #locale come from the #expected bundle"() {
+		expect:
+		messageLocale(locale) == expected
+
+		where:
+		locale                         | expected
+		Locale.forLanguageTag('en-US') | Locale.ENGLISH
+		Locale.forLanguageTag('de-AT') | Locale.GERMAN
+		Locale.GERMAN                  | Locale.GERMAN
+		Locale.FRENCH                  | Locale.ENGLISH
+		null                           | Locale.ENGLISH
+	}
+
+	def "an en-US setting formats numbers in English even when the browser sends German"() {
+		given:
+		Locale l = resolveLocale('en-US', Locale.forLanguageTag('de-DE'))
+
+		expect:
+		money('1234.5', l) == '1,234.50'
+		money('1234.5', resolveLocale('de', Locale.US)) == '1.234,50'
+	}
 }

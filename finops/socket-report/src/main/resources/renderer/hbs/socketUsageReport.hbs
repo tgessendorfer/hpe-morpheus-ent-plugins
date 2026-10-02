@@ -1,25 +1,25 @@
 <div class="finops-socket-usage-report">
 <div class="intro-stats">
-  <h2>{{i18n 'socket-usage-report.title'}}</h2>
+  <h2>{{text.title}}</h2>
   <div class="count-stats">
-    <div class="stats-container"><span class="big-stat">{{footer.sockets}}</span><span class="stat-label">{{i18n 'socket-usage-report.stat.total'}}</span></div>
-    <div class="stats-container"><span class="big-stat">{{footer.hostSockets}}</span><span class="stat-label">{{i18n 'socket-usage-report.stat.hostSockets'}} ({{footer.hosts}} {{i18n 'socket-usage-report.stat.hosts'}})</span></div>
-    <div class="stats-container"><span class="big-stat">{{footer.vmSockets}}</span><span class="stat-label">{{i18n 'socket-usage-report.stat.vmSockets'}} ({{footer.vmsWithoutHost}} {{i18n 'socket-usage-report.stat.vmsWithoutHost'}} / {{footer.vmsPerSocket}})</span></div>
+    <div class="stats-container"><span class="big-stat">{{footer.sockets}}</span><span class="stat-label">{{text.stat.total}}</span></div>
+    <div class="stats-container"><span class="big-stat">{{footer.hostSockets}}</span><span class="stat-label">{{text.stat.hostSockets}} ({{footer.hosts}} {{text.stat.hosts}})</span></div>
+    <div class="stats-container"><span class="big-stat">{{footer.vmSockets}}</span><span class="stat-label">{{text.stat.vmSockets}} ({{footer.vmsWithoutHost}} {{text.stat.vmsWithoutHost}} / {{footer.vmsPerSocket}})</span></div>
   </div>
 </div>
-<h3>{{i18n 'socket-usage-report.section.perTenant'}}</h3>
+<h3>{{text.section.perTenant}}</h3>
 <table class="table table-condensed">
-  <thead><tr><th>{{i18n 'socket-usage-report.column.tenant'}}</th><th>{{i18n 'socket-usage-report.column.hosts'}}</th><th>{{i18n 'socket-usage-report.column.hostSockets'}}</th><th>{{i18n 'socket-usage-report.column.vmsWithoutHost'}}</th><th>{{i18n 'socket-usage-report.column.vmSockets'}}</th><th>{{i18n 'socket-usage-report.column.sockets'}}</th></tr></thead>
+  <thead><tr><th>{{text.column.tenant}}</th><th>{{text.column.hosts}}</th><th>{{text.column.hostSockets}}</th><th>{{text.column.vmsWithoutHost}}</th><th>{{text.column.vmSockets}}</th><th>{{text.column.sockets}}</th></tr></thead>
   <tbody>
   {{#each tenants}}<tr><td>{{tenant}}</td><td>{{hosts}}</td><td>{{hostSockets}}</td><td>{{vmsWithoutHost}}</td><td>{{vmSockets}}</td><td><strong>{{sockets}}</strong></td></tr>{{/each}}
   </tbody>
 </table>
-<h3>{{i18n 'socket-usage-report.section.perCloud'}}</h3>
+<h3>{{text.section.perCloud}}</h3>
 <table class="table table-condensed">
-  <thead><tr><th>{{i18n 'socket-usage-report.column.cloud'}}</th><th>{{i18n 'socket-usage-report.column.type'}}</th><th>{{i18n 'socket-usage-report.column.tenant'}}</th><th>{{i18n 'socket-usage-report.column.hosts'}}</th><th>{{i18n 'socket-usage-report.column.hostSockets'}}</th><th>{{i18n 'socket-usage-report.column.hostsDefault'}} {{footer.defaultHostSockets}}</th><th>{{i18n 'socket-usage-report.column.vmsOnHosts'}}</th><th>{{i18n 'socket-usage-report.column.vmsWithoutHost'}}</th><th>{{i18n 'socket-usage-report.column.vmSockets'}}</th><th>{{i18n 'socket-usage-report.column.sockets'}}</th></tr></thead>
+  <thead><tr><th>{{text.column.cloud}}</th><th>{{text.column.type}}</th><th>{{text.column.tenant}}</th><th>{{text.column.hosts}}</th><th>{{text.column.hostSockets}}</th><th>{{text.column.hostsDefault}} {{footer.defaultHostSockets}}</th><th>{{text.column.vmsOnHosts}}</th><th>{{text.column.vmsWithoutHost}}</th><th>{{text.column.vmSockets}}</th><th>{{text.column.sockets}}</th></tr></thead>
   <tbody>
   {{#each rows}}<tr><td>{{cloud}}</td><td>{{cloudType}}{{#if category}} ({{category}}){{/if}}</td><td>{{tenant}}</td><td>{{hosts}}</td><td>{{hostSockets}}</td><td>{{hostsDefault}}</td><td>{{vmsOnHosts}}</td><td>{{vmsWithoutHost}}</td><td>{{vmSockets}}</td><td><strong>{{sockets}}</strong></td></tr>{{/each}}
   </tbody>
 </table>
-<p class="text-muted">{{i18n 'socket-usage-report.note.rule'}} {{i18n 'socket-usage-report.note.vmsPerSocket'}} {{footer.vmsPerSocket}}. {{i18n 'socket-usage-report.note.defaultHostSockets'}} {{footer.defaultHostSockets}}. {{i18n 'socket-usage-report.note.authoritative'}}</p>
+<p class="text-muted">{{text.note.rule}} {{text.note.vmsPerSocket}} {{footer.vmsPerSocket}}. {{text.note.defaultHostSockets}} {{footer.defaultHostSockets}}. {{text.note.authoritative}}</p>
 </div>

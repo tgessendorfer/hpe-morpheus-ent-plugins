@@ -6,6 +6,66 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 1.2.0
+
+**The report now shows in the language chosen in the Morpheus user settings, not in the
+browser language.** Measured on Morpheus 9.0.2: with the Morpheus UI set to English and the
+browser sending German, the menus were English but the report was German, texts and numbers
+alike. Morpheus takes its UI language from the user's own setting (`GET /api/user-settings`,
+`"locale": "en-US"`), while the plugin API only offers the locale of the web request, which is
+the browser's `Accept-Language`, and the API's user model carries no language.
+
+### What changed
+
+- **The report reads the language setting of the user** with one parameterised query over the
+  report's read-only database connection (`SELECT locale FROM user WHERE id = ?`), and uses it
+  for **texts and number formats**. A setting such as `en-US` gives English texts and
+  `1,234.567` even when the browser sends German; `de` gives German texts and `1.234,567`.
+- **Order of precedence:** the user setting, then the browser language, then English. An empty
+  or unparsable setting, or a lookup that fails, falls back to the browser language with at
+  most one debug line in the appliance log; the report always renders.
+- **Which user:** plugin API 1.4.2 hands a report's rendering no viewing user, so the report
+  uses the user who ran it (the report result's creator). Without one, the browser language
+  applies as in 1.1.1.
+- **Texts come from the plugin's own English and German bundles**, passed to the template
+  with the data, because the template helper of the plugin API always uses the request
+  locale. Any other language gets English texts with its own number format, as before.
+- The create dialog is unchanged: Morpheus translates the option labels itself, and the
+  validation messages still follow the browser language, since validation gets no user.
+
+### Behaviour changes from 1.1.1
+
+- A user whose Morpheus language differs from the browser language now sees the report in the
+  Morpheus language. 1.1.1 showed the browser language.
+- A viewer other than the user who ran the report sees the report in the runner's language
+  when the runner has a setting. 1.1.1 showed every viewer their own browser language.
+- The report reads one more internal table, `user` (column `locale`), each time it is shown.
+
+### Verified
+
+- 115 Spock unit tests, 0 failures (79 in 1.1.1). New: parsing of the setting (`en-US`, `de`,
+  `de_DE`, blank, `garbage`, over-long text), the precedence (an `en-US` setting with a German
+  browser gives English, a `de` setting gives German, a blank, missing, unparsable or unreadable
+  setting gives the browser language, no request gives English), that the lookup is a single
+  parameterised query, and the real template rendered in English and German from the resolved
+  locale with no `{{i18n}}` helper left. Two tests run the lookup through the plugin API's own
+  `withDbConnection` against a stubbed read-only connection: the user id is bound as the
+  statement's only parameter, the connection is released once, an `en-US` setting renders the
+  report in English despite a German browser, and a failing query falls back to the browser
+  language and still releases the connection.
+- Local build: JDK 17, Gradle 9.8.0, `clean test shadowJar` with `--warning-mode all` and no
+  deprecation warnings; one `morpheus-socket-report-plugin-1.2.0-all.jar` with the same manifest
+  attributes as 1.1.1 apart from the version.
+- On Morpheus 9.0.2 (build 9.0.2-2) with a release candidate built from this source, as a master
+  tenant user whose Morpheus setting is `en-US` while the browser sends German: a report result
+  renders in English with 11.600 sockets in total, equal to `GET /api/license`.
+
+### Not yet verified
+
+- A user with a German setting, and a result opened by a user other than its creator.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/socket-report-v1.1.1...socket-report-v1.2.0
+
 ## 1.1.1
 
 **Fix: the two report options are now bounded, so an extreme value can no longer hang the

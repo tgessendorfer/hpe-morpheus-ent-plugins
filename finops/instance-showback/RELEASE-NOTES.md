@@ -6,6 +6,77 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 1.2.0
+
+**The Costs tab now speaks the language set in the viewer's Morpheus user settings,** the same
+setting the Morpheus UI uses, for its texts and its number formats. Up to 1.1.1 it followed the
+browser language, so on Morpheus 9.0.2 a user with the Morpheus UI in English and a German browser
+saw the Morpheus pages in English and the tab in German. Minor release; plugin code, provider code,
+plugin API 1.4.2 and minimum appliance 9.0.2 unchanged.
+
+### What changed
+
+- **Why:** Morpheus takes its UI language from the user's own setting (the `locale` column of its
+  internal `user` table, for example `en-US`; `GET /api/user-settings` shows it as `locale`). The
+  plugin API's web request carries the browser's `Accept-Language` instead, and plugin API 1.4.2
+  has no locale on `User`. In 1.1.x, texts and number formats both came from the web request.
+- **New rule for the content language:** the viewing user's Morpheus setting, else the browser
+  language, else English. The setting is read with the parameterised query
+  `SELECT locale FROM user WHERE id = ?` over the read-only database connection the tab already
+  uses; `en_US` style values are accepted. An empty value, an unknown language or a failed lookup
+  falls back to the browser language with at most one debug line in the log; the tab still renders.
+- **Which user:** `renderTemplate()` gets no user in plugin API 1.4.2. Morpheus 9.0.2 calls the
+  tab's `show()` (which gets the user) and then `renderTemplate()` in the same request
+  (`InstancesController.show`), so the plugin keeps the user id from `show()` for that one render.
+  Without a preceding `show()` on the request thread there is no user in context and the browser
+  language counts, as before.
+- **Messages from the plugin's own bundles.** The template no longer uses Morpheus' `i18n` helper,
+  which always takes the browser language. The texts are resolved in the content language and passed
+  to the template. Texts exist in English and German as before; any other setting gets English texts
+  and that locale's number format.
+
+### Behaviour changes from 1.1.1
+
+- A user whose Morpheus language differs from the browser language now sees the tab in the Morpheus
+  language: English setting with a German browser gives English texts and `1,234.56`, German setting
+  with an English browser gives German texts and `1.234,56`.
+- With an empty or unknown Morpheus setting, or when the setting cannot be read, nothing changes:
+  browser language, else English.
+- The error message shown when the cost data cannot be loaded follows the same rule once the
+  database connection is open; when the connection itself fails, it is in the browser language.
+- The tab title stays *Costs* in every language (`getName()` has no request context).
+- The plugin now also reads the internal `user` table (`id`, `locale`).
+
+### Verified
+
+- 79 unit tests with plugin API 1.4.2, 0 failures (36 new, each row of a data table counted): the
+  language rule (`en-US` setting with a German browser gives English, `de` setting with an English
+  browser gives German, empty, blank, unknown and malformed settings give the browser language,
+  no setting and no request give English), the query text and that the user id is passed as a
+  parameter, the quiet fallback when the user row is missing or the query fails, no query without a
+  user, the hand-over of the user id from `show()` to one render, English texts for languages
+  without a bundle, equal keys in both bundles, the template rendered with Handlebars in the
+  resolved language and number format, and `renderTemplate()` itself with a stand-in database: it
+  reads the setting of the user from `show()` (`en-US` setting with a German browser gives
+  *Month to date* and `1,234.57`), falls back to the browser language for an empty setting or
+  without a preceding `show()`, and releases the connection. Removing the user lookup from
+  `renderTemplate()`, dropping the user id handed over from `show()`, or not storing it in `show()`
+  each makes tests fail.
+- Local build: JDK 17, Gradle 9.8.0, no deprecation warnings, one jar
+  `morpheus-instance-showback-plugin-1.2.0-all.jar`; manifest attributes unchanged apart from
+  `Plugin-Version`.
+- The call order `show()` then `renderTemplate()` in one request was read from the 9.0.2-2
+  appliance's `InstancesController` bytecode, not observed at runtime.
+- On Morpheus 9.0.2 (build 9.0.2-2) with a release candidate built from this source, as a master
+  tenant user whose Morpheus setting is `en-US` while the browser sends German: the *Costs* tab
+  renders in English with the same figures as 1.1.1 and the last cost run in UTC.
+
+### Not yet verified
+
+- A user with a German setting, a user without a setting, and a sub-tenant user.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/instance-showback-v1.1.1...instance-showback-v1.2.0
+
 ## 1.1.1
 
 **The footer time of the last cost run is now really UTC.** The footer has always said *UTC*, but

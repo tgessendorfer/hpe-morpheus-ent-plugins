@@ -40,7 +40,8 @@ import static com.morpheusdata.tenantchargeback.ChargebackCalculator.*
  * price - cost. An optional additional markup in percent is applied to the list price.
  *
  * process() stores plain, machine-readable values only (they are what the CSV export shows);
- * renderTemplate() formats them in the viewer's locale.
+ * renderTemplate() formats them and resolves the texts in the language of the user's Morpheus
+ * setting (see {@link #viewerLocale}).
  *
  * masterOnly: the report SQL sees all tenants.
  */
@@ -56,16 +57,19 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 	/**
 	 * Instance invoices plus server invoices without an instance, grouped by tenant, group id and
 	 * raw currency. The group id keeps two groups with the same name apart; the name is for display.
-	 * Server invoices can carry a group id with an empty name; aggregate() merges those into the
-	 * one line for servers without a group. If other invoices of the same id, tenant and currency
-	 * carry the name, MAX() returns it and the nameless ones count towards that group.
+	 * Server invoices can carry a group id with an empty name; the name is then looked up in the
+	 * group table (compute_site) by that id, so they count towards their group. Lines without a
+	 * group id, or whose group no longer exists, keep an empty name; aggregate() merges those into
+	 * the one line for servers without a group.
 	 */
 	static final String INVOICE_SQL = '''
 		SELECT a.id AS tenant_id, a.name AS tenant, CAST(a.master_account AS UNSIGNED) AS is_master,
-		       i.site_id AS grp_id, MAX(i.site_name) AS grp, NULLIF(TRIM(i.currency), '') AS currency,
+		       i.site_id AS grp_id, MAX(COALESCE(NULLIF(TRIM(i.site_name), ''), cs.name)) AS grp,
+		       NULLIF(TRIM(i.currency), '') AS currency,
 		       COUNT(*) AS resources,
 		       SUM(COALESCE(i.total_cost, 0)) AS cost, SUM(COALESCE(i.total_price, 0)) AS price
 		FROM account_invoice i JOIN account a ON a.id = i.account_id
+		LEFT JOIN compute_site cs ON cs.id = i.site_id
 		WHERE i.period_interval = 'month' AND i.period = ?
 		  AND (i.ref_type = 'Instance' OR (i.ref_type = 'ComputeServer' AND i.instance_id IS NULL))
 		GROUP BY a.id, a.name, a.master_account, i.site_id, NULLIF(TRIM(i.currency), '')
@@ -75,6 +79,21 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 	static final String MASTER_CURRENCY_SQL = '''
 		SELECT NULLIF(TRIM(currency), '') AS currency FROM account
 		WHERE master_account = 1 ORDER BY id LIMIT 1'''
+
+	/**
+	 * Language setting of a Morpheus user (e.g. 'en-US'). Plugin API 1.4.2 has no locale on the
+	 * User model, and the web request carries the browser's language, not this setting.
+	 */
+	static final String USER_LOCALE_SQL = 'SELECT locale FROM user WHERE id = ?'
+
+	/** Bundle keys (after the provider code) of the texts the template shows. */
+	static final List<String> TEXT_KEYS = [
+		'title', 'currentMonth', 'tenants', 'invoiceTotal', 'inclMarkup',
+		'section.currency', 'section.tenant', 'section.group',
+		'col.tenant', 'col.group', 'col.currency', 'col.resources', 'col.cost', 'col.price',
+		'col.margin', 'col.marginPct', 'col.invoice',
+		'empty', 'noGroup', 'footnote'
+	]
 
 	Plugin plugin
 	MorpheusContext morpheus
@@ -185,7 +204,7 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 			out.collate(50).each { morpheus.report.appendResultRows(reportResult, it).blockingGet() }
 			morpheus.report.updateReportResultStatus(reportResult, ReportResult.Status.ready).blockingAwait()
 		} catch(Exception e) {
-			// The report reads internal tables (account_invoice, account), tested on Morpheus 9.0.2 only.
+			// The report reads internal tables (account_invoice, account, compute_site), tested on Morpheus 9.0.2 only.
 			log.error("Tenant Chargeback report ${reportResult?.id} failed; it reads internal tables tested on Morpheus 9.0.2 only: ${e.message}")
 			log.debug('Tenant Chargeback report failure', e)
 			morpheus.report.updateReportResultStatus(reportResult, ReportResult.Status.failed).blockingAwait()
@@ -194,17 +213,23 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 
 	@Override
 	HTMLResponse renderTemplate(ReportResult reportResult, Map<String, List<ReportResultRow>> reportRowsBySection) {
-		Locale locale = requestLocale()
+		ViewModel<Map> model = new ViewModel<>()
+		model.object = pageModel(reportRowsBySection, viewerLocale(reportResult))
+		getRenderer().renderTemplate('hbs/tenantChargeback', model)
+	}
+
+	/** The template model: stored rows with their formatted values, and the texts, all in {@code locale}. */
+	static Map pageModel(Map<String, List<ReportResultRow>> reportRowsBySection, Locale locale) {
+		Map<String, String> t = texts(locale)
 		List<Map> footer = reportRowsBySection.footer?.collect { it.dataMap } ?: []
 		Map meta = footer.find { it.kind == 'meta' } ?: [:]
-		ViewModel<Map> model = new ViewModel<>()
-		model.object = [
-			rows   : (reportRowsBySection.main?.collect { it.dataMap } ?: []).collect { withTexts(it, locale) },
+		[
+			rows   : (reportRowsBySection.main?.collect { it.dataMap } ?: []).collect { withTexts(it, locale) + [noGroupText: t.noGroup] },
 			tenants: (reportRowsBySection.header?.collect { it.dataMap } ?: []).collect { withTexts(it, locale) },
 			footer : meta + [isCurrent: isTrue(meta.current), markupPercentText: decimalShort(meta.markupPercent ?: '0', locale)],
-			totals : footer.findAll { it.kind == 'total' }.collect { withTexts(it, locale) }
+			totals : footer.findAll { it.kind == 'total' }.collect { withTexts(it, locale) },
+			t      : t
 		]
-		getRenderer().renderTemplate('hbs/tenantChargeback', model)
 	}
 
 	/** Adds the locale-formatted texts the template shows next to the plain stored values. */
@@ -218,22 +243,115 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 		m
 	}
 
-	/** The viewer's locale; English outside a web request or when Morpheus does not provide one. */
-	Locale requestLocale() {
-		try {
-			return morpheus?.webRequest?.locale ?: Locale.ENGLISH
-		} catch(Throwable ignored) {
-			return Locale.ENGLISH
+	/**
+	 * Texts of the template in the language of {@code locale}, keyed by the bundle key with dots
+	 * replaced by underscores (col.cost -> col_cost). The template takes them from the model
+	 * instead of the i18n helper, because that helper always uses the browser's language.
+	 */
+	static Map<String, String> texts(Locale locale) {
+		TEXT_KEYS.collectEntries { String k ->
+			[(k.replace('.', '_')): text("${PROVIDER_CODE}.${k}".toString(), k, locale)]
 		}
 	}
 
-	/** Message from the plugin bundles in the viewer's language, or the English default. */
-	String msg(String key, String defaultText) {
+	/**
+	 * Message from the plugin's own bundles (i18n/messages*.properties) in the bundle language for
+	 * {@code locale}, falling back to the English bundle and then to {@code defaultText}. The bundle
+	 * files are read directly, without the JVM's default locale, so an English setting gives English
+	 * on an appliance with any system locale.
+	 */
+	static String text(String key, String defaultText, Locale locale) {
 		try {
-			def web = morpheus?.webRequest
-			return web ? (web.getMessage(key, null, defaultText, requestLocale()) ?: defaultText) : defaultText
+			String lang = messageLocale(locale).language
+			String v = (lang != 'en' ? bundle(lang)[key] : null) ?: bundle('en')[key]
+			return v ?: defaultText
 		} catch(Throwable ignored) {
 			return defaultText
 		}
+	}
+
+	/** Bundle key that only this plugin's bundles carry; tells them from another jar's i18n/messages. */
+	static final String BUNDLE_MARKER_KEY = "${PROVIDER_CODE}.title".toString()
+
+	private static final Map<String, Properties> BUNDLES = new java.util.concurrent.ConcurrentHashMap<>()
+
+	/**
+	 * The plugin's bundle for a bundle language ('en' = i18n/messages.properties). A class loader
+	 * that asks its parent first could find another i18n/messages*.properties of the same name
+	 * before the plugin's own, so every copy on the class path is checked and the first one that
+	 * carries {@link #BUNDLE_MARKER_KEY} is used. Empty when none does.
+	 */
+	static Properties bundle(String lang) {
+		BUNDLES.computeIfAbsent(lang) { String l ->
+			String name = l == 'en' ? 'i18n/messages.properties' : "i18n/messages_${l}.properties".toString()
+			ownBundle(Collections.list(TenantChargebackReportProvider.classLoader.getResources(name)))
+		}
+	}
+
+	/** The first of {@code urls} that carries {@link #BUNDLE_MARKER_KEY}, or an empty bundle. */
+	static Properties ownBundle(List<URL> urls) {
+		for(URL u : urls) {
+			Properties p = new Properties()
+			// The bundles are ASCII with escaped umlauts, which Properties.load reads correctly.
+			u.openStream().withCloseable { InputStream is -> p.load(is) }
+			if(p.containsKey(BUNDLE_MARKER_KEY)) return p
+		}
+		new Properties()
+	}
+
+	/**
+	 * Locale the report page is shown in: the Morpheus language setting of the user who ran the
+	 * report, else the browser's language, else English. renderTemplate() gets no viewing user and
+	 * plugin API 1.4.2 has no current user, so the report result's creator stands in for the viewer.
+	 * A failed lookup logs one debug line and falls back; it never breaks the page.
+	 */
+	Locale viewerLocale(ReportResult reportResult) {
+		Long userId = null
+		try {
+			userId = reportResult?.createdBy?.id
+		} catch(Throwable ignored) {
+			// no creator: browser language
+		}
+		if(userId == null) {
+			log.debug("Tenant Chargeback: report result ${reportResult?.id} has no creator, using the browser language")
+		}
+		resolveLocale(userId != null ? userLocaleSetting(userId) : null, browserLocale())
+	}
+
+	/** The user's language setting (user.locale), or null when it is empty or cannot be read. */
+	String userLocaleSetting(Long userId) {
+		try {
+			return queryFirstRow(USER_LOCALE_SQL, [userId])?.get('locale')?.toString()
+		} catch(Throwable e) {
+			log.debug("Tenant Chargeback: language setting of user ${userId} not read, using the browser language: ${e.message}")
+			return null
+		}
+	}
+
+	/** One row of a parameterised query over the read-only report connection. */
+	protected Map queryFirstRow(String query, List params) {
+		(Map) withDbConnection { Connection c -> new Sql(c).firstRow(query, params) }
+	}
+
+	/** Locale of the web request (the browser's Accept-Language), or null outside a request. */
+	Locale browserLocale() {
+		try {
+			return morpheus?.webRequest?.locale
+		} catch(Throwable ignored) {
+			return null
+		}
+	}
+
+	/** The browser's locale; English outside a web request or when Morpheus does not provide one. */
+	Locale requestLocale() {
+		browserLocale() ?: Locale.ENGLISH
+	}
+
+	/**
+	 * Message from the plugin bundles in the browser's language, or the English default. Used for
+	 * the option validation, which gets no user to read a language setting from.
+	 */
+	String msg(String key, String defaultText) {
+		text(key, defaultText, requestLocale())
 	}
 }
