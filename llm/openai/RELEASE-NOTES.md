@@ -6,6 +6,34 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 0.1.1
+
+**Build update only: the plugin now builds with Gradle 9.8.0 instead of the end-of-life Gradle
+7.5.1.** No change in behaviour, settings or plugin code.
+
+- **Gradle 9.8.0**, with the wrapper checking the distribution's SHA-256 checksum, and the Gradle
+  wrapper scripts regenerated for it.
+- **Shadow 9.6.1** (`com.gradleup.shadow`) replaces Shadow 6.0.0, which does not run on Gradle 9.
+  The jar keeps its name, `morpheus-openai-plugin-<version>-all.jar`.
+- **No `mavenLocal()`** in the build: dependencies come only from Maven Central, the Gradle plugin
+  portal and the asset-pipeline repositories, so a local Maven cache cannot change what is built.
+- Java 11 bytecode as before, set through a `java {}` block.
+
+### Verified
+
+- Local build with JDK 17 and Gradle 9.8.0: 19 tests, 0 failures; the HTTP client tests also
+  pass against plugin API 1.4.1.
+- The jar has the same entries as the 0.1.0 jar, and its manifest differs only in `Plugin-Version`.
+
+### Not yet verified
+
+- The jar on the appliance. The code is the same as 0.1.0, which runs on Morpheus 9.0.2.
+- The asset-pipeline Gradle plugin 4.4.0 still uses an API that Gradle 9.8 reports as deprecated
+  (`Task.project` at execution time). It works on Gradle 9 and has to change before Gradle 10;
+  asset-pipeline 5.0.9 does not build this plugin.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.0...openai-v0.1.1
+
 ## 0.1.0
 
 **First release: any OpenAI-compatible chat API as a Morpheus LLM integration, over HTTP or

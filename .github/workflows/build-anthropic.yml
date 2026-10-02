@@ -34,6 +34,11 @@ jobs:
       - name: Test and build
         run: ./gradlew clean test shadowJar --no-daemon
 
+      # Morpheus 9.0.1 and 9.0.2 run plugin API 1.4.1, which sends request bodies differently from the 1.4.2
+      # the build compiles against. The HTTP client tests must pass on the runtime version too.
+      - name: Test the HTTP client against plugin API 1.4.1
+        run: ./gradlew test --tests '*ApiServiceSpec*' -PmorpheusPluginApiVersion=1.4.1 --no-daemon
+
       - name: Publish test report
         uses: actions/upload-artifact@v7
         if: always()

@@ -128,11 +128,11 @@ verified that path.
 ### 2. Download the plugin JAR
 
 Grab `morpheus-anthropic-plugin-<version>-all.jar` from the
-[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/anthropic-v1.6.1) — it is the shaded (`-all`) JAR, which bundles the
+[latest release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/anthropic-v1.6.2) — it is the shaded (`-all`) JAR, which bundles the
 dependencies. The plain `.jar` is not what you want.
 
 ```bash
-gh release download anthropic-v1.6.1 --repo tgessendorfer/hpe-morpheus-ent-plugins -p '*-all.jar'
+gh release download anthropic-v1.6.2 --repo tgessendorfer/hpe-morpheus-ent-plugins -p '*-all.jar'
 ```
 
 Or [build it from source](#build-from-source).
@@ -611,7 +611,7 @@ API can fail at class-load time. If the versions differ and the plugin will not 
 
 ## Build from source
 
-Requires JDK 11–17 (**not 21** — Groovy 3.0.9) and the bundled Gradle wrapper. Run it in `llm/anthropic`.
+Requires JDK 17 (**not 21** — Groovy 3.0.9) and the bundled Gradle wrapper. Run it in `llm/anthropic`.
 
 ```bash
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
