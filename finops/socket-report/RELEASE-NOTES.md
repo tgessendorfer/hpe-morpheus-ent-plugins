@@ -58,6 +58,10 @@ accepted and the report thread then tried to write it out in full, with two bill
 
 Plugin API 1.4.2, minimum appliance 9.0.2.
 
+Built by the release workflow from the source at tag `socket-report-v1.1.1`.
+
+sha256 `1d88cf0531196a6a87f513eeb51342a24628ffbb0d7aa63c6912abf2a40dfe79`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/socket-report-v1.1.0...socket-report-v1.1.1
 
 ## 1.1.0

@@ -32,6 +32,10 @@ shaded `-all.jar` is attached.
   (`Task.project` at execution time). It works on Gradle 9 and has to change before Gradle 10;
   asset-pipeline 5.0.9 does not build this plugin.
 
+Built by the release workflow from the source at tag `openai-v0.1.1`.
+
+sha256 `a37cebb0bc51c1f602b3b54b01a303f27dc27819307ff0bd40fe1b0613f81ccc`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.0...openai-v0.1.1
 
 ## 0.1.0

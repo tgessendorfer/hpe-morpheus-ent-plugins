@@ -55,6 +55,10 @@ the precision it is calculated with.** Plugin API 1.4.2, minimum appliance 9.0.2
 - Live on the appliance: 1.1.1 has not been uploaded or run on Morpheus 9.0.2 yet, including the
   query on the group id against the internal `account_invoice` table.
 
+Built by the release workflow from the source at tag `tenant-chargeback-v1.1.1`.
+
+sha256 `d68eddb794eb2ad7aae521634923b60a7c4722754a8ecc9d6c830e7062ef23e2`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.1.0...tenant-chargeback-v1.1.1
 
 ## 1.1.0

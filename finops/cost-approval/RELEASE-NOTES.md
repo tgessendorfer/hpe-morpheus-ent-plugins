@@ -67,6 +67,10 @@ codes, plugin API 1.4.2 and minimum appliance 9.0.2 are unchanged; no new option
 - Live on the appliance: 1.1.1 has not been uploaded or run against Morpheus 9.0.2 yet. The
   approval flow itself is unchanged from 1.1.0, which was verified live.
 
+Built by the release workflow from the source at tag `cost-approval-v1.1.1`.
+
+sha256 `254e91fbf2f697acc4029e73355aefa0b79b45e1fb1ff01be6aef745ecf117f3`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.1.0...cost-approval-v1.1.1
 
 ## 1.1.0

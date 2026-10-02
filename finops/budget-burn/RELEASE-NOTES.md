@@ -49,6 +49,10 @@ the page layout are unchanged.
 - Live on the appliance: 1.1.1 has not been uploaded to Morpheus 9.0.2 yet, so the page with a
   budget of 0 and the new year-to-date figures have not been checked there.
 
+Built by the release workflow from the source at tag `budget-burn-v1.1.1`.
+
+sha256 `74ae571f3bd8bce2fe7648b8dd1a7dd48d1eb3f00bcf77e86a0d5b590db90bbc`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.1.0...budget-burn-v1.1.1
 
 ## 1.1.0

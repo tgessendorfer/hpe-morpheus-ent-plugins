@@ -32,6 +32,10 @@ shaded `-all.jar` is attached. Notes for 1.4.1 and earlier exist only there.
   (`Task.project` at execution time). It works on Gradle 9 and has to change before Gradle 10;
   asset-pipeline 5.0.9 does not build this plugin.
 
+Built by the release workflow from the source at tag `anthropic-v1.6.2`.
+
+sha256 `f55353ccf5dff3b7865e8ed874e024763958cf06b1aa73da7e374e05839d30c3`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.6.1...anthropic-v1.6.2
 
 ## 1.6.1

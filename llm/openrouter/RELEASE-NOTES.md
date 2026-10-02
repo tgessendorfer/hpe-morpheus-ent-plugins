@@ -32,6 +32,10 @@ shaded `-all.jar` is attached.
   (`Task.project` at execution time). It works on Gradle 9 and has to change before Gradle 10;
   asset-pipeline 5.0.9 does not build this plugin.
 
+Built by the release workflow from the source at tag `openrouter-v0.2.1`.
+
+sha256 `81eecde692377e6e369c455149ce67392f3ce31709d4f9b6d74c3cf23f284ae2`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.2.0...openrouter-v0.2.1
 
 ## 0.2.0

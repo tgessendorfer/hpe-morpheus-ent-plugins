@@ -60,6 +60,10 @@ appliance JVM. Patch release; no new options, plugin code and provider code unch
 - Live on the appliance: not done yet. 1.1.1 has not been uploaded to HPE Morpheus Enterprise
   9.0.2 so far.
 
+Built by the release workflow from the source at tag `instance-showback-v1.1.1`.
+
+sha256 `21983ae61c1e51e50f96347e11235d736558e90b95e6c3ce89177a59daaafc9b`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/instance-showback-v1.1.0...instance-showback-v1.1.1
 
 ## 1.1.0

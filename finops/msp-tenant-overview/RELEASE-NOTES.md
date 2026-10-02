@@ -49,6 +49,10 @@ plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and option
 
 - Live on the appliance: 1.1.1 has not been uploaded to a Morpheus 9.0.2 appliance yet.
 
+Built by the release workflow from the source at tag `msp-tenant-overview-v1.1.1`.
+
+sha256 `07cd4a696d8a8b8efc76b3c0b696a52c6766862af6d09c861b0c7c950600dc25`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.1.0...msp-tenant-overview-v1.1.1
 
 ## 1.1.0
