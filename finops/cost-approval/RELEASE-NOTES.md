@@ -57,10 +57,17 @@ instead of always being English.** Plugin code, provider code, option codes, pac
   became `denied` at the next monitor run (about 4 minutes), and approval and item show the English
   reason *Above cost threshold of 10.00 EUR/month (requested 12.50 EUR). Please contact your
   provider for approval.*
+- The release jar replaced the release candidate on the same Morpheus 9.0.2 appliance in place
+  (same plugin id), status `loaded`, valid and enabled. Its source equals the candidate's apart
+  from the version; the pages were not opened again with it.
 
 ### Not yet verified
 
 - A requesting user with a German setting (expected: the German reason).
+
+Built by the release workflow from the source at tag `cost-approval-v1.2.0`.
+
+sha256 `956b429752ea32f87bcc531592949674ba4ce1bd372ae0bf1321234dea5b3812`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.1.1...cost-approval-v1.2.0
 

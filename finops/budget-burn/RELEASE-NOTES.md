@@ -61,10 +61,17 @@ model, so the plugin now reads the setting itself.
 - On Morpheus 9.0.2 (build 9.0.2-2) with a release candidate built from this source, as a master
   tenant user whose Morpheus setting is `en-US` while the browser sends German: the page renders in
   English with the same figures as 1.1.1 (number format with a decimal point).
+- The release jar replaced the release candidate on the same Morpheus 9.0.2 appliance in place
+  (same plugin id), status `loaded`, valid and enabled. Its source equals the candidate's apart
+  from the version; the pages were not opened again with it.
 
 ### Not yet verified
 
 - A user with a German setting, and a sub-tenant user.
+
+Built by the release workflow from the source at tag `budget-burn-v1.2.0`.
+
+sha256 `e6ec2abef31706af1e5fcbb43797c9a7e807352521dfac36d179b973d239aed8`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.1.1...budget-burn-v1.2.0
 

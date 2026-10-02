@@ -59,10 +59,17 @@ the browser's `Accept-Language`, and the API's user model carries no language.
 - On Morpheus 9.0.2 (build 9.0.2-2) with a release candidate built from this source, as a master
   tenant user whose Morpheus setting is `en-US` while the browser sends German: a report result
   renders in English with 11.600 sockets in total, equal to `GET /api/license`.
+- The release jar replaced the release candidate on the same Morpheus 9.0.2 appliance in place
+  (same plugin id), status `loaded`, valid and enabled. Its source equals the candidate's apart
+  from the version; the pages were not opened again with it.
 
 ### Not yet verified
 
 - A user with a German setting, and a result opened by a user other than its creator.
+
+Built by the release workflow from the source at tag `socket-report-v1.2.0`.
+
+sha256 `ec7733bd38ee125f0d9773d3b2f998a3b03bcd1e7f50d4a81098177076ecb029`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/socket-report-v1.1.1...socket-report-v1.2.0
 

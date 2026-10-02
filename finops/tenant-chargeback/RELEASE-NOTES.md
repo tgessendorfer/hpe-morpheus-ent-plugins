@@ -79,11 +79,18 @@ their real group.** Plugin API 1.4.2, minimum appliance 9.0.2, no new options.
   another) and *Servers without a group* keeps only the lines without a group id; every tenant and
   currency adds up to the same amounts as before. Within a tenant the currency rows may come in a
   different order than in 1.1.2.
+- The release jar replaced the release candidate on the same Morpheus 9.0.2 appliance in place
+  (same plugin id), status `loaded`, valid and enabled. Its source equals the candidate's apart
+  from the version; the pages were not opened again with it.
 
 ### Not yet verified
 
 - A user with a German setting, and a result opened by a user other than its creator. The
   creator is used because the plugin API gives the page no viewing user.
+
+Built by the release workflow from the source at tag `tenant-chargeback-v1.2.0`.
+
+sha256 `bf1eea2e574151d6e71aeba799607042b6375834745956cefefa7e03b8fdd383`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.1.2...tenant-chargeback-v1.2.0
 

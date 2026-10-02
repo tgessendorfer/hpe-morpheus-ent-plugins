@@ -71,7 +71,7 @@ report runs, with a warning in the appliance log.
 
 | Plugin version | Plugin API | Min. appliance | Tested appliance | Internal tables read |
 |---|---|---|---|---|
-| 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0 release candidate, master tenant) | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account`, `user` (language setting) |
+| 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0, master tenant) | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account`, `user` (language setting) |
 | 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0, 1.1.1) | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account` |
 

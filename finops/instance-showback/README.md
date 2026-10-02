@@ -103,7 +103,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 
 | Plugin version | Plugin API | Min. appliance | Tested appliance | Internal tables read |
 |---|---|---|---|---|
-| 1.2.0 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | 9.0.2 (1.2.0 release candidate, master tenant) | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`), `user` (`id`, `locale`) |
+| 1.2.0 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | 9.0.2 (1.2.0, master tenant) | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`), `user` (`id`, `locale`) |
 | 1.1.1 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | 9.0.2 (1.1.0; 1.1.1 as master) | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`) |
 | 1.1.0 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`) |
 

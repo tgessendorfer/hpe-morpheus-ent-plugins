@@ -108,7 +108,7 @@ them itself. Texts written into a request follow the requesting user's language 
 
 | Plugin version | Plugin API | Min appliance | Tested appliance | Internal DB tables read |
 |---|---|---|---|---|
-| [1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.2.0) | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0 release candidate, master tenant) | `account` (`currency`, `master_account`), only when no currency is known; `user` (`locale`) of the requesting user |
+| [1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.2.0) | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0, master tenant) | `account` (`currency`, `master_account`), only when no currency is known; `user` (`locale`) of the requesting user |
 | [1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.1.1) | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 loads, not run) | `account` (`currency`, `master_account`), only when no currency is known |
 | [1.1.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.1.0) | 1.4.2 | 9.0.2 | 9.0.2 | `account` (`currency`, `master_account`), only when no currency is known |
 

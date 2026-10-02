@@ -70,10 +70,17 @@ plugin API 1.4.2 and minimum appliance 9.0.2 unchanged.
 - On Morpheus 9.0.2 (build 9.0.2-2) with a release candidate built from this source, as a master
   tenant user whose Morpheus setting is `en-US` while the browser sends German: the *Costs* tab
   renders in English with the same figures as 1.1.1 and the last cost run in UTC.
+- The release jar replaced the release candidate on the same Morpheus 9.0.2 appliance in place
+  (same plugin id), status `loaded`, valid and enabled. Its source equals the candidate's apart
+  from the version; the pages were not opened again with it.
 
 ### Not yet verified
 
 - A user with a German setting, a user without a setting, and a sub-tenant user.
+
+Built by the release workflow from the source at tag `instance-showback-v1.2.0`.
+
+sha256 `b8aa2e188d478db55893d3b20058bba8cd64ed37cbd8f2a3799e6976b75f3d50`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/instance-showback-v1.1.1...instance-showback-v1.2.0
 

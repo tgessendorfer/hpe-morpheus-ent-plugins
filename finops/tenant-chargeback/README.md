@@ -135,7 +135,7 @@ Morpheus itself through their i18n codes, not by the plugin.
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
-| 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0 release candidate, master tenant) | `account_invoice`, `account`, `compute_site`, `user` |
+| 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0, master tenant) | `account_invoice`, `account`, `compute_site`, `user` |
 | 1.1.2 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0, 1.1.2) | `account_invoice`, `account` |
 | 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 run: split no-group rows, fixed in 1.1.2) | `account_invoice`, `account` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `account_invoice`, `account` |

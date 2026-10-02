@@ -50,10 +50,17 @@ unchanged.
 - On Morpheus 9.0.2 (build 9.0.2-2) with a release candidate built from this source, as a master
   tenant user whose Morpheus setting is `en-US` while the browser sends German: the page renders in
   English with the same figures as 1.1.1.
+- The release jar replaced the release candidate on the same Morpheus 9.0.2 appliance in place
+  (same plugin id), status `loaded`, valid and enabled. Its source equals the candidate's apart
+  from the version; the pages were not opened again with it.
 
 ### Not yet verified
 
 - A user with a German setting, and that a sub-tenant user still sees no menu entry.
+
+Built by the release workflow from the source at tag `msp-tenant-overview-v1.2.0`.
+
+sha256 `6087b7c48dd3b47ba5c00dc10195d95317f984be049b61a74dbfbf53ba9131f1`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.1.1...msp-tenant-overview-v1.2.0
 
