@@ -23,9 +23,12 @@ One row per budget with `period = year` for the current calendar year:
 - **Forecast** – `total_price` of the same invoices (Morpheus' projection for the whole month),
   with a bar showing forecast vs. budget.
 - **Status** – *On track* below 80 %, *Warning* from 80 % to 100 %, *Over budget* above 100 %
-  of the monthly budget (forecast based).
+  of the monthly budget (forecast based). A monthly budget of 0 is *Over budget* as soon as
+  there is a forecast, and *On track* without one; its percentages show `-` instead of a number,
+  and the bar is full when there is spend.
 - **Year to date** – closed months (`total_price`) plus the current month's forecast, against
-  the budget for January to the current month.
+  the budget for January to the current month. Quarterly and yearly shares are rounded once for
+  the whole period, so in December a yearly budget shows exactly its amount.
 
 Spend means the price the tenant pays (including any tenant markup), not the provider's cost.
 Invoices counted are monthly invoices of instances and of servers that belong to no instance,
@@ -90,6 +93,7 @@ None. The page has no settings; budgets are managed in Morpheus under
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 not yet) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 
 Queries internal tables, tested on 9.0.2 only, may break on upgrade.
@@ -97,13 +101,13 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 ## Install
 
 Download `morpheus-budget-burn-plugin-<version>-all.jar` from the
-[release budget-burn-v1.1.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/budget-burn-v1.1.0) (tag
+[release budget-burn-v1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/budget-burn-v1.1.1) (tag
 `budget-burn-v<version>`), then upload it under *Administration → Integrations → Plugins →
 Add*. Updating to a newer version with the same plugin code replaces the plugin in place.
 
 ## Build
 
-JDK 17 (the jar targets Java 11):
+JDK 17 (the jar targets Java 11); the wrapper fetches Gradle 9.8.0 and checks its SHA-256:
 
 ```
 ./gradlew clean test shadowJar

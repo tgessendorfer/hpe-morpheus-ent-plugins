@@ -93,6 +93,34 @@ class TenantChargebackReportProviderSpec extends Specification {
 		'2026-00' | '0'    | false | 'chargebackMonth'
 		'2026-13' | '0'    | false | 'chargebackMonth'
 		'2026-09' | 'ten'  | false | 'markupPercent'
+		'2026-09' | '1000' | true  | null
+		'2026-09' | '7.1234' | true | null
+		'2026-09' | '-5'   | false | 'markupPercent'
+		'2026-09' | '1e3'  | false | 'markupPercent'
+		'2026-09' | '1E-2' | false | 'markupPercent'
+		'2026-09' | '1000.01' | false | 'markupPercent'
+		'2026-09' | '7.12345' | false | 'markupPercent'
+	}
+
+	def "the markup error names the accepted range in English and German"() {
+		given:
+		Properties en = load('i18n/messages.properties')
+		Properties de = load('i18n/messages_de.properties')
+
+		expect:
+		en.getProperty('tenant-chargeback-report.error.markup').contains('0 to 1000')
+		de.getProperty('tenant-chargeback-report.error.markup').contains('0 bis 1000')
+		provider.validateOptions([config: [markupPercent: '-5']]).errors.markupPercent.contains('0 to 1000')
+	}
+
+	def "the invoice query groups by group id, not by group name"() {
+		given:
+		String groupBy = TenantChargebackReportProvider.INVOICE_SQL.find(/(?s)GROUP BY(.*?)ORDER BY/) { all, g -> g }
+
+		expect:
+		groupBy.contains('i.site_id')
+		!groupBy.contains('site_name')
+		TenantChargebackReportProvider.INVOICE_SQL.contains('i.site_id AS grp_id')
 	}
 
 	def "without a web request messages fall back to English and the locale to ENGLISH"() {

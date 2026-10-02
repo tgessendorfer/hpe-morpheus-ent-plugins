@@ -39,6 +39,18 @@ class ChargebackCalculator {
 	/** Accepted month input: YYYY-MM (or YYYYMM), month 01 to 12. */
 	static final String MONTH_PATTERN = /^\d{4}-?(0[1-9]|1[0-2])$/
 
+	/** Accepted markup input: digits with an optional decimal point or comma (5, 7.5, 7,5, .5); no sign, no exponent. */
+	static final String MARKUP_PATTERN = /^(\d+([.,]\d*)?|[.,]\d+)$/
+
+	/** Highest additional markup in percent. */
+	static final BigDecimal MAX_MARKUP_PERCENT = 1000G
+
+	/**
+	 * Decimals of a percent the markup may carry. {@link #markupFactor} divides by 100 at six
+	 * decimals, so four decimals of a percent are calculated exactly and shown in full.
+	 */
+	static final int MARKUP_DECIMALS = 4
+
 	/**
 	 * Safe map lookup. Morpheus passes org.grails.web.json.JSONObject, whose get() throws on a
 	 * missing key, so containsKey is checked first.
@@ -84,10 +96,20 @@ class ChargebackCalculator {
 		new BigDecimal(v.toString().trim())
 	}
 
-	/** Percentage input; a decimal comma is accepted (7,5 = 7.5). Empty = 0. Throws NumberFormatException otherwise. */
+	/**
+	 * Additional markup input; a decimal comma is accepted (7,5 = 7.5). Empty = 0. Throws
+	 * NumberFormatException for anything else: text, a sign, an exponent, more than
+	 * {@link #MARKUP_DECIMALS} decimals (trailing zeros do not count) or more than
+	 * {@link #MAX_MARKUP_PERCENT}.
+	 */
 	static BigDecimal parsePercent(String v) {
 		if(v == null || v.trim().isEmpty()) return BigDecimal.ZERO
-		num(v.trim().replace(',', '.'))
+		String s = v.trim()
+		if(!(s ==~ MARKUP_PATTERN)) throw new NumberFormatException("Not a markup percentage: ${s}")
+		BigDecimal p = new BigDecimal(s.replace(',', '.'))
+		if(p > MAX_MARKUP_PERCENT) throw new NumberFormatException("Markup above ${MAX_MARKUP_PERCENT} %: ${s}")
+		if(p.stripTrailingZeros().scale() > MARKUP_DECIMALS) throw new NumberFormatException("Markup with more than ${MARKUP_DECIMALS} decimals: ${s}")
+		p
 	}
 
 	/** Rounded to cents, half up. */
@@ -137,11 +159,14 @@ class ChargebackCalculator {
 		f.format(num(v))
 	}
 
-	/** Locale-aware number with up to two decimals and no trailing zeros, for the markup option. */
+	/**
+	 * Locale-aware number with up to {@link #MARKUP_DECIMALS} decimals and no trailing zeros, for
+	 * the markup option: the same precision the invoice amount is calculated with.
+	 */
 	static String decimalShort(def v, Locale locale) {
 		NumberFormat f = NumberFormat.getNumberInstance(locale ?: Locale.ENGLISH)
 		f.minimumFractionDigits = 0
-		f.maximumFractionDigits = 2
+		f.maximumFractionDigits = MARKUP_DECIMALS
 		f.roundingMode = RoundingMode.HALF_UP
 		f.format(num(v))
 	}
@@ -154,7 +179,9 @@ class ChargebackCalculator {
 	 * Aggregates raw invoice rows (one per tenant, group and raw currency, as the SQL returns
 	 * them) into the three report levels. Each input row needs tenant (name), isMaster, grp (null
 	 * for servers without a group), currency (raw, may be empty), resources, cost and price;
-	 * tenantId is optional and keeps two tenants with the same name apart.
+	 * tenantId is optional and keeps two tenants with the same name apart, grpId likewise keeps
+	 * two groups with the same name apart. Without grpId the group name is the key; without both
+	 * the row belongs to the one line for servers without a group.
 	 *
 	 * Rows whose raw currency is empty are resolved with {@link #resolveCurrency} and merged with
 	 * rows that already carry that currency, so a group never shows twice for one currency.
@@ -170,7 +197,8 @@ class ChargebackCalculator {
 			String cur = resolveCurrency(r.currency, masterCurrency)
 			String grp = r.grp?.toString()?.trim() ?: null
 			def tenantKey = r.tenantId != null ? r.tenantId.toString() : r.tenant?.toString()
-			List key = [tenantKey, grp, cur]
+			String groupKey = r.grpId != null ? "id:${r.grpId}".toString() : (grp ? "name:${grp}".toString() : null)
+			List key = [tenantKey, groupKey, cur]
 			Map line = lines.get(key)
 			if(line == null) {
 				line = [tenantKey: tenantKey, tenant: r.tenant?.toString(), group: grp, currency: cur, cost: 0G, price: 0G, resources: 0]

@@ -16,6 +16,13 @@
 package com.morpheusdata.instanceshowback
 
 import java.math.RoundingMode
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 /**
  * Pure logic of the Costs tab: currency resolution, grouping per month and currency,
@@ -34,6 +41,9 @@ class ShowbackCalculator {
 	static final Locale DEFAULT_LOCALE = Locale.ENGLISH
 
 	static final List<String> AMOUNT_FIELDS = ['price', 'running', 'compute', 'storage', 'license']
+
+	/** Footer time of the last cost run; the template appends "UTC". */
+	static final DateTimeFormatter UTC_MINUTE = DateTimeFormatter.ofPattern('yyyy-MM-dd HH:mm', Locale.ROOT)
 
 	/** null, empty and non-numeric values count as zero. */
 	static BigDecimal num(def v) {
@@ -81,6 +91,46 @@ class ShowbackCalculator {
 		}
 	}
 
+	/**
+	 * A last_cost_date value as a date-time in UTC, or null.
+	 *
+	 * The JDBC driver may hand the DATETIME column over as java.sql.Timestamp or as
+	 * java.time.LocalDateTime, depending on driver and version:
+	 * - Timestamp (any java.util.Date), Instant, OffsetDateTime, ZonedDateTime carry an
+	 *   instant and are converted to UTC. Timestamp.toString() would use the JVM time zone.
+	 * - LocalDateTime is the column's wall clock without a zone. Morpheus writes these
+	 *   columns in UTC (its JVM runs with user.timezone=UTC), so it is taken as UTC as is.
+	 * - Text in the form yyyy-MM-dd HH:mm[...] is taken as a UTC wall clock as well.
+	 * Anything else gives null.
+	 */
+	static LocalDateTime utcDateTime(def v) {
+		if (v == null) return null
+		if (v instanceof LocalDateTime) return (LocalDateTime) v
+		if (v instanceof Date) return LocalDateTime.ofInstant(((Date) v).toInstant(), ZoneOffset.UTC)
+		if (v instanceof Instant) return LocalDateTime.ofInstant((Instant) v, ZoneOffset.UTC)
+		if (v instanceof OffsetDateTime) return ((OffsetDateTime) v).withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime()
+		if (v instanceof ZonedDateTime) return ((ZonedDateTime) v).withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime()
+		String t = v.toString().trim().replace('T', ' ')
+		if (t.length() < 16) return null
+		try {
+			return LocalDateTime.parse(t.take(16), UTC_MINUTE)
+		} catch (DateTimeParseException ignored) {
+			return null
+		}
+	}
+
+	/** yyyy-MM-dd HH:mm in UTC, or '-' when the value is missing or not a date-time. */
+	static String utcText(def v) {
+		LocalDateTime t = utcDateTime(v)
+		t != null ? t.format(UTC_MINUTE) : '-'
+	}
+
+	/** True when a is a later date-time than b; a value that is not a date-time never wins. */
+	static boolean later(def a, def b) {
+		LocalDateTime ta = utcDateTime(a), tb = utcDateTime(b)
+		ta != null && (tb == null || ta.isAfter(tb))
+	}
+
 	/** yyyyMM to yyyy-MM. */
 	static String monthText(String period) {
 		(period?.length() == 6) ? "${period.substring(0, 4)}-${period.substring(4)}".toString() : (period ?: '-')
@@ -106,7 +156,7 @@ class ShowbackCalculator {
 			}
 			AMOUNT_FIELDS.each { m[it] = (m[it] as BigDecimal) + num(r[it]) }
 			if (r.plan && !m.plan) m.plan = r.plan.toString()
-			if (r.updated != null && (m.updated == null || r.updated.toString() > m.updated.toString())) m.updated = r.updated
+			if (later(r.updated, m.updated)) m.updated = r.updated
 		}
 		merged.values().sort { Map a, Map b -> (b.period <=> a.period) ?: (a.currency <=> b.currency) }
 	}
@@ -162,7 +212,7 @@ class ShowbackCalculator {
 			}
 			[month: monthText(p), amounts: amounts, has: !amounts.isEmpty(), current: p == currentPeriod]
 		}
-		def updated = curRows.collect { it.updated }.findAll { it != null }.max { it.toString() }
+		def updated = curRows.collect { it.updated }.inject(null) { def best, def u -> later(u, best) ? u : best }
 		[
 			hasData      : !grouped.isEmpty(),
 			hasCurrent   : !current.isEmpty(),
@@ -173,7 +223,7 @@ class ShowbackCalculator {
 			day          : now.get(Calendar.DAY_OF_MONTH),
 			days         : now.getActualMaximum(Calendar.DAY_OF_MONTH),
 			history      : history,
-			updated      : updated != null ? updated.toString().take(16) : '-'
+			updated      : utcText(updated)
 		]
 	}
 }

@@ -1,7 +1,10 @@
 package com.morpheusdata.socketreport
 
 import spock.lang.Specification
+import spock.lang.Timeout
 import spock.lang.Unroll
+
+import java.util.concurrent.TimeUnit
 
 /**
  * Socket arithmetic: option parsing, ratio division, host defaults, rounding, aggregation
@@ -27,6 +30,81 @@ class SocketMathSpec extends Specification {
 		'-3'    | null     | false
 		'abc'   | null     | false
 		'1,5'   | null     | false
+	}
+
+	@Timeout(value = 10, unit = TimeUnit.SECONDS)
+	@Unroll
+	def "option '#raw' is bounded: valid #valid, out of range #outOfRange"() {
+		expect:
+		SocketMath.isValidOption(raw) == valid
+		SocketMath.isOutOfRange(raw) == outOfRange
+		(SocketMath.parsePositive(raw) != null) == valid
+
+		where:
+		raw                    | valid | outOfRange
+		'1000000'              | true  | false
+		'1000000.000'          | true  | false
+		'0.001'                | true  | false
+		'7.500000'             | true  | false
+		'1000000.001'          | false | true
+		'2000000'              | false | true
+		'0.0001'               | false | true
+		'1e2'                  | false | true
+		'1E2'                  | false | true
+		'1e2000000000'         | false | true
+		'1e-2000000000'        | false | true
+		'9' * 40               | false | true
+		'0e5'                  | false | false
+		'-1e2'                 | false | false
+		'abc'                  | false | false
+		1000000G               | true  | false
+		new BigDecimal('1E+3') | true  | false
+		new BigDecimal('1E+2000000000') | false | true
+	}
+
+	@Timeout(value = 5, unit = TimeUnit.SECONDS)
+	@Unroll
+	def "a long option text of #length characters is classified in linear time: out of range #outOfRange"() {
+		expect:
+		SocketMath.isValidOption(raw) == false
+		SocketMath.isOutOfRange(raw) == outOfRange
+
+		where:
+		raw                              | outOfRange
+		('1' * 30000) + 'x'              | false
+		'1.' + ('1' * 30000) + 'x'       | false
+		('1' * 30000) + 'e' + ('1' * 30000) + 'x' | false
+		('1' * 30000) + 'e5'             | true
+		('0' * 30000) + 'e5'             | false
+		('9' * 100000)                   | true
+		('1' * 100000) + 'x'             | false
+
+		length = raw.length()
+	}
+
+	@Timeout(value = 10, unit = TimeUnit.SECONDS)
+	def "an exponent option of 1e2000000000 falls back to the default without expanding it"() {
+		expect:
+		SocketMath.positiveOr('1e2000000000', SocketMath.DEFAULT_VMS_PER_SOCKET) == 15G
+		SocketMath.positiveOr(new BigDecimal('1E+2000000000'), SocketMath.DEFAULT_HOST_SOCKETS) == 2G
+		SocketMath.summarize([], SocketMath.positiveOr('1e2000000000', SocketMath.DEFAULT_VMS_PER_SOCKET), 2G).footer.vmsPerSocket == '15'
+	}
+
+	@Timeout(value = 10, unit = TimeUnit.SECONDS)
+	def "plainOption refuses a value outside the option bounds instead of expanding it"() {
+		when:
+		SocketMath.plainOption(new BigDecimal('1E+2000000000'))
+
+		then:
+		thrown(IllegalArgumentException)
+
+		when:
+		String upper = SocketMath.plainOption(1000000G)
+		String fraction = SocketMath.plainOption(new BigDecimal('7.500'))
+
+		then:
+		upper == '1000000'
+		fraction == '7.5'
 	}
 
 	def "an invalid or empty option falls back to the default"() {

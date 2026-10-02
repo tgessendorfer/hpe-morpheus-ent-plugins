@@ -51,6 +51,10 @@ class BudgetBurnAnalyticsProvider extends AbstractAnalyticsProvider {
 
 	static final String PROVIDER_CODE = 'budget-burn-analytics'
 
+	// Only yearly budgets; the budget currency is the owner's (as GET /api/budgets/{id} shows it).
+	// owner_master feeds the spend rule in scopeCondition (owner's invoices only, plus subtenants' for the master).
+	static final String BUDGET_SELECT = "SELECT b.*, a.name AS owner, a.currency AS owner_currency, CAST(a.master_account AS UNSIGNED) AS owner_master FROM account_budget b JOIN account a ON a.id = b.account_id WHERE b.period = 'year' AND b.period_value = ?"
+
 	static final String INVOICE_FILTER = "i.period_interval = 'month' AND (i.ref_type = 'Instance' OR (i.ref_type = 'ComputeServer' AND i.instance_id IS NULL))"
 
 	Plugin plugin
@@ -98,7 +102,7 @@ class BudgetBurnAnalyticsProvider extends AbstractAnalyticsProvider {
 			c = morpheus.report.getReadOnlyDatabaseConnection().blockingGet()
 			Sql sql = new Sql(c)
 			def acc = sql.firstRow('SELECT a.id, a.name, CAST(a.master_account AS UNSIGNED) AS is_master FROM user u JOIN account a ON a.id = u.account_id WHERE u.id = ?', [user.id])
-			boolean master = (acc?.is_master as Integer) == 1
+			boolean master = isMaster(acc?.is_master)
 			def masterAcc = sql.firstRow('SELECT currency FROM account WHERE master_account = 1 ORDER BY id LIMIT 1')
 			String masterCurrency = resolveCurrency(masterAcc?.currency as String)
 			// Current month in the JVM time zone of the appliance.
@@ -106,12 +110,9 @@ class BudgetBurnAnalyticsProvider extends AbstractAnalyticsProvider {
 			int year = now.get(Calendar.YEAR), month = now.get(Calendar.MONTH) + 1
 			int day = now.get(Calendar.DAY_OF_MONTH), days = now.getActualMaximum(Calendar.DAY_OF_MONTH)
 			String per = now.time.format('yyyyMM')
-			// Only yearly budgets; the budget currency is the owner's (as GET /api/budgets/{id} shows it).
-			// owner_master feeds the spend rule in scopeCondition (owner's invoices only, plus subtenants' for the master).
-			String budgetSelect = "SELECT b.*, a.name AS owner, a.currency AS owner_currency, CAST(a.master_account AS UNSIGNED) AS owner_master FROM account_budget b JOIN account a ON a.id = b.account_id WHERE b.period = 'year' AND b.period_value = ?"
 			List<GroovyRowResult> budgets = master ?
-				sql.rows("${budgetSelect} ORDER BY a.master_account DESC, b.name".toString(), [year.toString()]) :
-				sql.rows("${budgetSelect} AND b.account_id = ? ORDER BY b.name".toString(), [year.toString(), acc?.id])
+				sql.rows("${BUDGET_SELECT} ORDER BY a.master_account DESC, b.name".toString(), [year.toString()]) :
+				sql.rows("${BUDGET_SELECT} AND b.account_id = ? ORDER BY b.name".toString(), [year.toString(), acc?.id])
 			boolean anyMismatch = false
 			List items = budgets.collect { b ->
 				String bc = resolveCurrency(b.owner_currency as String, masterCurrency)
@@ -129,16 +130,15 @@ class BudgetBurnAnalyticsProvider extends AbstractAnalyticsProvider {
 				String foreignYtd = joinForeign(ytdForeign(ytd, cur, bc), bc, locale)
 				boolean monthMismatch = (foreignRunning || foreignForecast) as boolean, ytdMismatch = foreignYtd as boolean
 				anyMismatch = anyMismatch || monthMismatch || ytdMismatch
-				BigDecimal fPct = pct(forecast, budgetMonth)
-				String st = status(fPct, monthMismatch)
+				String st = status(forecast, budgetMonth, monthMismatch)
 				[name: b.name, owner: b.owner, scopeKey: scopeKey(b.ref_scope as String), target: b.ref_name ?: b.owner, currency: bc,
 				 budgetText: money(budgetMonth, locale), runningText: money(running, locale), forecastText: money(forecast, locale),
 				 burnText: money(burnRate(running, day), locale),
-				 usedPct: pctText(pct(running, budgetMonth), locale), forecastPct: pctText(fPct, locale), bar: barWidth(fPct),
+				 usedPct: pctLabel(running, budgetMonth, locale), forecastPct: pctLabel(forecast, budgetMonth, locale), bar: barWidth(forecast, budgetMonth),
 				 mismatch: monthMismatch, foreignRunning: foreignRunning, foreignForecast: foreignForecast,
 				 statusKey: statusKey(st), color: statusColor(st),
 				 ytdMismatch: ytdMismatch, foreignYtd: foreignYtd,
-				 ytdBudgetText: money(budgetYtd, locale), ytdText: money(ytdSpend, locale), ytdPct: pctText(pct(ytdSpend, budgetYtd), locale)]
+				 ytdBudgetText: money(budgetYtd, locale), ytdText: money(ytdSpend, locale), ytdPct: pctLabel(ytdSpend, budgetYtd, locale)]
 			}
 			ServiceResponse.success([items: items, tenant: acc?.name, master: master, day: day, days: days, anyMismatch: anyMismatch,
 				month: "${year}-${month.toString().padLeft(2, '0')}".toString(), count: items.size()])
@@ -147,7 +147,12 @@ class BudgetBurnAnalyticsProvider extends AbstractAnalyticsProvider {
 			ServiceResponse.error(message("${PROVIDER_CODE}.error.load".toString(),
 				'Budget data could not be loaded. See the appliance log for details.', locale))
 		} finally {
-			if(c) morpheus.report.releaseDatabaseConnection(c).blockingAwait()
+			// A failed release must not replace the page result.
+			try {
+				if(c) morpheus.report.releaseDatabaseConnection(c).blockingAwait()
+			} catch(Exception e) {
+				log.warn("Budget Burn: releasing the database connection failed: ${e.message}", e)
+			}
 		}
 	}
 

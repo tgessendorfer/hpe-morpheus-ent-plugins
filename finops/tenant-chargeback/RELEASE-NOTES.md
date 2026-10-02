@@ -6,6 +6,57 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.1.1
+
+**Fix release: groups are told apart by id, and the additional markup is checked and shown with
+the precision it is calculated with.** Plugin API 1.4.2, minimum appliance 9.0.2, no new options.
+
+### Changes
+
+- **Groups keyed by id, not by name.** 1.1.0 grouped the invoice lines by the group name, so two
+  groups with the same name in one tenant were merged into one row. The query now groups by the
+  group id and keeps the name for display; such groups get a row each. Servers without a group
+  are still one row, *Servers without a group*. The CSV columns are unchanged, so two groups with
+  the same name appear as two rows with the same name.
+- **Additional markup validated.** 1.1.0 accepted any number, including negative values and
+  exponent notation such as `1e3`. The markup must now be a plain number from 0 to 1000 with up
+  to four decimals (a decimal comma is still accepted, `7,5` = 7.5). Anything else is rejected
+  with a message in English or German; a report run that bypasses the form with such a value is
+  marked as failed instead of producing figures.
+- **Markup shown at full precision.** The invoice amount is calculated with up to four decimals
+  of a percent, but 1.1.0 showed the markup rounded to two (7.1234 % appeared as 7.12 %). The page
+  now shows up to four decimals, the same value the calculation uses.
+- **Build update, no change to the jar's contents.** Gradle 9.8.0 (the wrapper now checks the
+  distribution's SHA-256), Shadow 9.6.1 instead of 6.0.0, and the build no longer reads the local
+  Maven repository, so it uses only published dependencies. The jar keeps its name, manifest
+  attributes and Java 11 bytecode.
+
+### Behaviour changes from 1.1.0
+
+- A tenant with two groups of the same name now shows two rows instead of one combined row; the
+  per-tenant and per-currency totals are unchanged.
+- Markup values below 0, above 1000, with more than four decimals, with a sign or in exponent
+  notation are rejected; before, they were applied. Saved report runs with such a value fail.
+- The markup in the headline shows up to four decimals instead of two.
+
+### Verified
+
+- Unit tests (Spock), 118 in total, 0 failures: markup values accepted and rejected (sign,
+  exponent, range, decimals), form validation and the English and German error message, markup
+  shown with four decimals in both locales, two groups with the same name kept apart by id, one
+  line per group id, one line for servers without a group, and the query grouping by group id. The
+  new tests fail against the 1.1.0 sources.
+- Local build with JDK 17 and Gradle 9.8.0: one jar,
+  `morpheus-tenant-chargeback-plugin-1.1.1-all.jar`, manifest as in 1.1.0 apart from the version,
+  class files for Java 11, no deprecation warnings.
+
+### Not yet verified
+
+- Live on the appliance: 1.1.1 has not been uploaded or run on Morpheus 9.0.2 yet, including the
+  query on the group id against the internal `account_invoice` table.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.1.0...tenant-chargeback-v1.1.1
+
 ## 1.1.0
 
 **First public release: a monthly chargeback report per tenant and group from the Morpheus

@@ -44,6 +44,18 @@ class BudgetBurnMathSpec extends Specification {
 		budgetToDate('quarter', periods([1: 300, 2: 600]), 4) == 500.00G
 	}
 
+	def "budgetToDate rounds once, so a full year or quarter gives exactly its budget"() {
+		expect:
+		budgetToDate('year', periods([1: '1000.00']), 12) == 1000.00G
+		budgetToDate('year', periods([1: 1000]), 5) == 416.67G
+		budgetToDate('year', periods([1: 1000]), 1) == monthlyBudget('year', periods([1: 1000]), 1)
+		budgetToDate('quarter', periods([1: 100, 2: 100, 3: 100, 4: 100]), 3) == 100.00G
+		budgetToDate('quarter', periods([1: 100, 2: 100, 3: 100, 4: 100]), 6) == 200.00G
+		budgetToDate('quarter', periods([1: 100, 2: 100, 3: 100, 4: 100]), 12) == 400.00G
+		budgetToDate('quarter', periods([1: 100]), 2) == 66.67G
+		budgetToDate('year', periods([1: 1000]), 12).scale() == 2
+	}
+
 	def "byCurrency keeps currencies apart and never adds them up"() {
 		given:
 		List<Map> rows = [
@@ -161,6 +173,48 @@ class BudgetBurnMathSpec extends Specification {
 		100.1G   | false    || STATUS_OVER
 		250G     | true     || STATUS_MISMATCH
 		null     | false    || STATUS_OK
+	}
+
+	@Unroll
+	def "status of forecast #forecast against budget #budget is #expected"() {
+		expect:
+		status(forecast, budget, false) == expected
+
+		where:
+		forecast | budget || expected
+		10G      | 0G     || STATUS_OVER
+		0.01G    | 0.00G  || STATUS_OVER
+		10G      | -5G    || STATUS_OVER
+		10G      | null   || STATUS_OVER
+		0G       | 0G     || STATUS_OK
+		null     | 0G     || STATUS_OK
+		50G      | 100G   || STATUS_OK
+		80G      | 100G   || STATUS_WARNING
+		101G     | 100G   || STATUS_OVER
+	}
+
+	def "a currency mismatch wins over a missing budget"() {
+		expect:
+		status(10G, 0G, true) == STATUS_MISMATCH
+	}
+
+	def "pctLabel shows a dash without a number when there is no budget"() {
+		expect:
+		pctLabel(10G, 0G, Locale.ENGLISH) == '-'
+		pctLabel(0G, 0G, Locale.ENGLISH) == '-'
+		pctLabel(10G, null, Locale.ENGLISH) == '-'
+		pctLabel(81.25G, 100G, Locale.ENGLISH) == '81.3 %'
+		pctLabel(81.25G, 100G, Locale.GERMANY) == '81,3 %'
+		pctLabel(0G, 100G, Locale.ENGLISH) == '0.0 %'
+	}
+
+	def "the bar of a forecast without a budget is full when there is spend, empty otherwise"() {
+		expect:
+		barWidth(10G, 0G) == 100
+		barWidth(0G, 0G) == 0
+		barWidth(null, null) == 0
+		barWidth(55.9G, 100G) == 55
+		barWidth(300G, 100G) == 100
 	}
 
 	def "barWidth is capped to 0..100"() {

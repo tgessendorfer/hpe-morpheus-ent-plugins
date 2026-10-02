@@ -6,6 +6,51 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.1.1
+
+**Fix release: a budget of 0, the year-to-date budget and a failed connection release are
+handled correctly.** Plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and
+the page layout are unchanged.
+
+### Changes
+
+- **A monthly budget of 0 with spend is *Over budget*.** 1.1.0 showed such a budget as *On
+  track 0.0 %*, because the percentage of a budget of 0 was taken as 0. Now any forecast spend
+  against a budget of 0 is *Over budget* with a full bar, and a budget of 0 without spend stays
+  *On track*. **Behaviour change:** the percentages of a budget of 0 (spend to date, forecast,
+  year to date) show `-` instead of `0.0 %`.
+- **The year-to-date budget no longer drifts by cents.** 1.1.0 rounded each month's share of a
+  quarterly or yearly budget to cents before adding them up, so a yearly budget of 1,000.00
+  showed 999.96 in December. The shares are now added up unrounded and rounded once: a yearly
+  budget gives exactly its amount for the full year and a quarterly budget exactly its amount per
+  quarter. The monthly budget column is still the current month's share rounded to cents.
+  **Behaviour change:** year-to-date budgets and percentages can differ from 1.1.0 by a few cents
+  or a tenth of a percent.
+- **A failed release of the database connection no longer replaces the page result.** An error
+  while handing the read-only report connection back is now logged as a warning, and the page
+  shows its data (or its own error message) as before.
+- **Build:** Gradle 9.8.0 (wrapper with `distributionSha256Sum`), Shadow plugin 9.6.1
+  (`com.gradleup.shadow`), Java 11 target set through the `java` block, and no `mavenLocal()`
+  in the repositories, so a build no longer picks up artifacts from the local Maven cache. The
+  build update itself changes nothing in the jar: same manifest attributes, classes still Java 11.
+
+### Verified
+
+- New unit tests (Spock): status, percentages and bar of a budget of 0 with and without spend;
+  year-to-date budget of a yearly budget (exactly 1,000.00 in December) and a quarterly budget
+  (exactly its amount per quarter); a failing connection release that leaves the page result in
+  place; the budget query still returns `owner_master` for the spend rule. The year-to-date and
+  connection-release tests fail against the 1.1.0 code.
+- Local build with JDK 17 and Gradle 9.8.0: 91 tests, 0 failures, no deprecation warnings,
+  one jar `morpheus-budget-burn-plugin-1.1.1-all.jar`.
+
+### Not yet verified
+
+- Live on the appliance: 1.1.1 has not been uploaded to Morpheus 9.0.2 yet, so the page with a
+  budget of 0 and the new year-to-date figures have not been checked there.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.1.0...budget-burn-v1.1.1
+
 ## 1.1.0
 
 **First public release: an analytics page that compares every yearly Morpheus budget with

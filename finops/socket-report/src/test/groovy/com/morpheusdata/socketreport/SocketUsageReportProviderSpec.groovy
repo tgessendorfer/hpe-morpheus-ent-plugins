@@ -1,7 +1,18 @@
 package com.morpheusdata.socketreport
 
+import com.morpheusdata.core.AbstractReportProvider
+import com.morpheusdata.core.MorpheusContext
+import com.morpheusdata.core.MorpheusReportService
 import com.morpheusdata.model.OptionType
+import com.morpheusdata.model.ReportResult
+import com.morpheusdata.model.ReportResultRow
+import io.reactivex.rxjava3.core.Completable
+import io.reactivex.rxjava3.core.Single
 import spock.lang.Specification
+import spock.lang.Timeout
+import spock.lang.Unroll
+
+import java.util.concurrent.TimeUnit
 
 /**
  * Provider identity, option codes and that every text the provider or the template uses
@@ -35,6 +46,56 @@ class SocketUsageReportProviderSpec extends Specification {
 		!provider.validateOptions([defaultHostSockets: 'two']).success
 	}
 
+	@Timeout(value = 10, unit = TimeUnit.SECONDS)
+	@Unroll
+	def "validateOptions rejects '#raw' with the #key message"() {
+		when:
+		def response = provider.validateOptions([config: [vmsPerSocket: raw]])
+
+		then:
+		!response.success
+		response.errors.vmsPerSocket == message
+
+		where:
+		raw            | key              | message
+		'1e2000000000' | 'outOfRange'     | 'Enter a number up to 1,000,000 with at most 3 decimal places, without exponent notation, or leave the field empty for the default.'
+		'1000001'      | 'outOfRange'     | 'Enter a number up to 1,000,000 with at most 3 decimal places, without exponent notation, or leave the field empty for the default.'
+		'1.2345'       | 'outOfRange'     | 'Enter a number up to 1,000,000 with at most 3 decimal places, without exponent notation, or leave the field empty for the default.'
+		'-5'           | 'positiveNumber' | 'Enter a number greater than 0, or leave the field empty for the default.'
+	}
+
+	def "validateOptions accepts the bounds themselves"() {
+		expect:
+		provider.validateOptions([config: [vmsPerSocket: '1000000', defaultHostSockets: '0.001']]).success
+	}
+
+	@Timeout(value = 10, unit = TimeUnit.SECONDS)
+	def "process falls back to the defaults for stored options outside the bounds and finishes"() {
+		given:
+		List<ReportResultRow> appended = []
+		List<ReportResult.Status> statuses = []
+		MorpheusReportService reportService = Mock(MorpheusReportService) {
+			updateReportResultStatus(_, _) >> { ReportResult r, ReportResult.Status s -> statuses << s; Completable.complete() }
+			appendResultRows(_, _) >> { ReportResult r, Collection<ReportResultRow> rows -> appended.addAll(rows); Single.just(true) }
+		}
+		MorpheusContext context = Mock(MorpheusContext) { getReport() >> reportService }
+		SocketUsageReportProvider noDb = new SocketUsageReportProvider(null, context) {
+			@Override
+			Object withDbConnection(AbstractReportProvider.WithDbConnectionFunction function) { null }
+		}
+		Map config = [config: [vmsPerSocket: '1e2000000000', defaultHostSockets: '1E+2000000000']]
+		ReportResult result = Stub(ReportResult) { getConfigMap() >> config }
+
+		when:
+		noDb.process(result)
+
+		then:
+		statuses == [ReportResult.Status.generating, ReportResult.Status.ready]
+		Map footer = appended.find { it.section == ReportResultRow.SECTION_FOOTER }.dataMap
+		footer.vmsPerSocket == '15'
+		footer.defaultHostSockets == '2'
+	}
+
 	def "the viewer locale falls back to English without a request"() {
 		expect:
 		provider.viewerLocale() == Locale.ENGLISH
@@ -45,7 +106,7 @@ class SocketUsageReportProviderSpec extends Specification {
 		List<String> keys = provider.optionTypes.collectMany { OptionType o -> [o.fieldCode, o.helpTextI18nCode] }
 		String hbs = getClass().getResourceAsStream('/renderer/hbs/socketUsageReport.hbs').text
 		keys += (hbs =~ /\{\{i18n '([^']+)'\}\}/).collect { it[1] }
-		keys += ['socket-usage-report.error.positiveNumber']
+		keys += ['socket-usage-report.error.positiveNumber', 'socket-usage-report.error.outOfRange']
 
 		expect:
 		keys.size() > 10

@@ -6,6 +6,69 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 1.1.1
+
+**Fix release: a threshold with a decimal comma is read instead of silently ignored, and a
+decision can no longer be lost between two approval calls.** Plugin code, provider code, option
+codes, plugin API 1.4.2 and minimum appliance 9.0.2 are unchanged; no new options.
+
+### Fixed
+
+- **Threshold with a decimal comma.** In 1.1.0 a threshold entered as `50,00` did not parse. It
+  was skipped without a log line, and the next level applied (call options, integration) or, at the
+  end, the default of 100, so a policy meant to allow 50 allowed 100. 1.1.1 reads a single decimal
+  comma with one or two digits after it as a decimal point (`50,00` is 50.00). Forms that mix comma
+  and dot or look like a thousands separator (`1.000,50`, `1,000`, `1,000.50`) are still not
+  accepted, because guessing them could change the threshold by a factor of a thousand.
+- **A threshold that does not parse is now logged.** Such a value is still skipped and the next
+  level still applies, as in 1.1.0, but each one now writes one warning that names the level
+  (policy, call options or integration) and the raw value, e.g. *Cost threshold approval: policy
+  threshold '1.000,50' is not a non-negative amount, ignored*. Empty values stay silent.
+- **Lost decision under concurrency.** `createApprovalRequest` stored its decision for the next
+  `monitorApproval` run with `computeIfAbsent(...).put(...)`, while `monitorApproval` takes the
+  integration's pending reports with `remove`. When the monitor run removed the map between those
+  two steps, the decision went into a map nobody read any more and the request stayed `requested`.
+  The decision is now stored inside `compute`, under the same lock as the `remove`, so it lands
+  either in the reports the monitor run takes or in a new map for the next run. Each decision is
+  still reported once, unchanged, and only to the integration it is asked about.
+
+### Behaviour changes from 1.1.0
+
+- A threshold such as `50,00` or `10,5` now sets the threshold to that amount. In 1.1.0 it was
+  ignored and the next level or the default of 100 applied, so requests between this amount and
+  the fallback that 1.1.0 approved are now rejected (and the other way round when the fallback was
+  lower).
+- A set but unparsable threshold writes a warning to the Morpheus log on every approval request
+  that reaches that level.
+
+### Build
+
+- **Gradle 9.8.0** (wrapper with `distributionSha256Sum`), **Shadow 9.6.1** (`com.gradleup.shadow`)
+  instead of 6.0.0, Java 11 bytecode set through the `java {}` block, and **no `mavenLocal()`**
+  in either repository list, so a build no longer picks up artifacts from the local Maven
+  repository. This changes nothing in the jar's contents beyond the fixes above: same manifest
+  attributes, Java 11 bytecode.
+
+### Verified
+
+- New unit tests (Spock): decimal comma accepted (`50,00`, `50,5`, `0,99`), ambiguous and malformed
+  forms rejected (`1.000,50`, `1,000`, `1,000.50`, `50,`, `,50`, `5,0,0`, `-50,00`); a comma
+  threshold used instead of the default; one warning per skipped level naming the level and the
+  value, none for empty or valid values; a policy threshold of `10,50` honoured end to end.
+- New concurrency tests: a decision whose store is held while a monitor run takes the pending
+  reports is reported exactly once; four threads creating 1,000 decisions while a monitor run loops
+  report each exactly once. Both fail against the 1.1.0 code, as do the decimal comma and warning
+  tests.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --warning-mode all`, 82 tests,
+  0 failures, no deprecation warnings, one `morpheus-cost-approval-plugin-1.1.1-all.jar`.
+
+### Not yet verified
+
+- Live on the appliance: 1.1.1 has not been uploaded or run against Morpheus 9.0.2 yet. The
+  approval flow itself is unchanged from 1.1.0, which was verified live.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.1.0...cost-approval-v1.1.1
+
 ## 1.1.0
 
 **First public release: approve provisioning requests automatically up to a monthly cost

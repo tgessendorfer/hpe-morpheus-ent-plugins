@@ -3,6 +3,12 @@ package com.morpheusdata.instanceshowback
 import spock.lang.Specification
 import spock.lang.Unroll
 
+import java.sql.Timestamp
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+
 class ShowbackCalculatorSpec extends Specification {
 
 	static Calendar cal(int y, int m, int d) {
@@ -153,6 +159,111 @@ class ShowbackCalculatorSpec extends Specification {
 		expect:
 		ShowbackCalculator.buildModel([[period: '202610', price: 1G]], ['202610'], 'CHF', Locale.ENGLISH, cal(2026, 10, 1)).currencies == 'CHF'
 		ShowbackCalculator.buildModel([[period: '202610', price: 1G]], ['202610'], null, Locale.ENGLISH, cal(2026, 10, 1)).currencies == 'USD'
+	}
+
+	/** Runs the closure with a non-UTC JVM default time zone and restores the old one. */
+	static <T> T inTimeZone(String zone, Closure<T> body) {
+		TimeZone saved = TimeZone.getDefault()
+		try {
+			TimeZone.setDefault(TimeZone.getTimeZone(zone))
+			return body.call()
+		} finally {
+			TimeZone.setDefault(saved)
+		}
+	}
+
+	static Map row(def updated) {
+		[period: '202610', currency: 'EUR', price: 1G, running: 1G, updated: updated]
+	}
+
+	def "the footer time of a Timestamp is UTC, not the JVM time zone"() {
+		given:
+		Timestamp ts = Timestamp.from(Instant.parse('2026-10-15T02:00:00Z'))
+
+		when:
+		Map m = inTimeZone('Europe/Berlin') {
+			ShowbackCalculator.buildModel([row(ts)], ['202610'], null, Locale.ENGLISH, cal(2026, 10, 15))
+		}
+
+		then:
+		m.updated == '2026-10-15 02:00'
+	}
+
+	def "a Timestamp just before midnight UTC keeps its UTC date in a zone east of UTC"() {
+		expect:
+		inTimeZone('Asia/Tokyo') {
+			ShowbackCalculator.utcText(Timestamp.from(Instant.parse('2026-10-31T23:30:00Z')))
+		} == '2026-10-31 23:30'
+	}
+
+	def "a LocalDateTime is the stored UTC wall clock and is not shifted by the JVM time zone"() {
+		when:
+		Map m = inTimeZone('America/New_York') {
+			ShowbackCalculator.buildModel([row(LocalDateTime.of(2026, 10, 15, 2, 0, 59))], ['202610'], null, Locale.ENGLISH, cal(2026, 10, 15))
+		}
+
+		then:
+		m.updated == '2026-10-15 02:00'
+	}
+
+	@Unroll
+	def "utcText(#value) = #text"() {
+		expect:
+		inTimeZone('Europe/Berlin') { ShowbackCalculator.utcText(value) } == text
+
+		where:
+		value                                                              || text
+		null                                                               || '-'
+		Instant.parse('2026-01-01T00:05:00Z')                              || '2026-01-01 00:05'
+		OffsetDateTime.of(2026, 1, 1, 1, 5, 0, 0, ZoneOffset.ofHours(1))   || '2026-01-01 00:05'
+		new Date(Instant.parse('2026-07-01T10:00:00Z').toEpochMilli())     || '2026-07-01 10:00'
+		'2026-10-15 02:00:00.0'                                            || '2026-10-15 02:00'
+		'2026-10-15T02:00'                                                 || '2026-10-15 02:00'
+		'not a date'                                                       || '-'
+	}
+
+	/*
+	 * In the cases below the text order and the time order disagree: the Timestamp is the
+	 * later cost run (03:00 UTC), but its text '2026-10-15 05:00:00.0' (Berlin) sorts before
+	 * the LocalDateTime's '2026-10-15T02:00' because ' ' < 'T'.
+	 */
+
+	def "the latest cost run wins across currencies, compared as instants, not as text"() {
+		given:
+		Timestamp late = Timestamp.from(Instant.parse('2026-10-15T03:00:00Z'))
+		LocalDateTime early = LocalDateTime.of(2026, 10, 15, 2, 0)
+
+		when:
+		Map m = inTimeZone('Europe/Berlin') {
+			ShowbackCalculator.buildModel([row(early), [period: '202610', currency: 'USD', price: 1G, updated: late]],
+				['202610'], null, Locale.ENGLISH, cal(2026, 10, 15))
+		}
+
+		then:
+		m.multiCurrency
+		m.updated == '2026-10-15 03:00'
+	}
+
+	@Unroll
+	def "merging rows of one month and currency keeps the latest cost run (#order)"() {
+		given:
+		Timestamp late = Timestamp.from(Instant.parse('2026-10-15T03:00:00Z'))
+		LocalDateTime early = LocalDateTime.of(2026, 10, 15, 2, 0)
+		List<Map> rows = (order == 'later first' ? [late, early] : [early, late]).collect { row(it) }
+
+		when:
+		List<Map> grouped = inTimeZone('Europe/Berlin') {
+			ShowbackCalculator.groupByPeriodAndCurrency(rows, null)
+		}
+
+		then:
+		grouped.size() == 1
+		grouped[0].price == 2G
+		grouped[0].updated.is(late)
+		ShowbackCalculator.utcText(grouped[0].updated) == '2026-10-15 03:00'
+
+		where:
+		order << ['later first', 'earlier first']
 	}
 
 	def "every i18n key used by the template exists in the English bundle"() {

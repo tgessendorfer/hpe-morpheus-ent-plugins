@@ -57,6 +57,13 @@ Policy (per *Approve Provision* policy that uses the integration):
 
 Order of precedence: policy, then options passed with the call, then integration, then the default.
 
+**Threshold format:** a plain non-negative number such as `50` or `50.00`. A single decimal comma
+with one or two digits after it is accepted too (`50,00` is 50.00). Forms that mix comma and dot
+or look like a thousands separator (`1.000,50`, `1,000`) are not guessed: such a value, like any
+other value that does not parse, is skipped and the next level applies. Each skipped value writes
+one warning to the Morpheus log that names the level and the raw value, for example
+`Cost threshold approval: policy threshold '1.000,50' is not a non-negative amount, ignored`.
+
 **Currency of a request:** `Request.currency`, else the one currency all references share, else
 the currency of the integration's tenant, else of the master tenant, else `USD`.
 
@@ -87,7 +94,8 @@ a request are English, since the approval call carries no user locale.
 
 | Plugin version | Plugin API | Min appliance | Tested appliance | Internal DB tables read |
 |---|---|---|---|---|
-| 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `account` (`currency`, `master_account`), only when no currency is known |
+| [1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.1.1) | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 not yet) | `account` (`currency`, `master_account`), only when no currency is known |
+| [1.1.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.1.0) | 1.4.2 | 9.0.2 | 9.0.2 | `account` (`currency`, `master_account`), only when no currency is known |
 
 Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 

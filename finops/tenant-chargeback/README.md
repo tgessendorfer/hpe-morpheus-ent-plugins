@@ -21,8 +21,9 @@ For one month (`account_invoice` with `period_interval = 'month'`):
 - **Headline:** number of tenants and the invoice amount per currency.
 - **Total per currency:** resources, cost, list price, margin, margin % and invoice amount.
 - **Per tenant:** the same figures per tenant and currency.
-- **Per tenant and group:** one row per tenant, group and currency. Servers that belong to no
-  group are shown as *Servers without a group*.
+- **Per tenant and group:** one row per tenant, group and currency. Groups are told apart by
+  their id, so two groups with the same name in one tenant get a row each. Servers that belong to
+  no group are shown as one row, *Servers without a group*.
 
 Counted are the invoices of **instances** and of **servers that belong to no instance**. The
 summary invoices Morpheus keeps per tenant, group, cloud and user are left out; they would count
@@ -51,7 +52,7 @@ tenants. Which roles may run it follows the Morpheus report permissions. Without
 | Option | Code | Field | Default | Meaning |
 |---|---|---|---|---|
 | Month (YYYY-MM) | `tenant-chargeback-report-month` | `chargebackMonth` | empty | `YYYY-MM` (or `YYYYMM`), month 01–12. Empty = current month |
-| Additional Markup % | `tenant-chargeback-report-markup-percent` | `markupPercent` | `0` | Added to the list price for the invoice amount, e.g. a managed service fee. A decimal comma is accepted |
+| Additional Markup % | `tenant-chargeback-report-markup-percent` | `markupPercent` | `0` | Added to the list price for the invoice amount, e.g. a managed service fee. 0 to 1000, up to four decimals; a decimal comma is accepted, a sign or an exponent is not |
 | Include Master Tenant Resources | `tenant-chargeback-report-provider` | `includeProvider` | off | Also list the master tenant's own resources |
 
 ## Currencies
@@ -63,7 +64,7 @@ repository:
 2. else the currency of the master tenant,
 3. else `USD`.
 
-Lines that end up in the same tenant, group and currency are merged. Amounts in different
+Lines that end up in the same tenant, group (by id) and currency are merged. Amounts in different
 currencies are **never converted or added up**: every total is per currency, and every amount
 carries its ISO currency code.
 
@@ -72,7 +73,8 @@ carries its ISO currency code.
 The report result export contains the plain values, independent of the viewer's language:
 amounts with two decimals and a dot, no grouping. Main rows: `tenant`, `group` (empty for servers
 without a group), `noGroup`, `resources`, `currency`, `cost`, `price`, `margin`, `markupPercent`,
-`invoice`. Header rows (per tenant) add `marginPct`; footer rows carry the per-currency totals
+`invoice`. `markupPercent` carries the markup as entered, up to four decimals; the page shows it
+with the same precision. Header rows (per tenant) add `marginPct`; footer rows carry the per-currency totals
 (`kind = total`) and the report metadata (`kind = meta`: `month`, `current`, `markupPercent`,
 `tenants`, `currencies`).
 
@@ -95,6 +97,8 @@ viewers use in Morpheus.
 - **Current month in the appliance JVM time zone.** An empty month means the month the appliance
   JVM is in; around midnight at a month end that can differ from the viewer's month.
 - Amounts are as current as the last Morpheus costing run.
+- Two groups with the same name in one tenant are two rows with the same name; the CSV export
+  carries no group id to tell them apart, only their order.
 - The tenant currency is not used for the currency rule; an invoice line without a currency
   falls back to the master tenant's currency.
 - **Reads internal database tables** (see the matrix below) through the read-only report
@@ -106,6 +110,7 @@ viewers use in Morpheus.
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 not yet) | `account_invoice`, `account` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `account_invoice`, `account` |
 
 Queries internal tables, tested on 9.0.2 only, may break on upgrade.
@@ -113,7 +118,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 ## Install
 
 Download `morpheus-tenant-chargeback-plugin-<version>-all.jar` from the
-[release tenant-chargeback-v1.1.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.1.0) (tag
+[release tenant-chargeback-v1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.1.1) (tag
 `tenant-chargeback-v<version>`), then upload it under *Administration → Integrations → Plugins →
 Add*. Updating to a newer version with the same plugin code replaces the plugin in place and
 keeps existing report results. The report then appears under *Operations → Reports* in the
@@ -121,7 +126,7 @@ category *Cost*.
 
 ## Build
 
-JDK 17 (the jar targets Java 11):
+JDK 17 (the jar targets Java 11); the Gradle wrapper (9.8.0) checks the distribution's SHA-256:
 
 ```
 ./gradlew clean test shadowJar

@@ -1,5 +1,7 @@
 package com.morpheusdata.msptenantoverview
 
+import com.github.jknack.handlebars.Handlebars
+import com.github.jknack.handlebars.Helper
 import com.morpheusdata.core.MorpheusContext
 import com.morpheusdata.core.web.MorpheusWebRequestService
 import spock.lang.Specification
@@ -75,6 +77,33 @@ class MspTenantOverviewAnalyticsProviderSpec extends Specification {
 		expect:
 		!(hbs =~ /#[0-9A-Fa-f]{6}\b/)
 		hbs.contains('class="finops-msp-tenant-overview"')
+	}
+
+	def "the template shows no '- %' for a tenant without invoices and keeps the percentage otherwise"() {
+		given: 'one tenant without invoices, one with revenue in both months, and their totals'
+		Map none = MspTenantOverviewCalc.texts(MspTenantOverviewCalc.zero(), Locale.ENGLISH)
+		Map paid = MspTenantOverviewCalc.texts([rev: 100.00G, cost: 60.00G, lrev: 50.00G, lcost: 45.00G], Locale.ENGLISH)
+		Map data = [count: 2, instances: 0, cores: 0, month: '2026-10', lastMonth: '2026-09',
+			items: [[first: true, name: 'Empty', currency: 'USD'] + none, [first: true, name: 'Paying', currency: 'EUR'] + paid],
+			totals: [[currency: 'EUR'] + paid, [currency: 'USD'] + none]]
+
+		when:
+		String html = render(data)
+
+		then:
+		!html.contains('- %')
+		!html.contains('()')
+		html.contains('(USD)')
+		html.contains('<td>0.00</td></tr>')
+		html.contains('(EUR, 40.0 %)')
+		html.contains('<td>5.00 (10.0 %)</td>')
+		html.contains('<td>-</td>')
+	}
+
+	private static String render(Map data) {
+		Handlebars hb = new Handlebars()
+		hb.registerHelper('i18n', { Object key, options -> key } as Helper)
+		hb.compileInline(resource('renderer/hbs/mspTenantOverview.hbs')).apply(data)
 	}
 
 	private static String resource(String path) {

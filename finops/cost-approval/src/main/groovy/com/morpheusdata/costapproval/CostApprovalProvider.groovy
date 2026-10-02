@@ -161,19 +161,34 @@ class CostApprovalProvider implements ApprovalProvider {
 				currency: CostApprovalLogic.refValue(r, 'currency')?.toString(),
 				externalId: "${reqId}-${i}".toString(), externalName: name, status: status)
 		}
-		// The monitor run reports exactly the decision of this response, never a new one.
-		pending.computeIfAbsent(integrationKey(integration)) { new ConcurrentHashMap<String, Request>() }
-			.put(reqId, new Request(externalId: reqId, externalName: name, refs: outRefs))
+		// The monitor run reports exactly the decision of this response, never a new one. The put
+		// runs inside compute, under the same lock as the remove in monitorApproval, so it can
+		// never land in a map that a monitor run has already taken away.
+		Request report = new Request(externalId: reqId, externalName: name, refs: outRefs)
+		pending.compute(integrationKey(integration)) { Long key, Map<String, Request> reports ->
+			Map<String, Request> target = reports ?: newReportMap()
+			target.put(reqId, report)
+			target
+		}
 		log.info("Cost threshold approval ${reqId}: ${CostApprovalLogic.money(decision.price, decision.shownPriceCurrency, Locale.ENGLISH)} per month, " +
 			"threshold ${CostApprovalLogic.money(decision.threshold, decision.thresholdCurrency, Locale.ENGLISH)} -> ${decision.outcome} (${status})")
 		return new RequestResponse(success: true, externalRequestId: reqId, externalRequestName: name,
 			references: outRefs, msg: CostApprovalLogic.responseMessage(decision, locale))
 	}
 
+	/**
+	 * Takes the pending reports of the integration in one atomic remove. Every later decision
+	 * goes into a new map through compute, so the removed map is complete and no longer changes.
+	 */
 	@Override
 	List<Request> monitorApproval(AccountIntegration integration) {
 		Map<String, Request> mine = pending.remove(integrationKey(integration))
 		return mine ? new ArrayList<Request>(mine.values()) : []
+	}
+
+	/** The map that collects the pending reports of one integration; a seam for tests. */
+	protected Map<String, Request> newReportMap() {
+		return new ConcurrentHashMap<String, Request>()
 	}
 
 	/** Pending reports of one integration; visible for tests. */

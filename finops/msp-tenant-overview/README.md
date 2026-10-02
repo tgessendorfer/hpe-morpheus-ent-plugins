@@ -24,7 +24,7 @@ One row per active sub-tenant (`account.master_account = 0`, `active = 1`), orde
 | Servers | `compute_server` rows owned by the tenant |
 | Revenue | `account_invoice.total_price`: the price from the tenant's price set, markup included |
 | Cost | `account_invoice.total_cost`: the purchase cost |
-| Margin, Margin % | revenue - cost, and margin as a share of revenue (`-` when revenue is 0) |
+| Margin, Margin % | revenue - cost, and margin as a share of revenue (`-` in the column when revenue is 0; the percentage next to the tiles and the previous month's margin is then left out) |
 
 - **Invoices counted:** monthly invoices (`period_interval = 'month'`) of instances, plus those of
   servers that belong to no instance, so a VM is never counted twice.
@@ -56,7 +56,7 @@ and invoices in Morpheus.
 ## Install
 
 1. Download `morpheus-msp-tenant-overview-plugin-<version>-all.jar` from the
-   [release msp-tenant-overview-v1.1.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/msp-tenant-overview-v1.1.0) (tag
+   [release msp-tenant-overview-v1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/msp-tenant-overview-v1.1.1) (tag
    `msp-tenant-overview-v<version>`) and check it against `SHA256SUMS`.
 2. *Administration > Integrations > Plugins > Add*, upload the jar.
 3. Open *Operations > Analytics* in the master tenant and pick **MSP Tenant Overview**.
@@ -79,6 +79,7 @@ and invoices in Morpheus.
 
 | Plugin version | Plugin API | Min appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.1.1 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.1.0; 1.1.1 not yet on an appliance) | `user`, `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
 | 1.1.0 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 | `user`, `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
 
 Queries internal tables, tested on 9.0.2 only, may break on upgrade.
@@ -95,7 +96,7 @@ The codes are what Morpheus stores. They do not change between versions.
 
 ## Build from source
 
-Requires JDK 17 (Groovy 3.0.9) and the bundled Gradle wrapper. Run it in `finops/msp-tenant-overview`.
+Requires JDK 17 (Groovy 3.0.9) and the bundled Gradle wrapper (Gradle 9.8.0, checksum-pinned). Run it in `finops/msp-tenant-overview`.
 
 ```bash
 ./gradlew clean test shadowJar
@@ -103,7 +104,8 @@ Requires JDK 17 (Groovy 3.0.9) and the bundled Gradle wrapper. Run it in `finops
 ```
 
 The Spock tests cover the plugin identity (code, repo link, provider, message bundles), the
-currency fallback, grouping per currency, rounding, percentages and locale-aware number formats.
+currency fallback, grouping per currency, rounding, percentages, locale-aware number formats and
+the rendered template (no `- %` for tenants without revenue).
 
 ## Translations
 

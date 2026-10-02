@@ -89,7 +89,10 @@ class SocketUsageReportProvider extends AbstractReportProvider {
 	ServiceResponse validateOptions(Map opts) {
 		Map<String, String> errors = [:]
 		[FIELD_VMS_PER_SOCKET, FIELD_DEFAULT_HOST_SOCKETS].each { String field ->
-			if (!SocketMath.isValidOption(SocketMath.option(opts, field))) {
+			Object raw = SocketMath.option(opts, field)
+			if (SocketMath.isOutOfRange(raw)) {
+				errors[field] = message("${PROVIDER_CODE}.error.outOfRange", 'Enter a number up to 1,000,000 with at most 3 decimal places, without exponent notation, or leave the field empty for the default.')
+			} else if (!SocketMath.isValidOption(raw)) {
 				errors[field] = message("${PROVIDER_CODE}.error.positiveNumber", 'Enter a number greater than 0, or leave the field empty for the default.')
 			}
 		}
@@ -129,8 +132,8 @@ class SocketUsageReportProvider extends AbstractReportProvider {
 		morpheus.report.updateReportResultStatus(reportResult, ReportResult.Status.generating).blockingAwait()
 		try {
 			Map config = reportResult.configMap
-			BigDecimal vmsPerSocket = SocketMath.positiveOr(SocketMath.option(config, FIELD_VMS_PER_SOCKET), SocketMath.DEFAULT_VMS_PER_SOCKET)
-			BigDecimal defaultHostSockets = SocketMath.positiveOr(SocketMath.option(config, FIELD_DEFAULT_HOST_SOCKETS), SocketMath.DEFAULT_HOST_SOCKETS)
+			BigDecimal vmsPerSocket = optionOrDefault(reportResult, config, FIELD_VMS_PER_SOCKET, SocketMath.DEFAULT_VMS_PER_SOCKET)
+			BigDecimal defaultHostSockets = optionOrDefault(reportResult, config, FIELD_DEFAULT_HOST_SOCKETS, SocketMath.DEFAULT_HOST_SOCKETS)
 			List<GroovyRowResult> rows = []
 			withDbConnection { Connection c -> rows = new Sql(c).rows(SQL) }
 			Map summary = SocketMath.summarize(rows as List<Map>, vmsPerSocket, defaultHostSockets)
@@ -151,6 +154,22 @@ class SocketUsageReportProvider extends AbstractReportProvider {
 				"a newer appliance version may have changed them: ${e.message}", e)
 			morpheus.report.updateReportResultStatus(reportResult, ReportResult.Status.failed).blockingAwait()
 		}
+	}
+
+	/*
+	 * A stored option that validateOptions would reject (a report created before 1.1.1, or
+	 * through a path that skips validation) falls back to the default with a log entry,
+	 * so the report never works with an unbounded value.
+	 */
+	private static BigDecimal optionOrDefault(ReportResult reportResult, Map config, String field, BigDecimal fallback) {
+		Object raw = SocketMath.option(config, field)
+		if (!SocketMath.isValidOption(raw)) {
+			String shown = raw.toString().trim()
+			log.warn("Socket usage report ${reportResult?.id}: option ${field} '${shown.length() > 40 ? shown.take(40) + '...' : shown}' " +
+				"is not a number greater than 0 and up to ${SocketMath.plainOption(SocketMath.MAX_OPTION)} with at most " +
+				"${SocketMath.MAX_OPTION_FRACTION_DIGITS} decimal places; using the default ${SocketMath.plainOption(fallback)}.")
+		}
+		return SocketMath.positiveOr(raw, fallback)
 	}
 
 	@Override

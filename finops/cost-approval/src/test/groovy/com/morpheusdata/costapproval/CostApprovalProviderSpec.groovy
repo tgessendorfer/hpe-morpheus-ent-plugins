@@ -8,6 +8,12 @@ import com.morpheusdata.model.Request
 import com.morpheusdata.model.RequestReference
 import groovy.json.JsonOutput
 import spock.lang.Specification
+import spock.lang.Timeout
+
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class CostApprovalProviderSpec extends Specification {
 
@@ -155,6 +161,101 @@ class CostApprovalProviderSpec extends Specification {
 		first[rr.externalRequestId].externalName == rr.externalRequestName
 		first[rr.externalRequestId].refs*.externalId == rr.references*.externalId
 		provider.monitorApproval(a) == []
+	}
+
+	def "a policy threshold with a decimal comma is honoured"() {
+		given:
+		Policy policy = new Policy()
+		policy.config = JsonOutput.toJson([cm: [plugin: [costThreshold: '10,50']]])
+
+		when:
+		def rsp = provider.createApprovalRequest([], request(10.50G, 'EUR'), integration(7, [costThreshold: '5']), policy, [:])
+
+		then:
+		rsp.references*.status == [RequestReference.ApprovalStatus.approved]
+		rsp.externalRequestName == 'Approved automatically (10.50 EUR <= 10.50 EUR per month)'
+	}
+
+	/** Holds the first put of a decision until the test releases it. */
+	static class SlowPutProvider extends CostApprovalProvider {
+		final CountDownLatch putStarted = new CountDownLatch(1)
+		final CountDownLatch releasePut = new CountDownLatch(1)
+
+		SlowPutProvider() { super(null, null) }
+
+		@Override
+		protected Map<String, Request> newReportMap() {
+			// Local copies: inside the anonymous map, a bare name would resolve as a map key.
+			CountDownLatch started = putStarted
+			CountDownLatch release = releasePut
+			return new ConcurrentHashMap<String, Request>() {
+				@Override
+				Request put(String key, Request value) {
+					started.countDown()
+					release.await(5, TimeUnit.SECONDS)
+					return super.put(key, value)
+				}
+			}
+		}
+	}
+
+	@Timeout(20)
+	def "a decision stored while a monitor run takes the pending reports is not lost"() {
+		given:
+		SlowPutProvider slow = new SlowPutProvider()
+		def ai = integration(3, [costThreshold: '50'])
+		List<Request> firstRun = []
+		def rsp = null
+		Thread create = Thread.start { rsp = slow.createApprovalRequest([], request(1G, 'EUR'), ai, null, [:]) }
+
+		when: 'a monitor run starts while the decision is being stored'
+		assert slow.putStarted.await(5, TimeUnit.SECONDS)
+		Thread monitor = Thread.start { firstRun.addAll(slow.monitorApproval(ai)) }
+		monitor.join(300)
+		slow.releasePut.countDown()
+		create.join()
+		monitor.join()
+		List<Request> secondRun = slow.monitorApproval(ai)
+
+		then: 'the decision is reported exactly once over both runs'
+		(firstRun + secondRun)*.externalId == [rsp.externalRequestId]
+		slow.monitorApproval(ai) == []
+	}
+
+	@Timeout(60)
+	def "concurrent decisions and monitor runs report every decision exactly once"() {
+		given:
+		def ai = integration(4, [costThreshold: '50'])
+		int writers = 4
+		int perWriter = 250
+		Set<String> created = ConcurrentHashMap.newKeySet()
+		List<String> reported = Collections.synchronizedList([])
+		CountDownLatch start = new CountDownLatch(1)
+		AtomicBoolean done = new AtomicBoolean(false)
+
+		when:
+		List<Thread> threads = (1..writers).collect {
+			Thread.start {
+				start.await()
+				perWriter.times { created << provider.createApprovalRequest([], request(1G, 'EUR'), ai, null, [:]).externalRequestId }
+			}
+		}
+		Thread monitor = Thread.start {
+			start.await()
+			while (!done.get()) {
+				reported.addAll(provider.monitorApproval(ai)*.externalId)
+			}
+		}
+		start.countDown()
+		threads*.join()
+		done.set(true)
+		monitor.join()
+		reported.addAll(provider.monitorApproval(ai)*.externalId)
+
+		then:
+		created.size() == writers * perWriter
+		reported.size() == created.size()
+		reported as Set == created
 	}
 
 	/** Shape of the internal domain object Morpheus 9.0.2 puts into Request.refs (not the model class). */

@@ -73,9 +73,22 @@ class BudgetBurnMath {
 		(running ?: 0.00G).divide(new BigDecimal(Math.max(dayOfMonth, 1)), 2, RoundingMode.HALF_UP)
 	}
 
+	/**
+	 * a as percent of b for display, e.g. "81.3 %"; "-" when b is not positive, since a
+	 * share of a budget of 0 has no meaningful number.
+	 */
+	static String pctLabel(BigDecimal a, BigDecimal b, Locale locale) {
+		hasBudget(b) ? "${pctText(pct(a, b), locale)} %".toString() : '-'
+	}
+
 	/** Bar width in percent of the cell, capped at 100 and never negative. */
 	static int barWidth(BigDecimal forecastPct) {
 		Math.max(0, Math.min((forecastPct ?: 0.00G).intValue(), 100))
+	}
+
+	/** Bar width of a forecast against a budget: full when there is spend but no budget. */
+	static int barWidth(BigDecimal forecast, BigDecimal budget) {
+		hasBudget(budget) ? barWidth(pct(forecast, budget)) : (positive(forecast) ? 100 : 0)
 	}
 
 	/**
@@ -88,6 +101,24 @@ class BudgetBurnMath {
 		if(p > OVER_PCT) return STATUS_OVER
 		if(p >= WARNING_PCT) return STATUS_WARNING
 		STATUS_OK
+	}
+
+	/**
+	 * Status of a forecast against a monthly budget. Without a positive budget any
+	 * forecast spend is over budget, and no spend is on track.
+	 */
+	static String status(BigDecimal forecast, BigDecimal budget, boolean mismatch) {
+		if(mismatch) return STATUS_MISMATCH
+		if(!hasBudget(budget)) return positive(forecast) ? STATUS_OVER : STATUS_OK
+		status(pct(forecast, budget), false)
+	}
+
+	static boolean hasBudget(BigDecimal budget) {
+		positive(budget)
+	}
+
+	private static boolean positive(BigDecimal v) {
+		v != null && v > 0.00G
 	}
 
 	static String statusColor(String status) {
@@ -116,9 +147,21 @@ class BudgetBurnMath {
 		}
 	}
 
-	/** Budget for months 1..month. */
+	/**
+	 * Budget for months 1..month. Quarterly and yearly shares are summed unrounded and
+	 * rounded once, so a full year (or quarter) gives exactly its budget.
+	 */
 	static BigDecimal budgetToDate(String interval, List periods, int month) {
-		(1..month).inject(0.00G) { BigDecimal acc, m -> acc + monthlyBudget(interval, periods, m as int) } as BigDecimal
+		Map byIdx = periods.collectEntries { [(it.interval_index as Integer): num(it.cost)] }
+		switch(interval) {
+			case 'quarter':
+				BigDecimal thirds = (1..month).inject(0.00G) { BigDecimal acc, m -> acc + ((byIdx[((m as int) - 1).intdiv(3) + 1] ?: 0.00G) as BigDecimal) } as BigDecimal
+				return thirds.divide(3G, 2, RoundingMode.HALF_UP)
+			case 'year':
+				return (((byIdx[1] ?: 0.00G) as BigDecimal) * month).divide(12G, 2, RoundingMode.HALF_UP)
+			default:
+				return (1..month).inject(0.00G) { BigDecimal acc, m -> acc + monthlyBudget(interval, periods, m as int) } as BigDecimal
+		}
 	}
 
 	/**

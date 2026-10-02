@@ -58,12 +58,17 @@ every tenant.
 | VMs per Socket | `socket-usage-report-vms-per-socket` | `vmsPerSocket` | 15 |
 | Sockets per Host Without Value | `socket-usage-report-default-host-sockets` | `defaultHostSockets` | 2 |
 
-An empty field uses the default. Zero, negative or non-numeric values are rejected.
+An empty field uses the default. A value must be greater than 0 and at most 1,000,000, with at
+most 3 decimal places, in plain notation; zero, negative, non-numeric, larger values, more
+decimal places and exponent notation (`1e2`) are rejected (since 1.1.1). A stored value outside
+these bounds, for example from a report created with 1.1.0, falls back to the default when the
+report runs, with a warning in the appliance log.
 
 ## Compatibility
 
 | Plugin version | Plugin API | Min. appliance | Tested appliance | Internal tables read |
 |---|---|---|---|---|
+| 1.1.1 | 1.4.2 | 9.0.2 | not yet (unit tests only) | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account` |
 
 **The report queries internal database tables. It is tested on 9.0.2 only and may break on an

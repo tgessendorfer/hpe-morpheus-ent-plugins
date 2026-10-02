@@ -106,6 +106,34 @@ class ChargebackCalculatorSpec extends Specification {
 		thrown(NumberFormatException)
 	}
 
+	@Unroll
+	def "markup '#v' is accepted as #expected"() {
+		expect:
+		parsePercent(v) == expected
+
+		where:
+		v           | expected
+		'0'         | 0G
+		'1000'      | 1000G
+		'1000.0000' | 1000G
+		'7.1234'    | 7.1234G
+		'7,12340'   | 7.1234G
+		'.5'        | 0.5G
+		'5.'        | 5G
+	}
+
+	@Unroll
+	def "markup '#v' is rejected"() {
+		when:
+		parsePercent(v)
+
+		then:
+		thrown(NumberFormatException)
+
+		where:
+		v << ['-5', '-0.5', '+5', '1E3', '1e2', '1e-10', '5e', '1000.0001', '1001', '99999999999', '7.12345', '0.00001', '1.2.3', '7 5', '.']
+	}
+
 	// ------------------------------------------------------------------
 	// Rounding and percentages
 	// ------------------------------------------------------------------
@@ -198,6 +226,15 @@ class ChargebackCalculatorSpec extends Specification {
 		decimalShort('7.5', Locale.GERMAN) == '7,5'
 		decimalShort('10', Locale.ENGLISH) == '10'
 		decimalShort('0', Locale.ENGLISH) == '0'
+	}
+
+	def "the markup is shown with the four decimals it is calculated with"() {
+		expect:
+		decimalShort('7.1234', Locale.ENGLISH) == '7.1234'
+		decimalShort('7.1234', Locale.GERMAN) == '7,1234'
+		decimalShort('0.0005', Locale.ENGLISH) == '0.0005'
+		decimalShort('1000', Locale.GERMAN) == '1.000'
+		markupFactor(7.1234G) == 1.071234G
 	}
 
 	// ------------------------------------------------------------------
@@ -312,6 +349,48 @@ class ChargebackCalculatorSpec extends Specification {
 		r.lines.size() == 1
 		r.lines[0].group == null
 		r.lines[0].resources == 2
+	}
+
+	def "two groups with the same name in one tenant stay apart by group id"() {
+		when:
+		Map r = aggregate([
+			row(grpId: 11, grp: 'Same', cost: '1', price: '2'),
+			row(grpId: 12, grp: 'Same', cost: '3', price: '4'),
+			row(grpId: 11, grp: 'Same', cost: '5', price: '6')
+		], 'EUR', 0G, false)
+
+		then:
+		r.lines.size() == 2
+		r.lines*.group == ['Same', 'Same']
+		r.lines*.cost == [6G, 3G]
+		r.lines*.resources == [2, 1]
+		r.tenants.size() == 1
+		r.tenants[0].cost == 9G
+	}
+
+	def "rows of one group id merge into one line"() {
+		when:
+		Map r = aggregate([row(grpId: 11, grp: 'Group 1', cost: '1', price: '1'), row(grpId: 11, grp: 'Group 1', cost: '2', price: '2')], 'EUR', 0G, false)
+
+		then:
+		r.lines.size() == 1
+		r.lines[0].group == 'Group 1'
+		r.lines[0].cost == 3G
+	}
+
+	def "servers without a group stay one line when the rows carry group ids"() {
+		when:
+		Map r = aggregate([
+			row(grpId: null, grp: null, cost: '1', price: '1'),
+			row(grpId: null, grp: '', cost: '1', price: '1'),
+			row(grpId: 11, grp: 'Group 1', cost: '1', price: '1')
+		], 'EUR', 0G, false)
+
+		then:
+		r.lines.size() == 2
+		r.lines[0].group == null
+		r.lines[0].resources == 2
+		r.lines[1].group == 'Group 1'
 	}
 
 	def "two tenants with the same name stay apart by id"() {

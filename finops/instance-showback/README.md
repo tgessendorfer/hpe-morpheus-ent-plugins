@@ -17,8 +17,8 @@ before, all taken from the invoices Morpheus already calculates.
   where Morpheus has them, otherwise the plan prices.
 - **History:** the current month and the three months before, one row per month and currency,
   with a bar scaled to the highest month **of the same currency**.
-- **Footer:** time of the last cost run (UTC), and a note when the instance has costs in more than
-  one currency.
+- **Footer:** time of the last cost run, converted to UTC whatever the JVM time zone, and a note
+  when the instance has costs in more than one currency.
 
 Prices are the invoice prices, so they include any tenant markup from the price set.
 
@@ -59,7 +59,7 @@ viewers use in Morpheus.
 ## Install
 
 1. Download `morpheus-instance-showback-plugin-<version>-all.jar` from the
-   [release instance-showback-v1.1.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/instance-showback-v1.1.0) (tag
+   [release instance-showback-v1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/instance-showback-v1.1.1) (tag
    `instance-showback-v<version>`) and check it against `SHA256SUMS`.
 2. *Administration > Integrations > Plugins > Add*, upload the jar.
 3. Open any instance: the tab **Costs** appears next to the built-in tabs.
@@ -74,7 +74,8 @@ that there is no cost data yet.
   plugin is tested on 9.0.2 only and may break on an upgrade. A failed query shows an error
   message in the tab and logs the cause; it does not break the page.
 - **Current month = JVM time zone.** Which month counts as current, and the day counter, follow the
-  time zone of the appliance JVM, not the viewer's.
+  time zone of the appliance JVM, not the viewer's. Morpheus 9.0.2 runs its JVM in UTC. The footer
+  time of the last cost run is always shown in UTC (since 1.1.1).
 - **Tab title in English.** `getName()` has no request context in plugin API 1.4.2, so the tab is
   titled *Costs* in every language; its content is translated.
 - **No conversion.** Mixed-currency instances show one row per currency; there is no total.
@@ -87,6 +88,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 
 | Plugin version | Plugin API | Min. appliance | Tested appliance | Internal tables read |
 |---|---|---|---|---|
+| 1.1.1 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | not yet tested live (1.1.0 on 9.0.2) | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`) |
 | 1.1.0 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`) |
 
 ## Identifiers
@@ -100,7 +102,8 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 
 ## Build from source
 
-Requires JDK 17 (Groovy 3.0.9) and the bundled Gradle wrapper. Run it in `finops/instance-showback`.
+Requires JDK 17 (Groovy 3.0.9) and the bundled Gradle wrapper (Gradle 9.8.0, checked against its
+SHA-256 checksum). Run it in `finops/instance-showback`.
 
 ```bash
 ./gradlew clean test shadowJar
@@ -108,7 +111,8 @@ Requires JDK 17 (Groovy 3.0.9) and the bundled Gradle wrapper. Run it in `finops
 ```
 
 The unit tests cover the currency rule, grouping per month and currency, rounding, locale-aware
-number formatting, bar scaling, the month list across year boundaries, the plugin identity
+number formatting, bar scaling, the month list across year boundaries, the UTC footer time under a
+non-UTC JVM time zone, the plugin identity
 (code, repository URL, provider) and the completeness of the message bundles.
 
 ## License

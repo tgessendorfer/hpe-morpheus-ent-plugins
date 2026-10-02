@@ -16,6 +16,7 @@
 package com.morpheusdata.costapproval
 
 import groovy.json.JsonSlurper
+import groovy.util.logging.Slf4j
 
 import java.math.RoundingMode
 import java.text.NumberFormat
@@ -24,6 +25,7 @@ import java.text.NumberFormat
  * The pure decision logic of the cost threshold approval: no Morpheus services, no state.
  * Everything here is covered by CostApprovalLogicSpec.
  */
+@Slf4j
 class CostApprovalLogic {
 
 	/** Threshold when neither the policy, the call options nor the integration set one. */
@@ -118,13 +120,22 @@ class CostApprovalLogic {
 		}
 	}
 
-	/** A non-negative amount, or null for empty, malformed or negative input. */
+	/**
+	 * A non-negative amount, or null for empty, malformed or negative input. A single decimal
+	 * comma with one or two digits after it is read as a decimal point ({@code 50,00} is 50.00);
+	 * forms that mix comma and dot or look like a thousands separator ({@code 1.000,50},
+	 * {@code 1,000}) stay malformed rather than being guessed.
+	 */
 	static BigDecimal toAmount(Object value) {
 		if (blank(value)) {
 			return null
 		}
+		String text = value.toString().trim()
+		if (text ==~ /\d+,\d{1,2}/) {
+			text = text.replace(',', '.')
+		}
 		try {
-			BigDecimal amount = new BigDecimal(value.toString().trim())
+			BigDecimal amount = new BigDecimal(text)
 			return amount.signum() < 0 ? null : amount
 		} catch (Exception ignored) {
 			return null
@@ -137,13 +148,23 @@ class CostApprovalLogic {
 		return code ==~ /[A-Z]{3}/ ? code : null
 	}
 
-	/** First threshold that parses: policy, call options, integration, else the default. */
-	static BigDecimal threshold(Map policyCfg, Map opts, Map integrationCfg) {
+	/**
+	 * First threshold that parses: policy, call options, integration, else the default. A value
+	 * that is set but does not parse is skipped as before, with one warning naming the level and
+	 * the raw value, so a typo no longer falls back to the next level unnoticed.
+	 */
+	static BigDecimal threshold(Map policyCfg, Map opts, Map integrationCfg,
+	                            Closure warn = { String msg -> log.warn(msg) }) {
 		// No Elvis chain: a threshold of 0 is valid and Groovy treats 0 as false.
-		for (Map cfg : [policyCfg, opts, integrationCfg]) {
-			BigDecimal amount = toAmount(configValue(cfg, FIELD_THRESHOLD))
+		Map<String, Map> levels = [policy: policyCfg, 'call options': opts, integration: integrationCfg]
+		for (Map.Entry<String, Map> level : levels.entrySet()) {
+			Object raw = configValue(level.value, FIELD_THRESHOLD)
+			BigDecimal amount = toAmount(raw)
 			if (amount != null) {
 				return amount
+			}
+			if (!blank(raw)) {
+				warn?.call("Cost threshold approval: ${level.key} threshold '${raw}' is not a non-negative amount, ignored".toString())
 			}
 		}
 		return DEFAULT_THRESHOLD

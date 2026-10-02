@@ -53,17 +53,20 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 	static final String FIELD_MARKUP = 'markupPercent'
 	static final String FIELD_PROVIDER = 'includeProvider'
 
-	/** Instance invoices plus server invoices without an instance, grouped by raw currency. */
+	/**
+	 * Instance invoices plus server invoices without an instance, grouped by tenant, group id and
+	 * raw currency. The group id keeps two groups with the same name apart; the name is for display.
+	 */
 	static final String INVOICE_SQL = '''
 		SELECT a.id AS tenant_id, a.name AS tenant, CAST(a.master_account AS UNSIGNED) AS is_master,
-		       i.site_name AS grp, NULLIF(TRIM(i.currency), '') AS currency,
+		       i.site_id AS grp_id, MAX(i.site_name) AS grp, NULLIF(TRIM(i.currency), '') AS currency,
 		       COUNT(*) AS resources,
 		       SUM(COALESCE(i.total_cost, 0)) AS cost, SUM(COALESCE(i.total_price, 0)) AS price
 		FROM account_invoice i JOIN account a ON a.id = i.account_id
 		WHERE i.period_interval = 'month' AND i.period = ?
 		  AND (i.ref_type = 'Instance' OR (i.ref_type = 'ComputeServer' AND i.instance_id IS NULL))
-		GROUP BY a.id, a.name, a.master_account, i.site_name, NULLIF(TRIM(i.currency), '')
-		ORDER BY a.master_account, a.name, i.site_name, currency'''
+		GROUP BY a.id, a.name, a.master_account, i.site_id, NULLIF(TRIM(i.currency), '')
+		ORDER BY a.master_account, a.name, grp, grp_id, currency'''
 
 	/** Currency of the master tenant, the second step of the currency rule. */
 	static final String MASTER_CURRENCY_SQL = '''
@@ -124,7 +127,7 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 			try {
 				parsePercent(markup)
 			} catch(NumberFormatException ignored) {
-				String text = msg("${PROVIDER_CODE}.error.markup", 'Enter the additional markup as a number, for example 5 or 7.5.')
+				String text = msg("${PROVIDER_CODE}.error.markup", 'Enter the additional markup as a number from 0 to 1000 with up to four decimals, for example 5 or 7.5.')
 				return ServiceResponse.error(text, [(FIELD_MARKUP): text])
 			}
 		}
@@ -147,7 +150,7 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 				masterCurrency = sql.firstRow(MASTER_CURRENCY_SQL)?.currency as String
 			}
 			List<Map> raw = rows.collect { GroovyRowResult r ->
-				[tenantId: r.tenant_id, tenant: r.tenant, isMaster: (r.is_master as Integer) == 1, grp: r.grp,
+				[tenantId: r.tenant_id, tenant: r.tenant, isMaster: (r.is_master as Integer) == 1, grpId: r.grp_id, grp: r.grp,
 				 currency: r.currency, resources: r.resources, cost: r.cost, price: r.price]
 			}
 			Map result = aggregate(raw, masterCurrency, markup, includeProvider)

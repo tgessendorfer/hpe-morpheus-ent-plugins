@@ -115,6 +115,15 @@ class MspTenantOverviewCalc {
 		f.format((num(a) * 100G).divide(num(b), 1, RoundingMode.HALF_UP))
 	}
 
+	/**
+	 * pct with its unit for running text ('40.0 %'), or '' when there is no percentage,
+	 * so the template can leave it out instead of showing '- %'.
+	 */
+	static String pctLabel(def a, def b, Locale locale) {
+		String p = pct(a, b, locale)
+		p == '-' ? '' : "${p} %".toString()
+	}
+
 	/** instance.max_memory is in bytes; shown as GB (GiB) with one decimal. */
 	static String memoryGb(def bytes, Locale locale) {
 		DecimalFormat f = new DecimalFormat('#,##0.0', DecimalFormatSymbols.getInstance(locale))
@@ -122,13 +131,18 @@ class MspTenantOverviewCalc {
 		f.format(num(bytes).divide(BYTES_PER_GB, 1, RoundingMode.HALF_UP))
 	}
 
-	/** Display texts for one currency entry; margins come from the rounded amounts. */
+	/**
+	 * Display texts for one currency entry; margins come from the rounded amounts.
+	 * marginPct/lmarginPct are table cells ('-' without revenue); marginPctLabel/lmarginPctLabel
+	 * carry the unit for running text and are empty without revenue.
+	 */
 	static Map<String, String> texts(Map<String, BigDecimal> x, Locale locale) {
 		BigDecimal margin = x.rev - x.cost
 		BigDecimal lmargin = x.lrev - x.lcost
 		[revText    : money(x.rev, locale), costText: money(x.cost, locale),
 		 marginText : money(margin, locale), marginPct: pct(margin, x.rev, locale),
 		 lrevText   : money(x.lrev, locale), lcostText: money(x.lcost, locale),
-		 lmarginText: money(lmargin, locale), lmarginPct: pct(lmargin, x.lrev, locale)]
+		 lmarginText: money(lmargin, locale), lmarginPct: pct(lmargin, x.lrev, locale),
+		 marginPctLabel: pctLabel(margin, x.rev, locale), lmarginPctLabel: pctLabel(lmargin, x.lrev, locale)]
 	}
 }

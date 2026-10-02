@@ -6,7 +6,7 @@
       <div class="stats-container"><span class="big-stat">{{instances}}</span><span class="stat-label">{{i18n 'msp-tenant-overview-analytics.instances'}} ({{cores}} {{i18n 'msp-tenant-overview-analytics.vcpu'}})</span></div>
       {{#each totals}}
       <div class="stats-container"><span class="big-stat">{{revText}}</span><span class="stat-label">{{i18n 'msp-tenant-overview-analytics.revenue'}} {{../month}} ({{i18n 'msp-tenant-overview-analytics.forecast'}}, {{currency}})</span></div>
-      <div class="stats-container"><span class="big-stat">{{marginText}}</span><span class="stat-label">{{i18n 'msp-tenant-overview-analytics.margin'}} {{../month}} ({{currency}}, {{marginPct}} %)</span></div>
+      <div class="stats-container"><span class="big-stat">{{marginText}}</span><span class="stat-label">{{i18n 'msp-tenant-overview-analytics.margin'}} {{../month}} ({{currency}}{{#if marginPctLabel}}, {{marginPctLabel}}{{/if}})</span></div>
       <div class="stats-container"><span class="big-stat">{{lrevText}}</span><span class="stat-label">{{i18n 'msp-tenant-overview-analytics.revenue'}} {{../lastMonth}} ({{currency}}, {{i18n 'msp-tenant-overview-analytics.margin'}} {{lmarginText}})</span></div>
       {{/each}}
     </div>
@@ -24,7 +24,7 @@
     <tbody>
     {{#each items}}
       <tr>{{#if first}}<td><strong>{{name}}</strong></td><td>{{users}}</td><td>{{sites}}</td><td>{{instances}}</td><td>{{cores}}</td><td>{{memoryGb}}</td><td>{{servers}}</td>{{else}}<td colspan="7"></td>{{/if}}
-        <td>{{currency}}</td><td>{{revText}}</td><td>{{costText}}</td><td>{{marginText}}</td><td>{{marginPct}}</td><td>{{lrevText}}</td><td>{{lmarginText}} ({{lmarginPct}} %)</td></tr>
+        <td>{{currency}}</td><td>{{revText}}</td><td>{{costText}}</td><td>{{marginText}}</td><td>{{marginPct}}</td><td>{{lrevText}}</td><td>{{lmarginText}}{{#if lmarginPctLabel}} ({{lmarginPctLabel}}){{/if}}</td></tr>
     {{else}}
       <tr><td colspan="14">{{i18n 'msp-tenant-overview-analytics.noTenants'}}</td></tr>
     {{/each}}
@@ -32,7 +32,7 @@
     {{#if totals}}
     <tfoot>
     {{#each totals}}
-      <tr><td colspan="7"><strong>{{i18n 'msp-tenant-overview-analytics.total'}} {{currency}}</strong></td><td>{{currency}}</td><td><strong>{{revText}}</strong></td><td>{{costText}}</td><td>{{marginText}}</td><td>{{marginPct}}</td><td>{{lrevText}}</td><td>{{lmarginText}} ({{lmarginPct}} %)</td></tr>
+      <tr><td colspan="7"><strong>{{i18n 'msp-tenant-overview-analytics.total'}} {{currency}}</strong></td><td>{{currency}}</td><td><strong>{{revText}}</strong></td><td>{{costText}}</td><td>{{marginText}}</td><td>{{marginPct}}</td><td>{{lrevText}}</td><td>{{lmarginText}}{{#if lmarginPctLabel}} ({{lmarginPctLabel}}){{/if}}</td></tr>
     {{/each}}
     </tfoot>
     {{/if}}

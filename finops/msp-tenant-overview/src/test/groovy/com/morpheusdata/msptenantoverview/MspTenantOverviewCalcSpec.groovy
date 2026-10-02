@@ -123,6 +123,21 @@ class MspTenantOverviewCalcSpec extends Specification {
 		5G    | null   | EN     | '-'
 	}
 
+	@Unroll
+	def "pctLabel(#a, #b) in #locale == '#expected'"() {
+		expect:
+		MspTenantOverviewCalc.pctLabel(a, b, locale) == expected
+
+		where:
+		a     | b      | locale | expected
+		40G   | 100G   | EN     | '40.0 %'
+		1G    | 3G     | DE     | '33,3 %'
+		-5G   | 100G   | EN     | '-5.0 %'
+		5G    | 0G     | EN     | ''
+		5G    | -10G   | EN     | ''
+		5G    | null   | EN     | ''
+	}
+
 	def "memory is shown in GB with one decimal"() {
 		expect:
 		MspTenantOverviewCalc.memoryGb(8589934592L, EN) == '8.0'
@@ -143,5 +158,19 @@ class MspTenantOverviewCalcSpec extends Specification {
 		t.lrevText == '0.00'
 		t.lmarginText == '-10.00'
 		t.lmarginPct == '-'
+		t.marginPctLabel == '40.0 %'
+		t.lmarginPctLabel == ''
+	}
+
+	def "a tenant without invoices gets no percentage label in either month"() {
+		when:
+		Map t = MspTenantOverviewCalc.texts(MspTenantOverviewCalc.groupByCurrency([], '202610', 'EUR').EUR, DE)
+
+		then:
+		t.marginPct == '-'
+		t.lmarginPct == '-'
+		t.marginPctLabel == ''
+		t.lmarginPctLabel == ''
+		!t.values().any { it.contains('%') }
 	}
 }

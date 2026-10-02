@@ -6,6 +6,51 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.1.1
+
+**Fix release: tenants without revenue no longer show `(- %)` next to their margin.** Built against
+plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
+
+### What changed
+
+- **No more `- %`.** The percentage helper returns `-` when a month has no revenue, and the template
+  appended ` %` to it in three places: the margin tile of the current month (`(USD, - %)`), and the
+  previous month's margin in every tenant row and in every total row (`0.00 (- %)`). Every tenant
+  without invoices showed it. The provider now hands the template a separate label with the unit
+  (`40.0 %`), which is empty when there is no percentage, and the template leaves the percentage
+  out in that case.
+- **Build update, no change to the jar's contents.** Gradle wrapper 9.8.0 with a pinned
+  distribution checksum (`distributionSha256Sum`), Shadow plugin 9.6.1 (`com.gradleup.shadow`)
+  instead of 6.0.0, Java 11 bytecode set through the `java { }` block, and no `mavenLocal()`
+  repository any more, so a build resolves only from Maven Central and the Gradle plugin portal.
+  The jar keeps the same manifest attributes and the same class layout.
+
+### Behaviour changes from 1.1.0
+
+- **Margin tile without revenue:** `Margin 2026-10 (USD)` instead of `Margin 2026-10 (USD, - %)`.
+- **Previous month's margin without revenue** (tenant rows and totals): `0.00` instead of
+  `0.00 (- %)`.
+- **Unchanged:** the *Margin %* column still shows `-` without revenue, and every percentage with
+  revenue reads as before (`40.0 %`).
+
+### Verified
+
+- `./gradlew clean test shadowJar --warning-mode all` with JDK 17 and Gradle 9.8.0: 46 tests, 0
+  failures, no deprecation warnings, one jar `morpheus-msp-tenant-overview-plugin-1.1.1-all.jar`.
+- Compared with a local 1.1.0 build: the same jar entries and the same manifest attributes apart
+  from `Plugin-Version`; class files are still Java 11 bytecode (major version 55).
+- New Spock tests: the percentage label for positive, negative, zero and missing revenue in English
+  and German; a tenant without invoices gets no percentage label in either month; and the template,
+  rendered with Handlebars, shows no `- %` and no empty brackets for such a tenant while keeping
+  `(EUR, 40.0 %)` and `5.00 (10.0 %)` for a tenant with revenue. The template test fails against
+  the 1.1.0 template.
+
+### Not yet verified
+
+- Live on the appliance: 1.1.1 has not been uploaded to a Morpheus 9.0.2 appliance yet.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.1.0...msp-tenant-overview-v1.1.1
+
 ## 1.1.0
 
 **First public release: one Analytics page for the provider with resources, revenue, cost and

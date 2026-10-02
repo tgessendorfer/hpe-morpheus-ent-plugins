@@ -54,27 +54,75 @@ class SocketMath {
 		return value
 	}
 
-	/** Parses a positive number; null, blank, non-numeric, zero or negative input yields null. */
-	static BigDecimal parsePositive(Object raw) {
+	/** Largest value an option accepts; far above any real ratio or socket count. */
+	static final BigDecimal MAX_OPTION = new BigDecimal(1000000)
+	/** Most fraction digits an option accepts. */
+	static final int MAX_OPTION_FRACTION_DIGITS = SCALE
+	/** Longest option text that is parsed at all; "1000000.000" has 11 characters. */
+	static final int MAX_OPTION_LENGTH = 32
+
+	/** Parses any number in plain notation; null, blank, too long, non-numeric or exponent input yields null. */
+	static BigDecimal parsePlain(Object raw) {
 		if (raw == null) {
 			return null
 		}
+		if (raw instanceof BigDecimal) {
+			// Checked by digit counts, so a huge exponent is never expanded to its plain form.
+			BigDecimal d = (BigDecimal) raw
+			return d.precision() - d.scale() <= MAX_OPTION_LENGTH && d.scale() <= MAX_OPTION_LENGTH ? d : null
+		}
 		String s = raw.toString().trim()
-		if (s.isEmpty()) {
+		// Exponent notation is rejected before parsing: 1e2000000000 parses cheaply, but any
+		// later toPlainString() or setScale() on it would build a two-billion-digit string.
+		if (s.isEmpty() || s.length() > MAX_OPTION_LENGTH || s.indexOf('e') >= 0 || s.indexOf('E') >= 0) {
 			return null
 		}
 		try {
-			BigDecimal v = new BigDecimal(s)
-			return v.signum() > 0 ? v : null
+			return new BigDecimal(s)
 		} catch (NumberFormatException ignored) {
 			return null
 		}
 	}
 
-	/** True when the raw option is empty (default applies) or a positive number. */
+	/**
+	 * Parses a positive option value; null, blank, non-numeric, zero, negative, exponent
+	 * notation, more than {@link #MAX_OPTION_FRACTION_DIGITS} fraction digits or more than
+	 * {@link #MAX_OPTION} yields null.
+	 */
+	static BigDecimal parsePositive(Object raw) {
+		BigDecimal v = parsePlain(raw)
+		if (v == null || v.signum() <= 0 || v.compareTo(MAX_OPTION) > 0) {
+			return null
+		}
+		return v.stripTrailingZeros().scale() > MAX_OPTION_FRACTION_DIGITS ? null : v
+	}
+
+	/** True when the raw option is empty (default applies) or a positive number within the bounds. */
 	static boolean isValidOption(Object raw) {
 		return raw == null || raw.toString().trim().isEmpty() || parsePositive(raw) != null
 	}
+
+	/** True when the raw option is a positive plain number that only fails the bounds of {@link #parsePositive}. */
+	static boolean isOutOfRange(Object raw) {
+		if (raw == null || raw.toString().trim().isEmpty() || parsePositive(raw) != null) {
+			return false
+		}
+		BigDecimal v = parsePlain(raw)
+		if (v != null) {
+			return v.signum() > 0
+		}
+		// Exponent notation or an over-long number: matched as text, never parsed, so the
+		// check stays cheap whatever the input. Positive when the mantissa has a digit other than 0.
+		java.util.regex.Matcher m = POSITIVE_NUMBER_TEXT.matcher(raw.toString().trim())
+		return m.matches() && NONZERO_DIGIT.matcher(m.group(1)).find()
+	}
+
+	/**
+	 * A positive number as text, plain or with an exponent; group 1 is the mantissa. Possessive
+	 * quantifiers never give back digits, so a non-matching text fails in linear time.
+	 */
+	private static final java.util.regex.Pattern POSITIVE_NUMBER_TEXT = ~/^\+?(\d++(?:\.\d*+)?|\.\d++)(?:[eE][+-]?\d++)?$/
+	private static final java.util.regex.Pattern NONZERO_DIGIT = ~/[1-9]/
 
 	static BigDecimal positiveOr(Object raw, BigDecimal fallback) {
 		return parsePositive(raw) ?: fallback
@@ -117,8 +165,15 @@ class SocketMath {
 		return round(v).toPlainString()
 	}
 
-	/** Plain value without trailing zeros for option echoes, e.g. "15" or "7.5". */
+	/**
+	 * Plain value without trailing zeros for option echoes, e.g. "15" or "7.5".
+	 * Only for values that passed {@link #parsePositive}; anything else is refused instead of
+	 * expanded, since the plain form of an unbounded exponent has billions of digits.
+	 */
 	static String plainOption(BigDecimal v) {
+		if (v == null || v.abs().compareTo(MAX_OPTION) > 0 || v.stripTrailingZeros().scale() > MAX_OPTION_FRACTION_DIGITS) {
+			throw new IllegalArgumentException('option value out of range')
+		}
 		BigDecimal s = v.stripTrailingZeros()
 		return (s.scale() < 0 ? s.setScale(0) : s).toPlainString()
 	}

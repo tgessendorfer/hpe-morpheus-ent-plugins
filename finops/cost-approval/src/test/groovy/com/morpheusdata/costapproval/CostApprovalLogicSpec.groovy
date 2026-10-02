@@ -65,6 +65,65 @@ class CostApprovalLogicSpec extends Specification {
 		CostApprovalLogic.toAmount(' ') == null
 	}
 
+	@Unroll
+	def "toAmount reads a single decimal comma: '#text' -> #expected"() {
+		expect:
+		CostApprovalLogic.toAmount(text) == expected
+
+		where:
+		text        | expected
+		'50,00'     | 50.00G
+		' 50,5 '    | 50.5G
+		'0,99'      | 0.99G
+		'1.000,50'  | null
+		'1,000'     | null
+		'1,000.50'  | null
+		'50,'       | null
+		',50'       | null
+		'5,0,0'     | null
+		'-50,00'    | null
+	}
+
+	def "a threshold with a decimal comma is used, not the default"() {
+		expect:
+		CostApprovalLogic.threshold(null, null, [cm: [plugin: [costThreshold: '50,00']]], {}) == 50.00G
+	}
+
+	def "an unparsable threshold falls through with one warning naming the level and the value"() {
+		given:
+		List<String> warnings = []
+
+		when:
+		BigDecimal t = CostApprovalLogic.threshold([costThreshold: '1.000,50'], [costThreshold: 'abc'],
+			[cm: [plugin: [costThreshold: '30']]], { String m -> warnings << m })
+
+		then:
+		t == 30G
+		warnings == ["Cost threshold approval: policy threshold '1.000,50' is not a non-negative amount, ignored",
+			"Cost threshold approval: call options threshold 'abc' is not a non-negative amount, ignored"]
+	}
+
+	def "an unparsable integration threshold warns and the default applies; empty values stay silent"() {
+		given:
+		List<String> warnings = []
+
+		when:
+		BigDecimal t = CostApprovalLogic.threshold([costThreshold: ''], null, [costThreshold: '-5'], { String m -> warnings << m })
+
+		then:
+		t == 100G
+		warnings == ["Cost threshold approval: integration threshold '-5' is not a non-negative amount, ignored"]
+	}
+
+	def "a valid threshold logs nothing"() {
+		given:
+		List<String> warnings = []
+
+		expect:
+		CostApprovalLogic.threshold([costThreshold: '10'], [costThreshold: 'abc'], null, { String m -> warnings << m }) == 10G
+		warnings.isEmpty()
+	}
+
 	// ------------------------------------------------------------------
 	// Currency grouping
 	// ------------------------------------------------------------------
