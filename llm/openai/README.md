@@ -59,7 +59,7 @@ over HTTP or HTTPS.
 ### 1. Install the plugin
 
 Download `morpheus-openai-plugin-<version>-all.jar` from the
-[release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openai-v0.1.1) and
+[release](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openai-v0.1.2) and
 upload it under *Administration > Integrations > Plugins > Add*. The plugin registers two providers:
 `LLM OpenAI-Compatible API` and `OPTION OpenAI-Compatible API Options`.
 

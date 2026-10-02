@@ -1,3 +1,7 @@
+import asset.pipeline.AssetPipelineConfigHolder
+import asset.pipeline.AssetSpecLoader
+import asset.pipeline.gradle.AssetCompile
+
 buildscript {
 	repositories {
 		mavenCentral()
@@ -17,7 +21,6 @@ apply plugin: 'java'
 apply plugin: 'groovy'
 apply plugin: 'idea'
 apply plugin: 'com.gradleup.shadow'
-apply plugin: 'asset-pipeline'
 apply plugin: 'com.morpheusdata.morpheus-plugin-gradle'
 
 group = 'com.morpheusdata.openrouter'
@@ -101,3 +104,49 @@ tasks.withType(Sign) {
 }
 
 tasks.assemble.dependsOn tasks.shadowJar
+
+// asset-pipeline 4.4.0's AssetCompile reads its classpath through Task.project while it runs, which
+// Gradle 9 deprecates and Gradle 10 rejects. This subclass gets the classpath as a task input set at
+// configuration time. The asset-pipeline plugin is not applied; the task is wired the way the plugin
+// wires it: compiled assets go to build/assets and into jar and shadowJar under assets/.
+@CacheableTask
+abstract class PluginAssetCompile extends AssetCompile {
+	@Classpath
+	abstract ConfigurableFileCollection getAssetClasspath()
+
+	@Inject
+	abstract ObjectFactory getObjects()
+
+	@Internal
+	@Override
+	FileCollection getClasspath() {
+		assetClasspath
+	}
+
+	@Internal
+	@Override
+	FileTree getSource() {
+		objects.fileTree().from(assetsDir)
+	}
+
+	@Override
+	void loadAssetSpecifications() {
+		AssetSpecLoader.loadSpecifications()
+	}
+}
+
+AssetPipelineConfigHolder.config = (AssetPipelineConfigHolder.config ?: [:]) + [cacheLocation: layout.buildDirectory.file('.assetcache').get().asFile.path]
+
+def assetCompile = tasks.register('assetCompile', PluginAssetCompile) {
+	assetsDir = file('src/assets')
+	destinationDir = layout.buildDirectory.dir('assets').get().asFile
+	assetClasspath.from(configurations.runtimeClasspath, configurations.provided)
+}
+
+[tasks.named('jar'), tasks.named('shadowJar')].each { jarTask ->
+	jarTask.configure {
+		from(assetCompile) {
+			into 'assets'
+		}
+	}
+}

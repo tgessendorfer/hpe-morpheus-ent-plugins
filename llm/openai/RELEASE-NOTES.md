@@ -6,6 +6,38 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 0.1.2
+
+**Build update only: the build no longer uses a Gradle API that Gradle 10 removes.** No change in
+behaviour, settings or plugin code, and the jar has the same content as 0.1.1.
+
+- **The asset-pipeline Gradle plugin is no longer applied.** Its `assetCompile` task (version
+  4.4.0) read its classpath through `Task.project` while it ran, which Gradle 9.8 reports as
+  deprecated and Gradle 10 turns into an error. The build now registers its own `assetCompile`
+  task, a small subclass of asset-pipeline's `AssetCompile` that receives the same classpath
+  (`runtimeClasspath` and `provided`) as a task input at configuration time. It writes to the same
+  place and goes into the jar the same way.
+- **asset-pipeline stays at 4.4.0.** Newer releases under `com.bertramlabs.plugins` (4.5.x,
+  5.0.0-5.0.9) still read the classpath the same way, and 5.0.9 does not build this plugin.
+- The `assets {}` extension, the `assets` configuration and the `assetClean` task are gone with
+  the plugin; this build used none of them.
+
+### Verified
+
+- Local build with JDK 17 and Gradle 9.8.0 (`--warning-mode all`): no deprecation warning,
+  156 test cases, 0 failures; the HTTP client tests also pass against plugin API 1.4.1.
+- The jar has the same entries as the 0.1.1 release jar, with the same content. Two files differ
+  only in ways every build produces: the build timestamp comment in `assets/manifest.properties`,
+  and the line order of `i18n/i18n.manifest` (a local build on macOS against the release workflow
+  on Linux).
+
+### Not yet verified
+
+- The release jar on an appliance. Its content equals 0.1.1, so no change is expected.
+- A build with Gradle 10, which is not released yet.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.1...openai-v0.1.2
+
 ## 0.1.1
 
 **Build update only: the plugin now builds with Gradle 9.8.0 instead of the end-of-life Gradle
