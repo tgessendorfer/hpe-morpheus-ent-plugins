@@ -56,10 +56,12 @@ unchanged.
 - With the Morpheus setting switched to `de` for the same user while the request asked for English
   (`Accept-Language: en-US`): the page renders in German with German number formats (decimal
   comma).
+- As a sub-tenant admin (impersonated from the master tenant): no *MSP Tenant Overview* entry in
+  the Analytics menu, and the page URL shows no tenant data.
 
 ### Not yet verified
 
-- That a sub-tenant user still sees no menu entry.
+- Nothing beyond the limits in the README.
 
 Built by the release workflow from the source at tag `msp-tenant-overview-v1.2.0`.
 

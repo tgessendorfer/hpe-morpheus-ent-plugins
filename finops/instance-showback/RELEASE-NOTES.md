@@ -76,10 +76,13 @@ plugin API 1.4.2 and minimum appliance 9.0.2 unchanged.
 - With the Morpheus setting switched to `de` for the same user while the request asked for English
   (`Accept-Language: en-US`): the tab renders in German with German number formats (decimal
   comma).
+- As a sub-tenant admin without a language setting (impersonated from the master tenant, German
+  browser): the *Costs* tab of one of the tenant's instances shows its forecast (16,33 EUR) in
+  German, the browser language being the fallback.
 
 ### Not yet verified
 
-- A user without a setting, and a sub-tenant user.
+- Nothing beyond the limits in the README.
 
 Built by the release workflow from the source at tag `instance-showback-v1.2.0`.
 
