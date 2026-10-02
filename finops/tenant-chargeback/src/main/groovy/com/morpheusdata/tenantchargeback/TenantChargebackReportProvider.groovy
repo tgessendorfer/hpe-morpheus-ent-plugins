@@ -56,6 +56,9 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 	/**
 	 * Instance invoices plus server invoices without an instance, grouped by tenant, group id and
 	 * raw currency. The group id keeps two groups with the same name apart; the name is for display.
+	 * Server invoices can carry a group id with an empty name; aggregate() merges those into the
+	 * one line for servers without a group. If other invoices of the same id, tenant and currency
+	 * carry the name, MAX() returns it and the nameless ones count towards that group.
 	 */
 	static final String INVOICE_SQL = '''
 		SELECT a.id AS tenant_id, a.name AS tenant, CAST(a.master_account AS UNSIGNED) AS is_master,

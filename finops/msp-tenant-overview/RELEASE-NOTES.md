@@ -48,9 +48,13 @@ plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and option
   replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
   log.
 
+- Live on Morpheus 9.0.2 as master tenant user, in German and English: revenue, cost and margin
+  equal the Tenant Chargeback report for both months, and a currency without revenue shows
+  *Margin 2026-10 (USD)* and *0.00* instead of *(- %)*.
+
 ### Not yet verified
 
-- The page with this jar on the appliance. The jar loads there (see above).
+- That a sub-tenant user sees no menu entry with this jar (unchanged code path from 1.1.0).
 
 Built by the release workflow from the source at tag `msp-tenant-overview-v1.1.1`.
 

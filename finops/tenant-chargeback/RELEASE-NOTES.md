@@ -6,6 +6,51 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.1.2
+
+**Fix release: servers without a group are one row per tenant and currency again.** Plugin API
+1.4.2, minimum appliance 9.0.2, no new options.
+
+### Changes
+
+- **Nameless group lines merged again.** On Morpheus 9.0.2 the invoices of servers without an
+  instance can carry a group id but an empty group name. 1.1.1 keyed the group rows by group id,
+  so every such id became a row of its own, and all of them read *Servers without a group*: one
+  tenant showed two such rows in the same currency, another three. Lines without a group name now
+  merge into one *Servers without a group* row per tenant and currency, whatever their group id.
+  Lines with a group name stay keyed by group id, so two groups with the same name in one tenant
+  still get a row each (the 1.1.1 fix).
+- The query is unchanged: it sums per tenant, group id and currency and takes the group name it
+  finds. Group names are not looked up from the group table.
+- **Limit:** when other invoices of the same group id, tenant and currency carry the group's name,
+  the nameless server invoices of that id are summed into that group's row, not into *Servers
+  without a group*. 1.1.1 does the same; 1.1.0, which grouped by name, showed them without a
+  group. The totals are not affected. In the invoices that showed the split rows with 1.1.1 no
+  group id had both, since each of those ids came out as a row without a name.
+
+### Behaviour changes from 1.1.1
+
+- Several *Servers without a group* rows of one tenant and currency become one row with the summed
+  resources and amounts. For lines without a group name this restores the single row 1.1.0
+  showed. The per-tenant and per-currency totals are unchanged.
+
+### Verified
+
+- Unit tests (Spock), 121 in total, 0 failures. New tests cover the data shape seen on the
+  appliance: nameless lines with different group ids in two tenants, a nameless line with a null
+  group id, nameless lines in several currencies (including one without a currency that falls back
+  to the master tenant's), and two groups with the same name but different ids next to nameless
+  lines. The three new tests fail against the 1.1.1 sources.
+- Local build with JDK 17 and Gradle 9.8.0: one jar,
+  `morpheus-tenant-chargeback-plugin-1.1.2-all.jar`, no deprecation warnings.
+
+### Not yet verified
+
+- This jar on the appliance: upload, a report run, and the rows for servers without a group
+  against the invoices that showed the split rows with 1.1.1.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.1.1...tenant-chargeback-v1.1.2
+
 ## 1.1.1
 
 **Fix release: groups are told apart by id, and the additional markup is checked and shown with
@@ -53,10 +98,15 @@ the precision it is calculated with.** Plugin API 1.4.2, minimum appliance 9.0.2
   replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
   log.
 
-### Not yet verified
+- Live on Morpheus 9.0.2: the 2026-09 figures with 10 % markup equal the 1.1.0 acceptance
+  (cost 4.96, list price 6.16, margin 1.20, 19.5 %, invoice 6.78 EUR); a markup of 7.1234 % gives
+  6.60; markups of -5, 1e3, 7.12345, 1000.01 and +5 and the month 2026-13 are rejected.
 
-- A report run with this jar on the appliance, including the query on the group id against the
-  internal `account_invoice` table. The jar loads there (see above).
+### Known issue, fixed in 1.1.2
+
+- **Server invoices carry a group id but no group name**, so on the appliance one tenant showed two
+  or three *Servers without a group* rows per currency instead of one. Totals per tenant and
+  currency were correct. See 1.1.2.
 
 Built by the release workflow from the source at tag `tenant-chargeback-v1.1.1`.
 

@@ -51,12 +51,13 @@ accepted and the report thread then tried to write it out in full, with two bill
 - On Morpheus 9.0.2 (build 9.0.2-2): the release jar was uploaded over the previous build and
   replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
   log.
+- Live on Morpheus 9.0.2: the report with default options counts 11.600 sockets, equal to
+  `GET /api/license`; with 10 VMs per socket 12.400. An option of `1e2000000000`, `1000001`,
+  `1.2345`, `0`, `-3` or `abc` is rejected in under 0.1 s with the English or German message.
 
 ### Not yet verified
 
-- A report run with this jar on the appliance: the localized message in the report form and the
-  fallback for a stored 1.1.0 report are tested in unit tests only. The jar loads there (see
-  above).
+- The fallback for a stored 1.1.0 report with an out-of-range option (unit tests only).
 - Any appliance version other than 9.0.2.
 
 Plugin API 1.4.2, minimum appliance 9.0.2.

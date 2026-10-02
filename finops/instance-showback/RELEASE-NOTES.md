@@ -58,9 +58,13 @@ appliance JVM. Patch release; no new options, plugin code and provider code unch
   replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
   log.
 
+- Live on Morpheus 9.0.2 as master tenant user, page in German: the *Costs* tab shows month to date,
+  forecast, split and history equal to the instance's invoices, and the footer prints the last cost
+  run as `2026-10-02 08:59 UTC`, the invoice's `last_cost_date` in UTC.
+
 ### Not yet verified
 
-- The tab with this jar on the appliance. The jar loads there (see above).
+- The tab in English and as a sub-tenant user with this jar.
 
 Built by the release workflow from the source at tag `instance-showback-v1.1.1`.
 

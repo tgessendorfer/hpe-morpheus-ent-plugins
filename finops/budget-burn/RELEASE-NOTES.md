@@ -47,10 +47,15 @@ the page layout are unchanged.
   replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
   log.
 
+- Live on Morpheus 9.0.2 as master tenant user, in German and English: every budget renders; the
+  forecast and the year to date equal the tenant's invoices (for example 16.33 forecast and 22.49
+  year to date against a year-to-date budget of exactly 5,000.00), and a budget with spend in
+  another currency shows it separately without percentages.
+
 ### Not yet verified
 
-- The page with this jar on the appliance: a budget of 0 and the new year-to-date figures have not
-  been checked there. The jar loads there (see above).
+- A budget of 0 on the appliance (none exists there; covered by unit tests) and the page as a
+  sub-tenant user with this jar.
 
 Built by the release workflow from the source at tag `budget-burn-v1.1.1`.
 

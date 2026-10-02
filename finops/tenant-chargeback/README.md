@@ -23,7 +23,8 @@ For one month (`account_invoice` with `period_interval = 'month'`):
 - **Per tenant:** the same figures per tenant and currency.
 - **Per tenant and group:** one row per tenant, group and currency. Groups are told apart by
   their id, so two groups with the same name in one tenant get a row each. Servers that belong to
-  no group are shown as one row, *Servers without a group*.
+  no group are shown as one row per tenant and currency, *Servers without a group*; that includes
+  server invoices that carry a group id but no group name (see *Known limits*).
 
 Counted are the invoices of **instances** and of **servers that belong to no instance**. The
 summary invoices Morpheus keeps per tenant, group, cloud and user are left out; they would count
@@ -99,6 +100,10 @@ viewers use in Morpheus.
 - Amounts are as current as the last Morpheus costing run.
 - Two groups with the same name in one tenant are two rows with the same name; the CSV export
   carries no group id to tell them apart, only their order.
+- Server invoices that carry a group id but no group name count as *Servers without a group*,
+  unless other invoices of that group id in the same tenant and currency carry its name: the query
+  sums per group id and takes the name it finds, so those server invoices count towards that
+  group. The group name is not looked up from the group table.
 - The tenant currency is not used for the currency rule; an invoice line without a currency
   falls back to the master tenant's currency.
 - **Reads internal database tables** (see the matrix below) through the read-only report
@@ -110,7 +115,8 @@ viewers use in Morpheus.
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
-| 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 loads, not run) | `account_invoice`, `account` |
+| 1.1.2 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.2 not yet) | `account_invoice`, `account` |
+| 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 run: split no-group rows, fixed in 1.1.2) | `account_invoice`, `account` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `account_invoice`, `account` |
 
 Queries internal tables, tested on 9.0.2 only, may break on upgrade.
@@ -118,7 +124,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 ## Install
 
 Download `morpheus-tenant-chargeback-plugin-<version>-all.jar` from the
-[release tenant-chargeback-v1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.1.1) (tag
+[release tenant-chargeback-v1.1.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.1.2) (tag
 `tenant-chargeback-v<version>`), then upload it under *Administration → Integrations → Plugins →
 Add*. Updating to a newer version with the same plugin code replaces the plugin in place and
 keeps existing report results. The report then appears under *Operations → Reports* in the

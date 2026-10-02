@@ -79,7 +79,7 @@ and invoices in Morpheus.
 
 | Plugin version | Plugin API | Min appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
-| 1.1.1 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.1.0; 1.1.1 loads, not run) | `user`, `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
+| 1.1.1 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.1.0; 1.1.1 as master) | `user`, `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
 | 1.1.0 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 | `user`, `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
 
 Queries internal tables, tested on 9.0.2 only, may break on upgrade.

@@ -393,6 +393,70 @@ class ChargebackCalculatorSpec extends Specification {
 		r.lines[1].group == 'Group 1'
 	}
 
+	def "server invoices with a group id but no group name merge into one line per tenant and currency"() {
+		given: 'the shape of the query result on 9.0.2: server invoices carry a group id with an empty group name'
+		List<Map> raw = [
+			row(tenantId: 2, tenant: 'Tenant A', grpId: 1, grp: null, currency: 'USD', resources: 34, cost: '10', price: '20'),
+			row(tenantId: 2, tenant: 'Tenant A', grpId: 7, grp: '', currency: 'USD', resources: 3, cost: '1', price: '2'),
+			row(tenantId: 2, tenant: 'Tenant A', grpId: 11, grp: 'Group 1', currency: 'USD', resources: 2, cost: '5', price: '6'),
+			row(tenantId: 3, tenant: 'Tenant B', grpId: 1, grp: null, currency: 'USD', resources: 1, cost: '1', price: '1'),
+			row(tenantId: 3, tenant: 'Tenant B', grpId: 2, grp: '  ', currency: 'USD', resources: 1, cost: '1', price: '1'),
+			row(tenantId: 3, tenant: 'Tenant B', grpId: 7, grp: null, currency: 'USD', resources: 3, cost: '1', price: '1')
+		]
+
+		when:
+		Map r = aggregate(raw, 'EUR', 0G, false)
+
+		then:
+		r.lines.size() == 3
+		r.lines*.tenant == ['Tenant A', 'Tenant A', 'Tenant B']
+		r.lines*.group == [null, 'Group 1', null]
+		r.lines*.resources == [37, 2, 5]
+		r.lines*.cost == [11G, 5G, 3G]
+		r.lines*.price == [22G, 6G, 3G]
+		r.tenants*.resources == [39, 5]
+		r.totals.size() == 1
+		r.totals[0].resources == 44
+		r.totals[0].cost == 19G
+	}
+
+	def "nameless rows merge per currency, whether their group id is set or null"() {
+		when:
+		Map r = aggregate([
+			row(grpId: 1, grp: null, currency: 'USD', resources: 1, cost: '1', price: '2'),
+			row(grpId: null, grp: null, currency: 'USD', resources: 1, cost: '1', price: '2'),
+			row(grpId: 7, grp: '', currency: 'EUR', resources: 1, cost: '3', price: '4'),
+			row(grpId: 2, grp: null, currency: null, resources: 1, cost: '5', price: '6'),
+			row(grpId: 7, grp: null, currency: 'USD', resources: 1, cost: '1', price: '2')
+		], 'EUR', 0G, false)
+
+		then: 'one no-group line per currency; the line without a currency falls back to EUR'
+		r.lines.size() == 2
+		r.lines*.group == [null, null]
+		r.lines*.currency == ['USD', 'EUR']
+		r.lines*.resources == [3, 2]
+		r.lines*.cost == [3G, 8G]
+		r.totals*.currency == ['USD', 'EUR']
+		r.totals*.price == [6G, 10G]
+	}
+
+	def "named groups stay keyed by id while nameless rows merge"() {
+		when:
+		Map r = aggregate([
+			row(grpId: 11, grp: 'Same', cost: '1', price: '1'),
+			row(grpId: 1, grp: null, cost: '1', price: '1'),
+			row(grpId: 12, grp: 'Same', cost: '2', price: '2'),
+			row(grpId: 2, grp: null, cost: '1', price: '1'),
+			row(grpId: null, grp: 'Named without id', cost: '4', price: '4'),
+			row(grpId: null, grp: 'Named without id', cost: '4', price: '4')
+		], 'EUR', 0G, false)
+
+		then:
+		r.lines*.group == ['Same', null, 'Same', 'Named without id']
+		r.lines*.cost == [1G, 2G, 2G, 8G]
+		r.lines*.resources == [1, 2, 1, 2]
+	}
+
 	def "two tenants with the same name stay apart by id"() {
 		when:
 		Map r = aggregate([row(tenantId: 5, tenant: 'Same'), row(tenantId: 6, tenant: 'Same')], 'EUR', 0G, false)

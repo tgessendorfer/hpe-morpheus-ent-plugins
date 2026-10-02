@@ -180,8 +180,10 @@ class ChargebackCalculator {
 	 * them) into the three report levels. Each input row needs tenant (name), isMaster, grp (null
 	 * for servers without a group), currency (raw, may be empty), resources, cost and price;
 	 * tenantId is optional and keeps two tenants with the same name apart, grpId likewise keeps
-	 * two groups with the same name apart. Without grpId the group name is the key; without both
-	 * the row belongs to the one line for servers without a group.
+	 * two groups with the same name apart. Without grpId the group name is the key. A row without
+	 * a group name belongs to the one line for servers without a group, whatever its grpId: server
+	 * invoices can carry a group id with an empty group name, and each such id would otherwise
+	 * show as a line of its own that reads the same.
 	 *
 	 * Rows whose raw currency is empty are resolved with {@link #resolveCurrency} and merged with
 	 * rows that already carry that currency, so a group never shows twice for one currency.
@@ -197,7 +199,7 @@ class ChargebackCalculator {
 			String cur = resolveCurrency(r.currency, masterCurrency)
 			String grp = r.grp?.toString()?.trim() ?: null
 			def tenantKey = r.tenantId != null ? r.tenantId.toString() : r.tenant?.toString()
-			String groupKey = r.grpId != null ? "id:${r.grpId}".toString() : (grp ? "name:${grp}".toString() : null)
+			String groupKey = !grp ? null : (r.grpId != null ? "id:${r.grpId}".toString() : "name:${grp}".toString())
 			List key = [tenantKey, groupKey, cur]
 			Map line = lines.get(key)
 			if(line == null) {
