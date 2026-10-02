@@ -59,11 +59,14 @@ instead of always being English.** Plugin code, provider code, option codes, pac
   provider for approval.*
 - The release jar replaced the release candidate on the same Morpheus 9.0.2 appliance in place
   (same plugin id), status `loaded`, valid and enabled. Its source equals the candidate's apart
-  from the version; the pages were not opened again with it.
+  from the version; the check with the `de` setting below ran with this jar.
+- With the requesting user's Morpheus setting switched to `de`: the same request was rejected with
+  the German reason *Über der Kostenschwelle von 10,00 EUR/Monat (angefragt 12,50 EUR). Bitte
+  wenden Sie sich für eine Freigabe an Ihren Provider.*
 
 ### Not yet verified
 
-- A requesting user with a German setting (expected: the German reason).
+- Nothing beyond the limits in the README.
 
 Built by the release workflow from the source at tag `cost-approval-v1.2.0`.
 

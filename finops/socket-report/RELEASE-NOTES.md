@@ -61,11 +61,14 @@ the browser's `Accept-Language`, and the API's user model carries no language.
   renders in English with 11.600 sockets in total, equal to `GET /api/license`.
 - The release jar replaced the release candidate on the same Morpheus 9.0.2 appliance in place
   (same plugin id), status `loaded`, valid and enabled. Its source equals the candidate's apart
-  from the version; the pages were not opened again with it.
+  from the version; the check with the `de` setting below ran with this jar.
+- With the Morpheus setting switched to `de` for the same user while the request asked for English
+  (`Accept-Language: en-US`): the report result renders in German with German number formats (decimal
+  comma).
 
 ### Not yet verified
 
-- A user with a German setting, and a result opened by a user other than its creator.
+- A result opened by a user other than its creator.
 
 Built by the release workflow from the source at tag `socket-report-v1.2.0`.
 

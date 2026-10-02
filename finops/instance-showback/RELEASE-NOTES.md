@@ -72,11 +72,14 @@ plugin API 1.4.2 and minimum appliance 9.0.2 unchanged.
   renders in English with the same figures as 1.1.1 and the last cost run in UTC.
 - The release jar replaced the release candidate on the same Morpheus 9.0.2 appliance in place
   (same plugin id), status `loaded`, valid and enabled. Its source equals the candidate's apart
-  from the version; the pages were not opened again with it.
+  from the version; the check with the `de` setting below ran with this jar.
+- With the Morpheus setting switched to `de` for the same user while the request asked for English
+  (`Accept-Language: en-US`): the tab renders in German with German number formats (decimal
+  comma).
 
 ### Not yet verified
 
-- A user with a German setting, a user without a setting, and a sub-tenant user.
+- A user without a setting, and a sub-tenant user.
 
 Built by the release workflow from the source at tag `instance-showback-v1.2.0`.
 

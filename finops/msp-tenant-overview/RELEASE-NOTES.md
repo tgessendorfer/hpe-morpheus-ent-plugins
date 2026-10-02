@@ -52,11 +52,14 @@ unchanged.
   English with the same figures as 1.1.1.
 - The release jar replaced the release candidate on the same Morpheus 9.0.2 appliance in place
   (same plugin id), status `loaded`, valid and enabled. Its source equals the candidate's apart
-  from the version; the pages were not opened again with it.
+  from the version; the check with the `de` setting below ran with this jar.
+- With the Morpheus setting switched to `de` for the same user while the request asked for English
+  (`Accept-Language: en-US`): the page renders in German with German number formats (decimal
+  comma).
 
 ### Not yet verified
 
-- A user with a German setting, and that a sub-tenant user still sees no menu entry.
+- That a sub-tenant user still sees no menu entry.
 
 Built by the release workflow from the source at tag `msp-tenant-overview-v1.2.0`.
 
