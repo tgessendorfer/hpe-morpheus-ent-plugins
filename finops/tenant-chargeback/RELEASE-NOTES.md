@@ -44,10 +44,21 @@ One section per version, newest first. The same text is the body of the matching
 - Local build with JDK 17 and Gradle 9.8.0: one jar,
   `morpheus-tenant-chargeback-plugin-1.1.2-all.jar`, no deprecation warnings.
 
+- On Morpheus 9.0.2 (build 9.0.2-2): the release jar replaced 1.1.1 in place (same plugin id),
+  status `loaded`, valid and enabled. Reports for 2026-09 (10 % markup, provider resources) and
+  2026-10 (no options) against the same runs with 1.1.1: the split rows are one row again (two USD
+  rows of 34 and 3 resources became one of 37; three of 1, 1 and 3 became one of 5); tenant and
+  total rows are identical, and every tenant and currency adds up to the same resources and
+  invoice amount.
+
 ### Not yet verified
 
-- This jar on the appliance: upload, a report run, and the rows for servers without a group
-  against the invoices that showed the split rows with 1.1.1.
+- The report as a sub-tenant user is not applicable (master tenant only); the page in English with
+  this jar was not opened.
+
+Built by the release workflow from the source at tag `tenant-chargeback-v1.1.2`.
+
+sha256 `d74d9ec3a0d1b6c2a49a18db6af296f04a0cfa229e2a2bae23d4c5634a040875`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.1.1...tenant-chargeback-v1.1.2
 
