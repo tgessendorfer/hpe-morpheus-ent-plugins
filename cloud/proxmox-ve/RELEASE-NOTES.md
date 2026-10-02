@@ -13,6 +13,67 @@ new number, and why the digests are recorded.
 
 ---
 
+## 0.1.30
+
+**A powered-off VM no longer puts a WARN in the appliance log on every cloud refresh.** The VM
+sync asked every QEMU VM's guest agent for its network interfaces, without looking at the VM's
+state or its agent setting. For a stopped VM Proxmox answers `500 VM <id> is not running`, and
+Morpheus' own HTTP client logs that as a WARN
+(`HttpApiClient - path: /api2/json/nodes/<node>/qemu/<id>/agent/network-get-interfaces error: 500`),
+once per stopped VM per refresh: about every 5 minutes in the lab, 320 lines in 29 hours for one
+VM. The plugin cannot change that log level, so it now skips the call: the guest agent is asked
+only when the VM is `running` and its config enables the agent (`agent: 1` or `enabled=1`). The
+VM config is now read before the agent call instead of after it, so this costs no extra request,
+and every refresh makes one request fewer per stopped or agent-less VM. When the config cannot be
+read, a running VM is still asked, as before.
+
+**Behaviour change:** none in what is synced. A stopped VM had no address from the agent before
+either; a running VM with the agent disabled answered `500 No QEMU guest agent configured` and
+had none. A running VM whose agent is enabled but not installed or not running in the guest is
+still asked and still causes the WARN, because that cannot be told apart without asking.
+
+**Build update: Gradle 9.8.0 and Shadow 9.6.1, like the other plugins in this repository.**
+
+- **Gradle 9.8.0** instead of the end-of-life Gradle 8.3, with the wrapper checking the
+  distribution's SHA-256 checksum. The build no longer stops at JDK 20.
+- **Shadow 9.6.1** (`com.gradleup.shadow`) replaces Shadow 8.1.1 (`com.github.johnrengelman`). It
+  is told not to add `Multi-Release: true` to the manifest, so the manifest stays as before.
+- **The asset-pipeline Gradle plugin is no longer applied**, for the same reason as in the LLM
+  plugins: its `assetCompile` task read its classpath through `Task.project` while it ran, which
+  Gradle 10 rejects. The build registers its own `assetCompile` task, a small subclass of
+  asset-pipeline 4.4.0's `AssetCompile` that gets the classpath at configuration time.
+- **No `mavenLocal()`** in the build, so a local Maven cache cannot change what is built.
+- The `console` task uses `mainClass`, and the build uses `layout.buildDirectory`; both old forms
+  are removed in Gradle 9 or 10.
+- The test task no longer prints its own `>>> SUCCESS: <spec> > <feature>` line per test
+  (`afterTest(Closure)` is deprecated); Gradle's test logging still shows each test.
+- CodeNarc 3.5.0 is unchanged and reports the same violations as before.
+
+### Verified
+
+- Local build with JDK 17 and Gradle 9.8.0 (`--warning-mode all`): no deprecation warning, 40
+  test cases (9 new, for when the agent is asked), 0 failures.
+- Compared with the 0.1.29 release jar, entry by entry: the manifest is byte-identical apart from
+  the version; the only changed classes are `ProxmoxApiComputeUtil` and its closures; the only
+  other changed file is the build timestamp comment in `assets/manifest.properties`. Three entries
+  are gone: `META-INF/versions/9/module-info.class` and its two folders, which come from a
+  dependency (commons-beanutils or commons-logging) and are never read, because the manifest has no
+  `Multi-Release: true`.
+- The cause was measured on the lab before the change: the WARN came only for VM 102, which was
+  stopped with `agent: 1`; the running VMs with the agent enabled caused none.
+
+### Not yet verified
+
+- This jar on an appliance, and the WARN gone from the log after a refresh. The lab was down when
+  this version was built.
+- The two cases that were not in the lab: a running VM with the agent disabled, and one with the
+  agent enabled but not running in the guest.
+- A build with Gradle 10, which is not released yet. `morpheus-plugin-gradle`'s `i18nPackage`
+  task also reads `Task.project` while Gradle fingerprints its inputs; Gradle 9.8 reports that
+  only with the configuration cache on.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.29-lab...proxmox-ve-v0.1.30-lab
+
 ## 0.1.29
 
 **Proxmox VE nodes count as hypervisor sockets for licensing.**

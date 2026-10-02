@@ -246,6 +246,17 @@ class ProxmoxApiComputeUtil {
         return first == '1' || first == 'enabled=1'
     }
 
+    /**
+     * Whether listVMs asks a VM's guest agent for its interfaces: only for a running VM whose
+     * config enables the agent. A null config (it could not be read) leaves the agent setting open.
+     */
+    static boolean shouldQueryGuestAgent(Map vm, Map vmConfig) {
+        if (vm?.status?.toString() != 'running') {
+            return false
+        }
+        return vmConfig == null || guestAgentEnabled(vmConfig)
+    }
+
     static String getVMStatus(HttpApiClient client, Map authConfig, String nodeId, String vmId) {
         ServiceResponse resp = callListApiV2(client, "nodes/$nodeId/qemu/$vmId/status/current", authConfig)
         if (!resp?.success || !(resp.data instanceof Map)) {
@@ -1510,9 +1521,17 @@ class ProxmoxApiComputeUtil {
         }
         qemuVMs.data.each { Map vm ->
             if (vm?.template == 0 && vm?.type == "qemu") {
-                def vmAgentInfo = callListApiV2(client, "nodes/$vm.node/qemu/$vm.vmid/agent/network-get-interfaces", authConfig)
+                def vmConfigInfo = callListApiV2(client, "nodes/$vm.node/qemu/$vm.vmid/config", authConfig)
+                def vmCfg = (vmConfigInfo?.data instanceof Map && vmConfigInfo.data.data instanceof Map)
+                        ? vmConfigInfo.data.data
+                        : (vmConfigInfo?.data instanceof Map ? vmConfigInfo.data : [:])
                 vm.ip = ""
-                if (vmAgentInfo.success && vmAgentInfo.data?.result) {
+                // Proxmox answers 500 for a stopped VM or one without the agent, and core's
+                // HttpApiClient logs a WARN for it on every refresh; skip the call in those cases.
+                def vmAgentInfo = shouldQueryGuestAgent(vm, vmConfigInfo?.success ? vmCfg : null)
+                        ? callListApiV2(client, "nodes/$vm.node/qemu/$vm.vmid/agent/network-get-interfaces", authConfig)
+                        : null
+                if (vmAgentInfo?.success && vmAgentInfo.data?.result) {
                     def interfaces = vmAgentInfo.data.result
                     // Iterate through each network interface
                     interfaces.each { iface ->
@@ -1529,10 +1548,6 @@ class ProxmoxApiComputeUtil {
                         }
                     }
                 }
-                def vmConfigInfo = callListApiV2(client, "nodes/$vm.node/qemu/$vm.vmid/config", authConfig)
-                def vmCfg = (vmConfigInfo?.data instanceof Map && vmConfigInfo.data.data instanceof Map)
-                        ? vmConfigInfo.data.data
-                        : (vmConfigInfo?.data instanceof Map ? vmConfigInfo.data : [:])
                 vm.osCode = morpheusOsCode(vmCfg.ostype as String)
                 vm.maxCores = (vmConfigInfo?.data?.data?.sockets?.toInteger() ?: 0) * (vmConfigInfo?.data?.data?.cores?.toInteger() ?: 0)
                 vm.coresPerSocket = vmConfigInfo?.data?.data?.cores?.toInteger() ?: 0

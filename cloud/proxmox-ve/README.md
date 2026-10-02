@@ -23,7 +23,7 @@
 > - Every cloud form field has help text and a placeholder.
 >
 > Prebuilt jars are under
-> [Releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.29-lab),
+> [Releases](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.30-lab),
 > tagged `proxmox-ve-v<version>-lab`.
 > Changes per version are in [`RELEASE-NOTES.md`](RELEASE-NOTES.md), and
 > installing is covered in [`docs/lab/installing.md`](docs/lab/installing.md).

@@ -13,7 +13,7 @@ releases on its own.
 | Anthropic Claude | LLM | [`llm/anthropic`](llm/anthropic) | [1.6.3](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/anthropic-v1.6.3) | Claude over the native Messages API, direct or through OpenRouter. Verified on Morpheus 9.0.1. |
 | OpenRouter | LLM | [`llm/openrouter`](llm/openrouter) | [0.2.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openrouter-v0.2.2) | Every other model OpenRouter serves, over its OpenAI-compatible API. Verified on Morpheus 9.0.2. |
 | OpenAI-Compatible API | LLM | [`llm/openai`](llm/openai) | [0.1.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openai-v0.1.2) | Any OpenAI-compatible chat API — api.openai.com, OpenRouter, LiteLLM, vLLM, Ollama — over HTTP or HTTPS, where HPE's Local LLM plugin fails on SNI. Verified on Morpheus 9.0.2. |
-| Proxmox VE | Cloud | [`cloud/proxmox-ve`](cloud/proxmox-ve) | [0.1.29-lab](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.29-lab) | Lab build of HPE's community Proxmox VE plugin, with Proxmox VE 9 support and working provisioning. Verified on Morpheus 9.0.2 with Proxmox VE 9.2.20. Community code without support. |
+| Proxmox VE | Cloud | [`cloud/proxmox-ve`](cloud/proxmox-ve) | [0.1.30-lab](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.30-lab) | Lab build of HPE's community Proxmox VE plugin, with Proxmox VE 9 support and working provisioning. Verified on Morpheus 9.0.2 with Proxmox VE 9.2.20. Community code without support. |
 | Tenant Chargeback | FinOps: Report | [`finops/tenant-chargeback`](finops/tenant-chargeback) | [1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.2.0) | Monthly chargeback per tenant and group from the Morpheus invoices: cost, list price, margin, optional markup, per currency, with CSV export. Verified on Morpheus 9.0.2. |
 | Instance Showback | FinOps: Instance tab | [`finops/instance-showback`](finops/instance-showback) | [1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/instance-showback-v1.2.0) | *Costs* tab on every instance: month to date, month-end forecast, compute/storage/license split and the three months before. Verified on Morpheus 9.0.2. |
 | Budget Burn | FinOps: Analytics | [`finops/budget-burn`](finops/budget-burn) | [1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/budget-burn-v1.2.0) | Yearly Morpheus budgets against actual spend: monthly budget, spend to date, burn rate, forecast and status. Verified on Morpheus 9.0.2. |
@@ -44,8 +44,8 @@ from the plugins' earlier repositories.
 
 ## Building
 
-Each plugin folder is a standalone Gradle project with its own wrapper. Use JDK 17: Groovy 3.0.9
-does not run on JDK 21, and the Proxmox VE plugin's Gradle 8.3 stops at JDK 20.
+Each plugin folder is a standalone Gradle project with its own wrapper. Use JDK 17: Groovy 3
+does not run on JDK 21. All plugins build with Gradle 9.8.0.
 
 ```bash
 (cd llm/anthropic && ./gradlew clean test shadowJar)    # build/libs/morpheus-anthropic-plugin-<version>-all.jar

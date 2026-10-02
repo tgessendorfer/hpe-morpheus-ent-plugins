@@ -126,6 +126,23 @@ class MyTestSpec extends Specification {
         null                             || false
     }
 
+    def "asks the guest agent only for a running VM with the agent enabled"() {
+        expect:
+        ProxmoxApiComputeUtil.shouldQueryGuestAgent(vm, config) == expected
+
+        where:
+        vm                  | config                                     || expected
+        [status: 'running'] | [agent: '1']                               || true
+        [status: 'running'] | [agent: 'enabled=1,fstrim_cloned_disks=1'] || true
+        [status: 'running'] | [agent: '0']                               || false
+        [status: 'running'] | [:]                                        || false
+        [status: 'running'] | null                                       || true
+        [status: 'stopped'] | [agent: '1']                               || false
+        [status: 'stopped'] | null                                       || false
+        [:]                 | [agent: '1']                               || false
+        null                | [agent: '1']                               || false
+    }
+
     def "reads the guest agent switch from a VM config"() {
         expect:
         ProxmoxApiComputeUtil.guestAgentEnabled(agent == null ? [:] : [agent: agent]) == expected

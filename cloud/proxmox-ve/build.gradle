@@ -1,11 +1,14 @@
+import asset.pipeline.AssetPipelineConfigHolder
+import asset.pipeline.AssetSpecLoader
+import asset.pipeline.gradle.AssetCompile
+
 buildscript {
     repositories {
-        mavenLocal()
         mavenCentral()
-        maven { url "https://plugins.gradle.org/m2/" }
+        maven { url = "https://plugins.gradle.org/m2/" }
     }
     dependencies {
-        classpath "com.github.johnrengelman:shadow:8.1.1"
+        classpath "com.gradleup.shadow:shadow-gradle-plugin:9.6.1"
         classpath "com.morpheusdata:morpheus-plugin-gradle:$morpheusApiVersion"
         classpath "com.bertramlabs.plugins:asset-pipeline-gradle:$assetPipelineVersion"
     }
@@ -16,8 +19,7 @@ apply plugin: 'java'
 apply plugin: 'groovy'
 apply plugin: 'codenarc'
 apply plugin: 'idea'
-apply plugin: 'com.github.johnrengelman.shadow'
-apply plugin: 'asset-pipeline'
+apply plugin: 'com.gradleup.shadow'
 apply plugin: 'com.morpheusdata.morpheus-plugin-gradle'
 
 
@@ -30,7 +32,6 @@ java {
 }
 
 repositories {
-	mavenLocal()
 	mavenCentral()
 }
 
@@ -99,13 +100,9 @@ jar {
 	}
 }
 
-assets {
-	packagePlugin = false //leave this false for plugins
-}
-
 
 task(console, dependsOn: 'classes', type: JavaExec) {
-	main = 'groovy.ui.Console'
+	mainClass = 'groovy.ui.Console'
 	classpath = sourceSets.main.compileClasspath + sourceSets.main.runtimeClasspath
 }
 
@@ -117,17 +114,17 @@ test {
 		exceptionFormat = 'full'
 	}
 
-	afterTest { desc, result ->
-		println ">>> ${result.resultType}: ${desc.className} > ${desc.name}"
-	}
-
 	classpath = classpath.filter { !it.path.endsWith('classes/java/test') }
 	doFirst {
-		def testJavaDir = file("$buildDir/classes/java/test")
+		def testJavaDir = layout.buildDirectory.dir("classes/java/test").get().asFile
 		if (!testJavaDir.exists()) {
 			testJavaDir.mkdirs()
 		}
 	}
+}
+shadowJar {
+	// Shadow 9 sets Multi-Release: true when a dependency does; the jar has no versioned classes.
+	addMultiReleaseAttribute = false
 }
 tasks.assemble.dependsOn tasks.shadowJar
 
@@ -144,9 +141,9 @@ codenarcMain {
 	source = 'src/main/groovy'
 	reports {
 		html.required = true
-		html.outputLocation = file("${buildDir}/reports/codenarc/main.html")
+		html.outputLocation = layout.buildDirectory.file("reports/codenarc/main.html")
 		xml.required = true
-		xml.outputLocation = file("${buildDir}/reports/codenarc/main.xml")
+		xml.outputLocation = layout.buildDirectory.file("reports/codenarc/main.xml")
 		text.required = false
 	}
 }
@@ -158,3 +155,49 @@ tasks.named('codenarcTest').configure {
 
 // Run CodeNarc as part of the check task
 check.dependsOn codenarcMain
+
+// asset-pipeline 4.4.0's AssetCompile reads its classpath through Task.project while it runs, which
+// Gradle 9 deprecates and Gradle 10 rejects. This subclass gets the classpath as a task input set at
+// configuration time. The asset-pipeline plugin is not applied; the task is wired the way the plugin
+// wires it: compiled assets go to build/assets and into jar and shadowJar under assets/.
+@CacheableTask
+abstract class PluginAssetCompile extends AssetCompile {
+	@Classpath
+	abstract ConfigurableFileCollection getAssetClasspath()
+
+	@Inject
+	abstract ObjectFactory getObjects()
+
+	@Internal
+	@Override
+	FileCollection getClasspath() {
+		assetClasspath
+	}
+
+	@Internal
+	@Override
+	FileTree getSource() {
+		objects.fileTree().from(assetsDir)
+	}
+
+	@Override
+	void loadAssetSpecifications() {
+		AssetSpecLoader.loadSpecifications()
+	}
+}
+
+AssetPipelineConfigHolder.config = (AssetPipelineConfigHolder.config ?: [:]) + [cacheLocation: layout.buildDirectory.file('.assetcache').get().asFile.path]
+
+def assetCompile = tasks.register('assetCompile', PluginAssetCompile) {
+	assetsDir = file('src/assets')
+	destinationDir = layout.buildDirectory.dir('assets').get().asFile
+	assetClasspath.from(configurations.runtimeClasspath, configurations.provided)
+}
+
+[tasks.named('jar'), tasks.named('shadowJar')].each { jarTask ->
+	jarTask.configure {
+		from(assetCompile) {
+			into 'assets'
+		}
+	}
+}
