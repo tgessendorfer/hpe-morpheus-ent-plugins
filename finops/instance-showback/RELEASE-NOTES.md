@@ -54,11 +54,13 @@ appliance JVM. Patch release; no new options, plugin code and provider code unch
   helpers that 1.1.0 does not have.
 - Local build: JDK 17, Gradle 9.8.0, no deprecation warnings; the jar has the same manifest
   attributes as 1.1.0 apart from `Plugin-Version`, and Java 11 bytecode (class file major 55).
+- On Morpheus 9.0.2 (build 9.0.2-2): the release jar was uploaded over the previous build and
+  replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
+  log.
 
 ### Not yet verified
 
-- Live on the appliance: not done yet. 1.1.1 has not been uploaded to HPE Morpheus Enterprise
-  9.0.2 so far.
+- The tab with this jar on the appliance. The jar loads there (see above).
 
 Built by the release workflow from the source at tag `instance-showback-v1.1.1`.
 

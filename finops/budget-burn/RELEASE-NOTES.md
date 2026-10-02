@@ -43,11 +43,14 @@ the page layout are unchanged.
   connection-release tests fail against the 1.1.0 code.
 - Local build with JDK 17 and Gradle 9.8.0: 91 tests, 0 failures, no deprecation warnings,
   one jar `morpheus-budget-burn-plugin-1.1.1-all.jar`.
+- On Morpheus 9.0.2 (build 9.0.2-2): the release jar was uploaded over the previous build and
+  replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
+  log.
 
 ### Not yet verified
 
-- Live on the appliance: 1.1.1 has not been uploaded to Morpheus 9.0.2 yet, so the page with a
-  budget of 0 and the new year-to-date figures have not been checked there.
+- The page with this jar on the appliance: a budget of 0 and the new year-to-date figures have not
+  been checked there. The jar loads there (see above).
 
 Built by the release workflow from the source at tag `budget-burn-v1.1.1`.
 

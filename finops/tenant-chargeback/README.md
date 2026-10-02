@@ -110,7 +110,7 @@ viewers use in Morpheus.
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
-| 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 not yet) | `account_invoice`, `account` |
+| 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 loads, not run) | `account_invoice`, `account` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `account_invoice`, `account` |
 
 Queries internal tables, tested on 9.0.2 only, may break on upgrade.

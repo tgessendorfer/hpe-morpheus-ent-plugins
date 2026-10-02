@@ -48,12 +48,15 @@ accepted and the report thread then tried to write it out in full, with two bill
 - Local build: JDK 17, Gradle 9.8.0, `clean test shadowJar` with `--warning-mode all` and no
   deprecation warnings; one `morpheus-socket-report-plugin-1.1.1-all.jar` with the same manifest
   attributes as 1.1.0 (apart from the version) and class-file major version 55.
+- On Morpheus 9.0.2 (build 9.0.2-2): the release jar was uploaded over the previous build and
+  replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
+  log.
 
 ### Not yet verified
 
-- Live on the appliance: 1.1.1 has not been uploaded to Morpheus 9.0.2 yet, so the localized
-  message in the report form and the fallback for a stored 1.1.0 report are tested in unit
-  tests only.
+- A report run with this jar on the appliance: the localized message in the report form and the
+  fallback for a stored 1.1.0 report are tested in unit tests only. The jar loads there (see
+  above).
 - Any appliance version other than 9.0.2.
 
 Plugin API 1.4.2, minimum appliance 9.0.2.

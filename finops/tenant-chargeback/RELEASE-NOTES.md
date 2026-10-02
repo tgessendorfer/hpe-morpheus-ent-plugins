@@ -49,11 +49,14 @@ the precision it is calculated with.** Plugin API 1.4.2, minimum appliance 9.0.2
 - Local build with JDK 17 and Gradle 9.8.0: one jar,
   `morpheus-tenant-chargeback-plugin-1.1.1-all.jar`, manifest as in 1.1.0 apart from the version,
   class files for Java 11, no deprecation warnings.
+- On Morpheus 9.0.2 (build 9.0.2-2): the release jar was uploaded over the previous build and
+  replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
+  log.
 
 ### Not yet verified
 
-- Live on the appliance: 1.1.1 has not been uploaded or run on Morpheus 9.0.2 yet, including the
-  query on the group id against the internal `account_invoice` table.
+- A report run with this jar on the appliance, including the query on the group id against the
+  internal `account_invoice` table. The jar loads there (see above).
 
 Built by the release workflow from the source at tag `tenant-chargeback-v1.1.1`.
 

@@ -68,7 +68,7 @@ report runs, with a warning in the appliance log.
 
 | Plugin version | Plugin API | Min. appliance | Tested appliance | Internal tables read |
 |---|---|---|---|---|
-| 1.1.1 | 1.4.2 | 9.0.2 | not yet (unit tests only) | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account` |
+| 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 loads, not run) | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account` |
 
 **The report queries internal database tables. It is tested on 9.0.2 only and may break on an

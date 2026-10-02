@@ -44,10 +44,13 @@ plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and option
   rendered with Handlebars, shows no `- %` and no empty brackets for such a tenant while keeping
   `(EUR, 40.0 %)` and `5.00 (10.0 %)` for a tenant with revenue. The template test fails against
   the 1.1.0 template.
+- On Morpheus 9.0.2 (build 9.0.2-2): the release jar was uploaded over the previous build and
+  replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
+  log.
 
 ### Not yet verified
 
-- Live on the appliance: 1.1.1 has not been uploaded to a Morpheus 9.0.2 appliance yet.
+- The page with this jar on the appliance. The jar loads there (see above).
 
 Built by the release workflow from the source at tag `msp-tenant-overview-v1.1.1`.
 

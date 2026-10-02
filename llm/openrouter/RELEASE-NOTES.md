@@ -24,10 +24,15 @@ shaded `-all.jar` is attached.
 - Local build with JDK 17 and Gradle 9.8.0: 20 tests, 0 failures; the HTTP client tests also
   pass against plugin API 1.4.1.
 - The jar has the same entries as the 0.2.0 jar, and its manifest differs only in `Plugin-Version`.
+- On Morpheus 9.0.2 (build 9.0.2-2): the release jar was uploaded over the previous build and
+  replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
+  log.
+- After the upload the plugin's integrations on the appliance stayed `ok`; a refresh of one of them
+  succeeded.
 
 ### Not yet verified
 
-- The jar on the appliance. The code is the same as 0.2.0, which runs on Morpheus 9.0.2.
+- A chat with this jar on the appliance. The code is the same as 0.2.0.
 - The asset-pipeline Gradle plugin 4.4.0 still uses an API that Gradle 9.8 reports as deprecated
   (`Task.project` at execution time). It works on Gradle 9 and has to change before Gradle 10;
   asset-pipeline 5.0.9 does not build this plugin.

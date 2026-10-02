@@ -61,11 +61,14 @@ codes, plugin API 1.4.2 and minimum appliance 9.0.2 are unchanged; no new option
   tests.
 - Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --warning-mode all`, 82 tests,
   0 failures, no deprecation warnings, one `morpheus-cost-approval-plugin-1.1.1-all.jar`.
+- On Morpheus 9.0.2 (build 9.0.2-2): the release jar was uploaded over the previous build and
+  replaced it in place (same plugin id), status `loaded`, valid and enabled; no plugin error in the
+  log.
 
 ### Not yet verified
 
-- Live on the appliance: 1.1.1 has not been uploaded or run against Morpheus 9.0.2 yet. The
-  approval flow itself is unchanged from 1.1.0, which was verified live.
+- An approval run with this jar on the appliance. The jar loads there (see above); the approval
+  flow itself is unchanged from 1.1.0, which was verified live.
 
 Built by the release workflow from the source at tag `cost-approval-v1.1.1`.
 

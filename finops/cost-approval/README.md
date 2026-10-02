@@ -94,7 +94,7 @@ a request are English, since the approval call carries no user locale.
 
 | Plugin version | Plugin API | Min appliance | Tested appliance | Internal DB tables read |
 |---|---|---|---|---|
-| [1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.1.1) | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 not yet) | `account` (`currency`, `master_account`), only when no currency is known |
+| [1.1.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.1.1) | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 loads, not run) | `account` (`currency`, `master_account`), only when no currency is known |
 | [1.1.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.1.0) | 1.4.2 | 9.0.2 | 9.0.2 | `account` (`currency`, `master_account`), only when no currency is known |
 
 Queries internal tables, tested on 9.0.2 only, may break on upgrade.

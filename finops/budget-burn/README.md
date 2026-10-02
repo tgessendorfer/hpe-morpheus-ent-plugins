@@ -93,7 +93,7 @@ None. The page has no settings; budgets are managed in Morpheus under
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
-| 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 not yet) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
+| 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 loads, not run) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 
 Queries internal tables, tested on 9.0.2 only, may break on upgrade.
