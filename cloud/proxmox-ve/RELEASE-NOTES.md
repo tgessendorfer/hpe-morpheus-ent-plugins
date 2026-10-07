@@ -110,10 +110,11 @@ still asked and still causes the WARN, because that cannot be told apart without
 - Four cloud refreshes after the upload: no WARN for the stopped VM 102 any more.
 - The cloud list renders the new logo at 108x40, the same as the VMware, OpenStack and HVM logos.
 - 53 test cases (13 new, for the plan choice), 0 failures.
+- The release jar on the lab appliance (replacing `0.1.30-rc.2`): loaded as `0.1.30`, cloud refresh
+  `ok`, every discovered guest kept its plan, no WARN for VM 102, no error from the plugin.
 
 ### Not yet verified
 
-- This release jar on an appliance (the lab ran the release candidates).
 - A new guest discovered after the upgrade: it gets its plan at creation, and its first usage
   record was not watched.
 - A guest resized in Proxmox: the sync moves it to the matching plan only if its current plan is
@@ -123,6 +124,10 @@ still asked and still causes the WARN, because that cannot be told apart without
 - A build with Gradle 10, which is not released yet. `morpheus-plugin-gradle`'s `i18nPackage`
   task also reads `Task.project` while Gradle fingerprints its inputs; Gradle 9.8 reports that
   only with the configuration cache on.
+
+Built by the release workflow from the source at tag `proxmox-ve-v0.1.30-lab`.
+
+sha256 `7104014d00d14b9f461782eedd9e0c54b491107dfb4a7dc86b37c43542bbb5b3`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.29-lab...proxmox-ve-v0.1.30-lab
 
