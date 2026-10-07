@@ -27,7 +27,8 @@ For one month (`account_invoice` with `period_interval = 'month'`):
   table (`compute_site`) and counts towards that group. Lines without a group id, or whose group
   no longer exists, are shown as one row per tenant and currency, *Servers without a group*.
 
-Counted are the invoices of **instances** and of **servers that belong to no instance**. The
+Counted are the invoices of **instances** and of **servers that belong to no instance** (since
+1.2.1 a server belongs to an instance when a `container` row links them (`container.server_id` = the invoice's `ref_id`, `container.instance_id` set); Morpheus leaves `instance_id` empty on the server invoice of an instance's own VM). The
 summary invoices Morpheus keeps per tenant, group, cloud and user are left out; they would count
 the same resources twice.
 
@@ -135,6 +136,7 @@ Morpheus itself through their i18n codes, not by the plugin.
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.2.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.1-rc.1, master tenant) | `account_invoice`, `account`, `compute_site`, `user`, `container` |
 | 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0, master tenant) | `account_invoice`, `account`, `compute_site`, `user` |
 | 1.1.2 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0, 1.1.2) | `account_invoice`, `account` |
 | 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 run: split no-group rows, fixed in 1.1.2) | `account_invoice`, `account` |

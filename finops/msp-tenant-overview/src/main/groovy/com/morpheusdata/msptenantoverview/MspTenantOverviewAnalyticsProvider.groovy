@@ -34,7 +34,7 @@ import java.time.YearMonth
  * tenant only (masterTenantOnly); loadData also checks that the user belongs to the master account.
  *
  * Reads Morpheus' internal tables (user, account, compute_site, instance, compute_server,
- * account_invoice) through the read-only report connection. Tested on Morpheus 9.0.2 only.
+ * container, account_invoice) through the read-only report connection. Tested on Morpheus 9.0.2 only.
  *
  * Language and number formats follow the viewer's Morpheus language setting (user.locale), not the
  * browser; see viewerLocale().
@@ -45,7 +45,10 @@ class MspTenantOverviewAnalyticsProvider extends AbstractAnalyticsProvider {
 	static final String PROVIDER_CODE = 'msp-tenant-overview-analytics'
 
 	// Instance invoices plus invoices of servers that belong to no instance, so nothing is counted twice.
-	static final String INVOICE_FILTER = "period_interval = 'month' AND (ref_type = 'Instance' OR (ref_type = 'ComputeServer' AND instance_id IS NULL))"
+	// The server invoice of an instance's VM carries no instance_id either; the server-to-instance
+	// link is the container table (container.server_id, container.instance_id).
+	static final String INVOICE_FILTER = "period_interval = 'month' AND (ref_type = 'Instance' OR (ref_type = 'ComputeServer' AND instance_id IS NULL" +
+		" AND NOT EXISTS (SELECT 1 FROM container ct WHERE ct.server_id = account_invoice.ref_id AND ct.instance_id IS NOT NULL)))"
 
 	Plugin plugin
 	MorpheusContext morpheus

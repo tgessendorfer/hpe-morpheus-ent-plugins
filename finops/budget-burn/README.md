@@ -32,7 +32,7 @@ One row per budget with `period = year` for the current calendar year:
 
 Spend means the price the tenant pays (including any tenant markup), not the provider's cost.
 Invoices counted are monthly invoices of instances and of servers that belong to no instance,
-so nothing is counted twice. The budget scope maps to the invoices as follows: tenant →
+so nothing is counted twice (since 1.2.1 a server belongs to an instance when a `container` row links them (`container.server_id` = the invoice's `ref_id`, `container.instance_id` set); Morpheus leaves `instance_id` empty on the server invoice of an instance's own VM). The budget scope maps to the invoices as follows: tenant →
 `account_id`, group → `site_id`, cloud → `zone_id`, user → `user_id`, otherwise the budget
 owner's tenant.
 
@@ -101,6 +101,7 @@ None. The page has no settings; budgets are managed in Morpheus under
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.2.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.1-rc.1, master tenant) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice`, `container` |
 | 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0, master tenant) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 | 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 as master) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |

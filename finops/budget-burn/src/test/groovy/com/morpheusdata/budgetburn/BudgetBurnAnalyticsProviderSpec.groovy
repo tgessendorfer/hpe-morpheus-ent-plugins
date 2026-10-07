@@ -16,6 +16,16 @@ class BudgetBurnAnalyticsProviderSpec extends Specification {
 		BudgetBurnAnalyticsProvider.BUDGET_SELECT.contains('a.currency AS owner_currency')
 	}
 
+	def "server invoices count only for servers that belong to no instance"() {
+		given:
+		String f = BudgetBurnAnalyticsProvider.INVOICE_FILTER
+
+		expect: 'an instance VM has an instance invoice and a server invoice without instance_id; the container row links them'
+		f.contains("i.ref_type = 'Instance'")
+		f.contains("i.ref_type = 'ComputeServer' AND i.instance_id IS NULL")
+		f.contains('NOT EXISTS (SELECT 1 FROM container ct WHERE ct.server_id = i.ref_id AND ct.instance_id IS NOT NULL)')
+	}
+
 	def "a failing connection release does not replace the page result"() {
 		given:
 		Connection connection = Mock(Connection)

@@ -6,6 +6,47 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.1
+
+**Revenue and cost no longer count each priced VM twice, and zero-amount currencies are hidden.**
+Built against plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and options are
+unchanged.
+
+### What changed
+
+- **Each priced VM counted once.** An instance's VM has two monthly invoices in Morpheus 9.0.2:
+  the instance invoice and a server invoice. Both carry the same price and cost, and the server
+  invoice has no `instance_id`, so the old filter `ref_type = 'ComputeServer' AND instance_id IS NULL`
+  let it through and the VM counted twice. A server invoice now counts only when no `container`
+  row links its server to an instance:
+  `NOT EXISTS (SELECT 1 FROM container ct WHERE ct.server_id = <invoice>.ref_id AND ct.instance_id IS NOT NULL)`.
+  Server invoices of discovered or unmanaged VMs (no instance) still count.
+- **Zero currencies hidden.** Servers without a priced plan have zero invoices in USD, which showed as
+  *USD 0.00* rows and a *Total USD 0.00*. A currency whose revenue and cost round to 0.00 in both
+  months is now left out of the tenant rows and the totals. A tenant with nothing but zero amounts
+  keeps one zero row in the master currency, so it is still listed.
+- **Internal tables read:** `container` in addition to the tables of 1.2.0.
+
+### Behaviour changes from 1.2.0
+
+- **Revenue and cost of tenants with instances drop to about half** where 1.2.0 counted the
+  instance's server invoice too; margin percentages stay the same.
+- **No *USD 0.00* rows or totals** for currencies without amounts.
+
+### Not covered
+
+- **Deleted instances (not verified).** If Morpheus removes the `container` row when an instance
+  and its server are deleted, a server invoice of that VM left over in the month counts again next
+  to the instance invoice. In the lab the server invoices of two deleted Contoso instances stayed
+  out, so the row seems to survive the deletion; the amounts involved are what accrued until then.
+
+### Verified
+
+- Unit tests (Spock) for the new filter and for hiding zero currencies.
+- Lab appliance (Morpheus 9.0.2, master tenant), 1.2.1-rc.1 built from the same source: Contoso revenue 2026-10 29.48 EUR (cost 23.96, margin 18.7 %), Fabrikam 13.62 EUR (11.50, 15.6 %), total 43.10 EUR (17.7 %); 1.2.0 showed 56.71 and 26.72 EUR with the same margins. No USD rows and no USD total. The new filter runs against the `container` table without error.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.2.0...msp-tenant-overview-v1.2.1
+
 ## 1.2.0
 
 **The page now follows the viewer's Morpheus language setting instead of the browser language.**

@@ -132,6 +132,32 @@ class MspTenantOverviewAnalyticsProviderSpec extends Specification {
 		p.message('no.such.key', 'fallback', Locale.ENGLISH) == 'fallback'
 	}
 
+	def "server invoices count only for servers that belong to no instance"() {
+		given:
+		String f = MspTenantOverviewAnalyticsProvider.INVOICE_FILTER
+
+		expect: 'an instance VM has an instance invoice and a server invoice without instance_id; the container row links them'
+		f.contains("ref_type = 'Instance'")
+		f.contains("ref_type = 'ComputeServer' AND instance_id IS NULL")
+		f.contains('NOT EXISTS (SELECT 1 FROM container ct WHERE ct.server_id = account_invoice.ref_id AND ct.instance_id IS NOT NULL)')
+	}
+
+	def "loadData leaves out currencies whose amounts are all zero, in the rows and in the totals"() {
+		given: 'EUR revenue plus zero-priced server invoices in USD'
+		def env = loadEnv(Locale.US, 'en-US', 1, [
+			[cur: 'EUR', period: currentPeriod(), rev: 28.58G, cost: 23.22G],
+			[cur: 'USD', period: currentPeriod(), rev: 0G, cost: 0G]])
+
+		when:
+		def resp = env.p.loadData(new User(id: 7L), [:])
+
+		then:
+		resp.success
+		resp.data.items*.currency == ['EUR']
+		resp.data.totals*.currency == ['EUR']
+		resp.data.totals[0].revText == '28.58'
+	}
+
 	def "loadData renders numbers and texts in the user's setting, not the browser's"() {
 		given: 'a German browser, a user whose Morpheus setting is en-US, one tenant with revenue'
 		def env = loadEnv(Locale.GERMANY, 'en-US')
@@ -246,7 +272,8 @@ class MspTenantOverviewAnalyticsProviderSpec extends Specification {
 		new MspTenantOverviewAnalyticsProvider(new MspTenantOverviewPlugin(), ctx)
 	}
 
-	private Map loadEnv(Locale browser, String setting, int isMaster = 1) {
+	private Map loadEnv(Locale browser, String setting, int isMaster = 1,
+			List<Map> invoiceRows = [[cur: 'EUR', period: currentPeriod(), rev: 1234.56G, cost: 1000.00G]]) {
 		MorpheusWebRequestService web = Mock() { getLocale() >> browser }
 		Connection conn = Mock()
 		MorpheusReportService report = Mock() {
@@ -259,7 +286,7 @@ class MspTenantOverviewAnalyticsProviderSpec extends Specification {
 		sql.firstRow({ it.contains('master_account') }, [7L]) >> [is_master: isMaster, currency: 'EUR']
 		sql.rows({ it.contains('FROM account a') }) >> [[id: 2L, name: 'Tenant A', users: 1, sites: 1, instances: 1, cores: 2,
 			memory: 2147483648L, servers: 1]]
-		sql.rows({ it.contains('account_invoice') }, _) >> [[cur: 'EUR', period: currentPeriod(), rev: 1234.56G, cost: 1000.00G]]
+		sql.rows({ it.contains('account_invoice') }, _) >> invoiceRows
 		def p = Spy(MspTenantOverviewAnalyticsProvider, constructorArgs: [new MspTenantOverviewPlugin(), ctx]) {
 			newSql(_) >> sql
 		}

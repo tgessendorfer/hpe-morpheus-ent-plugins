@@ -6,6 +6,43 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.1
+
+**Chargeback no longer counts each priced VM twice.**
+Built against plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and options are
+unchanged.
+
+### What changed
+
+- **Each priced VM counted once.** An instance's VM has two monthly invoices in Morpheus 9.0.2:
+  the instance invoice and a server invoice. Both carry the same price and cost, and the server
+  invoice has no `instance_id`, so the old filter `ref_type = 'ComputeServer' AND instance_id IS NULL`
+  let it through and the VM counted twice. A server invoice now counts only when no `container`
+  row links its server to an instance:
+  `NOT EXISTS (SELECT 1 FROM container ct WHERE ct.server_id = <invoice>.ref_id AND ct.instance_id IS NOT NULL)`.
+  Server invoices of discovered or unmanaged VMs (no instance) still count.
+- **Internal tables read:** `container` in addition to the tables of 1.2.0.
+
+### Behaviour changes from 1.2.0
+
+- **Cost, list price, invoice amount and the resource count of tenants with instances drop to
+  about half** where 1.2.0 counted the instance's server invoice too; margin percentages stay the
+  same.
+
+### Not covered
+
+- **Deleted instances (not verified).** If Morpheus removes the `container` row when an instance
+  and its server are deleted, a server invoice of that VM left over in the month counts again next
+  to the instance invoice. In the lab the server invoices of two deleted Contoso instances stayed
+  out, so the row seems to survive the deletion; the amounts involved are what accrued until then.
+
+### Verified
+
+- Unit tests (Spock) for the new filter.
+- Lab appliance (Morpheus 9.0.2, master tenant), 1.2.1-rc.1 built from the same source: report for 2026-10: Contoso 29.48 EUR list price / 23.96 EUR cost (18.7 %), Fabrikam 13.62 / 11.50 EUR (15.6 %), total 43.10 / 35.46 EUR, the same amounts as MSP Tenant Overview and Budget Burn. The new filter runs against the `container` table without error.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.2.0...tenant-chargeback-v1.2.1
+
 ## 1.2.0
 
 **The report page follows the user's Morpheus language setting, and server invoices appear under

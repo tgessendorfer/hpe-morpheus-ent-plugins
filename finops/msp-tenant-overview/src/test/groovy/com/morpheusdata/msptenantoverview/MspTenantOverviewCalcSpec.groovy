@@ -66,6 +66,37 @@ class MspTenantOverviewCalcSpec extends Specification {
 		g.CHF.rev == 1.01G
 	}
 
+	def "a currency whose amounts are all zero is left out"() {
+		given: 'zero-priced server invoices in USD next to priced EUR invoices'
+		List<Map> rows = [
+			[cur: 'EUR', period: '202610', rev: 28.58, cost: 23.22],
+			[cur: 'USD', period: '202610', rev: 0, cost: 0],
+			[cur: 'USD', period: '202609', rev: 0.004, cost: 0],
+		]
+
+		expect: 'USD rounds to 0.00 in both months'
+		MspTenantOverviewCalc.groupByCurrency(rows, '202610', 'EUR').keySet() as List == ['EUR']
+	}
+
+	def "a currency with an amount in only one month or only cost is kept"() {
+		given:
+		List<Map> rows = [
+			[cur: 'USD', period: '202609', rev: 5, cost: 0],
+			[cur: 'CHF', period: '202610', rev: 0, cost: 1],
+		]
+
+		expect:
+		MspTenantOverviewCalc.groupByCurrency(rows, '202610', 'EUR').keySet() as List == ['CHF', 'USD']
+	}
+
+	def "a tenant with zero amounts only gets one zero entry in the master currency"() {
+		given:
+		List<Map> rows = [[cur: 'USD', period: '202610', rev: 0, cost: 0]]
+
+		expect:
+		MspTenantOverviewCalc.groupByCurrency(rows, '202610', 'EUR') == [EUR: [rev: 0.00G, cost: 0.00G, lrev: 0.00G, lcost: 0.00G]]
+	}
+
 	def "a tenant without invoices gets one zero entry in the fallback currency"() {
 		expect:
 		MspTenantOverviewCalc.groupByCurrency([], '202610', null) == [USD: [rev: 0.00G, cost: 0.00G, lrev: 0.00G, lcost: 0.00G]]

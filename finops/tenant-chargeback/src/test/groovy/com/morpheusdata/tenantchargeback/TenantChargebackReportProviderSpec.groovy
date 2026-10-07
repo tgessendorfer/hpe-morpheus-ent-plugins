@@ -138,6 +138,15 @@ class TenantChargebackReportProviderSpec extends Specification {
 		TenantChargebackReportProvider.INVOICE_SQL.contains('i.site_id AS grp_id')
 	}
 
+	def "the invoice query counts server invoices only for servers that belong to no instance"() {
+		given:
+		String q = TenantChargebackReportProvider.INVOICE_SQL.replaceAll(/\s+/, ' ')
+
+		expect: 'an instance VM has an instance invoice and a server invoice without instance_id; the container row links them'
+		q.contains("i.ref_type = 'Instance' OR (i.ref_type = 'ComputeServer' AND i.instance_id IS NULL")
+		q.contains('NOT EXISTS (SELECT 1 FROM container ct WHERE ct.server_id = i.ref_id AND ct.instance_id IS NOT NULL)')
+	}
+
 	def "the invoice query looks a missing group name up in compute_site by group id"() {
 		given:
 		String q = TenantChargebackReportProvider.INVOICE_SQL.replaceAll(/\s+/, ' ')

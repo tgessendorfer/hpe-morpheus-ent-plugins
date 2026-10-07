@@ -35,7 +35,8 @@ import static com.morpheusdata.tenantchargeback.ChargebackCalculator.*
 /**
  * Chargeback per tenant and group for one month, read from the Morpheus invoices
  * (internal table account_invoice). Counted are instance invoices and server invoices without an
- * instance; the summary invoices per account, group, cloud and user are left out, they would count
+ * instance (no instance_id and no container row linking the server to an instance); the summary
+ * invoices per account, group, cloud and user are left out, they would count
  * twice. cost = purchase cost, price = list price including the price-set markup, margin =
  * price - cost. An optional additional markup in percent is applied to the list price.
  *
@@ -71,7 +72,8 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 		FROM account_invoice i JOIN account a ON a.id = i.account_id
 		LEFT JOIN compute_site cs ON cs.id = i.site_id
 		WHERE i.period_interval = 'month' AND i.period = ?
-		  AND (i.ref_type = 'Instance' OR (i.ref_type = 'ComputeServer' AND i.instance_id IS NULL))
+		  AND (i.ref_type = 'Instance' OR (i.ref_type = 'ComputeServer' AND i.instance_id IS NULL
+		    AND NOT EXISTS (SELECT 1 FROM container ct WHERE ct.server_id = i.ref_id AND ct.instance_id IS NOT NULL)))
 		GROUP BY a.id, a.name, a.master_account, i.site_id, NULLIF(TRIM(i.currency), '')
 		ORDER BY a.master_account, a.name, grp, grp_id, currency'''
 

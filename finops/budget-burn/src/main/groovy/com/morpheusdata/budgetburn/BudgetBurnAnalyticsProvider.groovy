@@ -48,7 +48,7 @@ import static com.morpheusdata.budgetburn.BudgetBurnMath.*
  * setting the web request's locale (browser language) counts, without a request English.
  *
  * Reads internal tables (account, user, account_budget, account_budget_period,
- * account_invoice); tested on Morpheus 9.0.2 only.
+ * account_invoice, container); tested on Morpheus 9.0.2 only.
  */
 @Slf4j
 class BudgetBurnAnalyticsProvider extends AbstractAnalyticsProvider {
@@ -59,7 +59,10 @@ class BudgetBurnAnalyticsProvider extends AbstractAnalyticsProvider {
 	// owner_master feeds the spend rule in scopeCondition (owner's invoices only, plus subtenants' for the master).
 	static final String BUDGET_SELECT = "SELECT b.*, a.name AS owner, a.currency AS owner_currency, CAST(a.master_account AS UNSIGNED) AS owner_master FROM account_budget b JOIN account a ON a.id = b.account_id WHERE b.period = 'year' AND b.period_value = ?"
 
-	static final String INVOICE_FILTER = "i.period_interval = 'month' AND (i.ref_type = 'Instance' OR (i.ref_type = 'ComputeServer' AND i.instance_id IS NULL))"
+	// Instance invoices plus invoices of servers that belong to no instance. The server invoice of an
+	// instance's VM carries no instance_id either; the link is the container table.
+	static final String INVOICE_FILTER = "i.period_interval = 'month' AND (i.ref_type = 'Instance' OR (i.ref_type = 'ComputeServer' AND i.instance_id IS NULL" +
+		" AND NOT EXISTS (SELECT 1 FROM container ct WHERE ct.server_id = i.ref_id AND ct.instance_id IS NOT NULL)))"
 
 	Plugin plugin
 	MorpheusContext morpheus

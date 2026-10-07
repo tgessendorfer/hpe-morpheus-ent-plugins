@@ -71,8 +71,10 @@ class MspTenantOverviewCalc {
 	/**
 	 * Groups one tenant's invoice rows (keys cur, period, rev, cost) by resolved currency.
 	 * Rows of the current period count as rev/cost, all others as lrev/lcost (the previous month).
-	 * The raw sums are rounded to cents per currency and month. A tenant without any row gets one
-	 * zero entry in the fallback currency, so it is still listed. Currencies are sorted by code.
+	 * The raw sums are rounded to cents per currency and month. A currency whose four rounded
+	 * amounts are all zero is left out (e.g. zero-priced server invoices in USD). A tenant without
+	 * any non-zero amount gets one zero entry in the fallback currency, so it is still listed.
+	 * Currencies are sorted by code.
 	 */
 	static Map<String, Map<String, BigDecimal>> groupByCurrency(List<Map> rows, String curPeriod, def masterCurrency) {
 		Map<String, Map<String, BigDecimal>> raw = new TreeMap<String, Map<String, BigDecimal>>()
@@ -85,11 +87,12 @@ class MspTenantOverviewCalc {
 				x.lrev += num(m.rev); x.lcost += num(m.cost)
 			}
 		}
-		if(raw.isEmpty()) raw[fallbackCurrency(masterCurrency)] = zero()
 		Map<String, Map<String, BigDecimal>> out = new LinkedHashMap<String, Map<String, BigDecimal>>()
 		raw.each { String ccy, Map<String, BigDecimal> x ->
-			out[ccy] = [rev: r2(x.rev), cost: r2(x.cost), lrev: r2(x.lrev), lcost: r2(x.lcost)]
+			Map<String, BigDecimal> r = [rev: r2(x.rev), cost: r2(x.cost), lrev: r2(x.lrev), lcost: r2(x.lcost)]
+			if(r.values().any { it.signum() != 0 }) out[ccy] = r
 		}
+		if(out.isEmpty()) out[fallbackCurrency(masterCurrency)] = [rev: r2(0), cost: r2(0), lrev: r2(0), lcost: r2(0)]
 		out
 	}
 
