@@ -30,11 +30,16 @@ behaviour, settings or plugin code, and the jar has the same content as 0.1.1.
   only in ways every build produces: the build timestamp comment in `assets/manifest.properties`,
   and the line order of `i18n/i18n.manifest` (a local build on macOS against the release workflow
   on Linux).
+- The release jar on the lab appliance (HPE Morpheus Enterprise 9.0.2): loaded, its two integrations `ok`
+  after the upload, no error or warning in the log.
 
 ### Not yet verified
 
-- The release jar on an appliance. Its content equals 0.1.1, so no change is expected.
 - A build with Gradle 10, which is not released yet.
+
+Built by the release workflow from the source at tag `openai-v0.1.2`.
+
+sha256 `e76be5344ff919318d42dbbe5dd68e65f2cb7ec10a55b9ade9adf0ddb15c4812`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.1...openai-v0.1.2
 

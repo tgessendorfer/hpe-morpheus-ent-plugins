@@ -30,11 +30,16 @@ behaviour, settings or plugin code, and the jar has the same content as 0.2.1.
   only in ways every build produces: the build timestamp comment in `assets/manifest.properties`,
   and the line order of `i18n/i18n.manifest` (a local build on macOS against the release workflow
   on Linux).
+- The release jar on the lab appliance (HPE Morpheus Enterprise 9.0.2): loaded, its three integrations `ok`
+  after the upload, no error or warning in the log.
 
 ### Not yet verified
 
-- The release jar on an appliance. Its content equals 0.2.1, so no change is expected.
 - A build with Gradle 10, which is not released yet.
+
+Built by the release workflow from the source at tag `openrouter-v0.2.2`.
+
+sha256 `5977bc1e6bae205b81bf341e01cbe92556cafca1997f4ce6102224e662cc933c`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.2.1...openrouter-v0.2.2
 

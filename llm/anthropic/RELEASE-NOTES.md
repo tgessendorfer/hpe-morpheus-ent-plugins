@@ -30,11 +30,16 @@ behaviour, settings or plugin code, and the jar has the same content as 1.6.2.
   only in ways every build produces: the build timestamp comment in `assets/manifest.properties`,
   and the line order of `i18n/i18n.manifest` (a local build on macOS against the release workflow
   on Linux).
+- The release jar on the lab appliance (HPE Morpheus Enterprise 9.0.2): loaded, its Anthropic integration `ok`
+  after the upload, no error or warning in the log.
 
 ### Not yet verified
 
-- The release jar on an appliance. Its content equals 1.6.2, so no change is expected.
 - A build with Gradle 10, which is not released yet.
+
+Built by the release workflow from the source at tag `anthropic-v1.6.3`.
+
+sha256 `26e847ba677648e72a2a3d7ec71c6d7608d1965e3e439de6a8640efd21181038`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.6.2...anthropic-v1.6.3
 
