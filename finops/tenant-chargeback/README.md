@@ -27,6 +27,10 @@ For one month (`account_invoice` with `period_interval = 'month'`):
   table (`compute_site`) and counts towards that group. Lines without a group id, or whose group
   no longer exists, are shown as one row per tenant and currency, *Servers without a group*.
 
+On the report page (since 1.2.2) a currency whose total cost, list price and invoice amount are
+all zero is left out of the cards and the three tables, as long as another currency has an amount;
+the CSV export keeps every row. Numbers are right-aligned and never broken inside.
+
 Counted are the invoices of **instances** and of **servers that belong to no instance** (since
 1.2.1 a server belongs to an instance when a `container` row links them (`container.server_id` = the invoice's `ref_id`, `container.instance_id` set); Morpheus leaves `instance_id` empty on the server invoice of an instance's own VM). The
 summary invoices Morpheus keeps per tenant, group, cloud and user are left out; they would count
@@ -136,6 +140,7 @@ Morpheus itself through their i18n codes, not by the plugin.
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.2.2 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.2-rc.2, master tenant) | `account_invoice`, `account`, `compute_site`, `user`, `container` |
 | 1.2.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.1-rc.1, master tenant) | `account_invoice`, `account`, `compute_site`, `user`, `container` |
 | 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0, master tenant) | `account_invoice`, `account`, `compute_site`, `user` |
 | 1.1.2 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0, 1.1.2) | `account_invoice`, `account` |
@@ -147,7 +152,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 ## Install
 
 Download `morpheus-tenant-chargeback-plugin-<version>-all.jar` from the
-[release tenant-chargeback-v1.2.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.2.1) (tag
+[release tenant-chargeback-v1.2.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.2.2) (tag
 `tenant-chargeback-v<version>`), then upload it under *Administration → Integrations → Plugins →
 Add*. Updating to a newer version with the same plugin code replaces the plugin in place and
 keeps existing report results. The report then appears under *Operations → Reports* in the

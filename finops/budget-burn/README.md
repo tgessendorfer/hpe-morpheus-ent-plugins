@@ -15,8 +15,11 @@ forecast, status, and the year to date.
 
 One row per budget with `period = year` for the current calendar year:
 
+- **Budget** – the budget's name, and under it in a smaller line its scope (*Tenant: …*,
+  *Group: …*, …), in the master tenant's view also its owner.
 - **Monthly budget** – the share of the budget for the current month: monthly budgets as
-  entered, quarterly budgets / 3, yearly budgets / 12 (two decimals, half up).
+  entered, quarterly budgets / 3, yearly budgets / 12 (two decimals, half up), with the budget
+  currency. All other amounts of the row are in that currency.
 - **Spend to date** – `running_price` of the monthly invoices in the budget scope, and its
   share of the monthly budget.
 - **Burn rate / day** – spend to date divided by the elapsed days of the month.
@@ -45,7 +48,7 @@ carries invoices of the master tenant.
 ## Who sees what
 
 - Users of the **master tenant** see all budgets of the master tenant and of every sub-tenant,
-  with an extra *Owner* column.
+  with the owner under each budget name.
 - Users of a **sub-tenant** see only the budgets owned by their own tenant.
 
 The page appears in the Morpheus analytics section (category *Cost*); which roles can open it follows the Morpheus analytics permissions.
@@ -101,6 +104,7 @@ None. The page has no settings; budgets are managed in Morpheus under
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.2.2 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.2-rc.2, master tenant) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice`, `container` |
 | 1.2.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.1-rc.1, master tenant) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice`, `container` |
 | 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0, master tenant) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 | 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 as master) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
@@ -111,7 +115,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 ## Install
 
 Download `morpheus-budget-burn-plugin-<version>-all.jar` from the
-[release budget-burn-v1.2.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/budget-burn-v1.2.1) (tag
+[release budget-burn-v1.2.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/budget-burn-v1.2.2) (tag
 `budget-burn-v<version>`), then upload it under *Administration → Integrations → Plugins →
 Add*. Updating to a newer version with the same plugin code replaces the plugin in place.
 

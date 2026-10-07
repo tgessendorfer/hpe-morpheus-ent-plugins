@@ -24,7 +24,7 @@ One row per active sub-tenant (`account.master_account = 0`, `active = 1`), orde
 | Servers | `compute_server` rows owned by the tenant |
 | Revenue | `account_invoice.total_price`: the price from the tenant's price set, markup included |
 | Cost | `account_invoice.total_cost`: the purchase cost |
-| Margin, Margin % | revenue - cost, and margin as a share of revenue (`-` in the column when revenue is 0; the percentage next to the tiles and the previous month's margin is then left out) |
+| Margin, Margin % | revenue - cost, and margin as a share of revenue, in a smaller line under the margin (left out when revenue is 0) |
 
 - **Invoices counted:** monthly invoices (`period_interval = 'month'`) of instances, plus those of
   servers that belong to no instance, so a VM is never counted twice. Since 1.2.1 a server belongs to an instance when a `container` row links them (`container.server_id` = the invoice's `ref_id`, `container.instance_id` set); Morpheus leaves `instance_id` empty on the server invoice of an instance's own VM.
@@ -32,7 +32,12 @@ One row per active sub-tenant (`account.master_account = 0`, `active = 1`), orde
   months gets no tenant row and no total; a tenant with nothing but zero amounts keeps one zero row
   in the master currency.
 - **Months:** the current month, which Morpheus projects to month end (forecast), and the previous
-  month.
+  month, each under its own column group heading.
+- **Layout (since 1.2.2):** the page brings its own scoped CSS, shows the five summary cards in
+  one row and fits the 857 px that Morpheus leaves an analytics page in its 1150 px container:
+  numbers right-aligned and never broken, secondary values in a smaller line under the amount, a
+  horizontal scroll bar instead of wrapping on narrow screens. It sets no text color, so it
+  follows the page in light and dark mode.
 - **Currencies are never added up.** A tenant with invoices in two currencies gets one line per
   currency; the totals in the table footer and the tiles above it are per currency, too.
 - **Currency of an invoice:** its own currency; if it has none, the master account's currency; if
@@ -62,7 +67,7 @@ and invoices in Morpheus.
 ## Install
 
 1. Download `morpheus-msp-tenant-overview-plugin-<version>-all.jar` from the
-   [release msp-tenant-overview-v1.2.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/msp-tenant-overview-v1.2.1) (tag
+   [release msp-tenant-overview-v1.2.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/msp-tenant-overview-v1.2.2) (tag
    `msp-tenant-overview-v<version>`) and check it against `SHA256SUMS`.
 2. *Administration > Integrations > Plugins > Add*, upload the jar.
 3. Open *Operations > Analytics* in the master tenant and pick **MSP Tenant Overview**.
@@ -89,6 +94,7 @@ and invoices in Morpheus.
 
 | Plugin version | Plugin API | Min appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.2.2 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.2.2-rc.2, master tenant) | `user` (incl. `locale`), `account`, `compute_site`, `instance`, `compute_server`, `container`, `account_invoice` |
 | 1.2.1 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.2.1-rc.1, master tenant) | `user` (incl. `locale`), `account`, `compute_site`, `instance`, `compute_server`, `container`, `account_invoice` |
 | 1.2.0 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.2.0, master tenant) | `user` (incl. `locale`), `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
 | 1.1.1 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.1.0; 1.1.1 as master) | `user`, `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
