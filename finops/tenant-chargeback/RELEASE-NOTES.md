@@ -6,6 +6,48 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.2
+
+**The report page hides currencies without any amount and right-aligns its numbers.** The stored
+report rows and the CSV export are unchanged.
+Built against plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and options are
+unchanged.
+
+### What changed
+
+- **Own scoped CSS.** The report page brings a `<style>` block whose rules all start with the
+  plugin's root class: numbers right-aligned and never broken inside, tighter cell padding, and a
+  horizontal scroll bar instead of wrapping on narrow screens.
+- **Light and dark mode.** The CSS sets no text color; card labels are the page's own color with
+  reduced opacity, card borders a translucent grey. On 9.0.2 the HPE theme variables
+  (`--hpe-color-*`) switch to dark values while the surrounding page can stay light, so they are
+  not used.
+- **Zero currencies hidden.** A currency whose total cost, list price and invoice amount are all
+  zero (on the lab: unpriced servers in USD) is left out of the cards and of all three tables, as
+  long as another currency has an amount. Rows of a priced currency stay even when they are zero
+  (an unpriced group in EUR is still listed). The CSV export keeps every row.
+- **Own cards.** The summary cards use their own classes in a grid; the *Total per currency*
+  heading no longer sits next to the first card.
+
+### Behaviour changes from 1.2.1
+
+- No *0.00 USD* card and no USD rows on the report page when USD has no amount; the CSV export is
+  unchanged.
+
+### Verified
+
+- Unit tests (Spock) for the zero-currency rule (hidden, kept when every currency is zero, stored
+  rows untouched), the right-aligned cells and the scoped CSS.
+- Lab appliance (Morpheus 9.0.2, Chrome): report result 109 for 2026-10 shown with 1.2.2-rc.1: one
+  card *43.10 EUR*, no USD row, numbers right-aligned, nothing wraps.
+
+### Not yet verified
+
+- The German page was checked in the unit tests only.
+- Dark mode was checked by setting `data-mode="dark"` in the browser and by review only.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.2.1...tenant-chargeback-v1.2.2
+
 ## 1.2.1
 
 **Chargeback no longer counts each priced VM twice.**

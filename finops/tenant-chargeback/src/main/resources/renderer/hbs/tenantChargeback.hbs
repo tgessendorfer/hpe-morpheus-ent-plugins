@@ -1,41 +1,59 @@
-<div class="intro-stats finops-chargeback">
-  <h2>{{t.title}} {{footer.month}}{{#if footer.isCurrent}} ({{t.currentMonth}}){{/if}}</h2>
-  <div class="count-stats">
-    <div class="stats-container"><span class="big-stat">{{footer.tenants}}</span><span class="stat-label">{{t.tenants}}</span></div>
-    {{#each totals}}
-    <div class="stats-container"><span class="big-stat">{{invoiceText}} {{currency}}</span><span class="stat-label">{{../t.invoiceTotal}} ({{../t.inclMarkup}} {{../footer.markupPercentText}} %)</span></div>
-    {{/each}}
-  </div>
+<div class="finops-chargeback">
+<style>
+  .finops-chargeback .finops-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 0 0 16px; }
+  .finops-chargeback .finops-kpi { min-width: 0; padding: 10px 14px; border: 1px solid rgba(128, 128, 128, .35); border-radius: 6px; }
+  .finops-chargeback .finops-kpi-value { display: block; font-size: 22px; line-height: 1.2; font-weight: 600; white-space: nowrap; }
+  .finops-chargeback .finops-kpi-label { display: block; margin-top: 4px; font-size: 12px; line-height: 1.3; opacity: .75; }
+  .finops-chargeback .finops-scroll { overflow-x: auto; }
+  .finops-chargeback table.finops-table { width: 100%; margin-bottom: 16px; }
+  .finops-chargeback .finops-table > thead > tr > th,
+  .finops-chargeback .finops-table > tbody > tr > td { padding: 5px 6px; }
+  .finops-chargeback .finops-table .num { text-align: right; }
+  .finops-chargeback .finops-table > tbody > tr > td.num { white-space: nowrap; }
+</style>
+<h2>{{t.title}} {{footer.month}}{{#if footer.isCurrent}} ({{t.currentMonth}}){{/if}}</h2>
+<div class="finops-kpis">
+  <div class="finops-kpi"><span class="finops-kpi-value">{{footer.tenants}}</span><span class="finops-kpi-label">{{t.tenants}}</span></div>
+  {{#each totals}}
+  <div class="finops-kpi"><span class="finops-kpi-value">{{invoiceText}} {{currency}}</span><span class="finops-kpi-label">{{../t.invoiceTotal}} ({{../t.inclMarkup}} {{../footer.markupPercentText}} %)</span></div>
+  {{/each}}
 </div>
 <h3>{{t.section_currency}}</h3>
+<div class="finops-scroll">
 <table class="table table-condensed finops-table">
-  <thead><tr><th>{{t.col_currency}}</th><th>{{t.col_resources}}</th><th>{{t.col_cost}}</th><th>{{t.col_price}}</th><th>{{t.col_margin}}</th><th>{{t.col_marginPct}}</th><th>{{t.col_invoice}}</th></tr></thead>
+  <thead><tr><th>{{t.col_currency}}</th><th class="num">{{t.col_resources}}</th><th class="num">{{t.col_cost}}</th><th class="num">{{t.col_price}}</th><th class="num">{{t.col_margin}}</th><th class="num">{{t.col_marginPct}}</th><th class="num">{{t.col_invoice}}</th></tr></thead>
   <tbody>
   {{#each totals}}
-    <tr><td>{{currency}}</td><td>{{resources}}</td><td>{{costText}}</td><td>{{priceText}}</td><td>{{marginText}}</td><td>{{marginPctText}}</td><td><strong>{{invoiceText}}</strong></td></tr>
+    <tr><td>{{currency}}</td><td class="num">{{resources}}</td><td class="num">{{costText}}</td><td class="num">{{priceText}}</td><td class="num">{{marginText}}</td><td class="num">{{marginPctText}}</td><td class="num"><strong>{{invoiceText}}</strong></td></tr>
   {{else}}
     <tr><td colspan="7">{{t.empty}}</td></tr>
   {{/each}}
   </tbody>
 </table>
+</div>
 <h3>{{t.section_tenant}}</h3>
+<div class="finops-scroll">
 <table class="table table-condensed finops-table">
-  <thead><tr><th>{{t.col_tenant}}</th><th>{{t.col_currency}}</th><th>{{t.col_resources}}</th><th>{{t.col_cost}}</th><th>{{t.col_price}}</th><th>{{t.col_margin}}</th><th>{{t.col_marginPct}}</th><th>{{t.col_invoice}}</th></tr></thead>
+  <thead><tr><th>{{t.col_tenant}}</th><th>{{t.col_currency}}</th><th class="num">{{t.col_resources}}</th><th class="num">{{t.col_cost}}</th><th class="num">{{t.col_price}}</th><th class="num">{{t.col_margin}}</th><th class="num">{{t.col_marginPct}}</th><th class="num">{{t.col_invoice}}</th></tr></thead>
   <tbody>
   {{#each tenants}}
-    <tr><td>{{tenant}}</td><td>{{currency}}</td><td>{{resources}}</td><td>{{costText}}</td><td>{{priceText}}</td><td>{{marginText}}</td><td>{{marginPctText}}</td><td><strong>{{invoiceText}}</strong></td></tr>
+    <tr><td>{{tenant}}</td><td>{{currency}}</td><td class="num">{{resources}}</td><td class="num">{{costText}}</td><td class="num">{{priceText}}</td><td class="num">{{marginText}}</td><td class="num">{{marginPctText}}</td><td class="num"><strong>{{invoiceText}}</strong></td></tr>
   {{else}}
     <tr><td colspan="8">{{t.empty}}</td></tr>
   {{/each}}
   </tbody>
 </table>
+</div>
 <h3>{{t.section_group}}</h3>
+<div class="finops-scroll">
 <table class="table table-condensed finops-table">
-  <thead><tr><th>{{t.col_tenant}}</th><th>{{t.col_group}}</th><th>{{t.col_currency}}</th><th>{{t.col_resources}}</th><th>{{t.col_cost}}</th><th>{{t.col_price}}</th><th>{{t.col_margin}}</th><th>{{t.col_invoice}}</th></tr></thead>
+  <thead><tr><th>{{t.col_tenant}}</th><th>{{t.col_group}}</th><th>{{t.col_currency}}</th><th class="num">{{t.col_resources}}</th><th class="num">{{t.col_cost}}</th><th class="num">{{t.col_price}}</th><th class="num">{{t.col_margin}}</th><th class="num">{{t.col_invoice}}</th></tr></thead>
   <tbody>
   {{#each rows}}
-    <tr><td>{{tenant}}</td><td>{{#if noGroup}}<em>{{noGroupText}}</em>{{else}}{{group}}{{/if}}</td><td>{{currency}}</td><td>{{resources}}</td><td>{{costText}}</td><td>{{priceText}}</td><td>{{marginText}}</td><td>{{invoiceText}}</td></tr>
+    <tr><td>{{tenant}}</td><td>{{#if noGroup}}<em>{{noGroupText}}</em>{{else}}{{group}}{{/if}}</td><td>{{currency}}</td><td class="num">{{resources}}</td><td class="num">{{costText}}</td><td class="num">{{priceText}}</td><td class="num">{{marginText}}</td><td class="num">{{invoiceText}}</td></tr>
   {{/each}}
   </tbody>
 </table>
+</div>
 <p class="text-muted">{{t.footnote}}</p>
+</div>

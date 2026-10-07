@@ -37,6 +37,8 @@ class BudgetBurnMath {
 	static final String STATUS_OVER = 'over'
 	static final String STATUS_MISMATCH = 'mismatch'
 
+	// Mid tones that stay readable on a light and on a dark page. The Morpheus theme variables are not
+	// used: on 9.0.2 they can switch to dark while the page around the plugin stays light.
 	static final Map<String, String> STATUS_COLORS = [
 		(STATUS_OK): '#27AE60', (STATUS_WARNING): '#E67E22', (STATUS_OVER): '#C0392B', (STATUS_MISMATCH): '#7F8C8D'
 	].asImmutable()

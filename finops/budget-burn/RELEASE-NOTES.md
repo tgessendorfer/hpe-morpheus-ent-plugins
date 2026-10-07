@@ -6,6 +6,56 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.2
+
+**The table fits the analytics page without wrapping numbers.** Layout only; amounts, forecasts
+and statuses are calculated as in 1.2.1.
+Built against plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and options are
+unchanged.
+
+### What changed
+
+- **Fits the analytics pane.** Morpheus puts every analytics page, its own included, into a
+  1150 px container, which leaves the plugin 857 px at any window width of 1200 px or more. The
+  page now brings its own scoped CSS (a `<style>` block whose rules all start with the plugin's root
+  class): numbers right-aligned and never broken inside, secondary values in a smaller line under
+  the amount, tighter cell padding, and a horizontal scroll bar instead of wrapping on narrower
+  screens.
+- **Light and dark mode.** The CSS sets no text color; secondary text is the page's own color with
+  reduced opacity, borders and the bar track are a translucent grey. On 9.0.2 the HPE theme
+  variables (`--hpe-color-*`) switch to dark values while the surrounding page can stay light, so
+  they are not used.
+- **Fewer columns.** Owner and scope moved into a small second line under the budget name
+  (*Owner: … · Tenant: …*, owner in the provider view only). The currency column is gone; the
+  budget currency stands once, with the monthly budget. Spend share, forecast share and year-to-date
+  share sit under their amounts.
+- **Narrow number columns.** Number columns shrink to their content and their headers wrap, so the
+  budget column gets the remaining width.
+- **Status colors** stay the fixed mid tones of 1.2.1, which read on light and dark pages; the
+  light grey bar track (`#e6e6e6`) is now translucent.
+
+### Behaviour changes from 1.2.1
+
+- No *Owner*, *Scope* and *Currency* columns; that information is in the budget cell.
+- Amounts after the monthly budget carry no currency unit any more.
+
+### Verified
+
+- Unit tests (Spock) for the new cell layout in English and German, the scoped CSS and the absence
+  of fixed text colors.
+- Lab appliance (Morpheus 9.0.2, master tenant, Chrome, window 2560 px wide, so the 857 px pane):
+  1.2.2-rc.1 rendered without wrapped numbers and without a scroll bar; the final column widths
+  (number columns shrunk to content, header minimum 72 px) were checked by applying the CSS in the
+  browser: budget column 231-290 px, rows 59 px instead of up to 92 px.
+
+### Not yet verified
+
+- The German page (longer headers such as *Monatsbudget*) was checked in the unit tests only.
+- Dark mode cannot be switched on in the lab (the theme setting is hidden while whitelabeling is
+  enabled); it was checked by setting `data-mode="dark"` in the browser and by review.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.2.1...budget-burn-v1.2.2
+
 ## 1.2.1
 
 **Spend, burn rate and forecast no longer count each priced VM twice.**

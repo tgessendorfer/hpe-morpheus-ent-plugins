@@ -170,7 +170,7 @@ class MspTenantOverviewAnalyticsProviderSpec extends Specification {
 		resp.data.t.revenue == 'Revenue'
 		resp.data.totals[0].revText == '1,234.56'
 		resp.data.items[0].memoryGb == '2.0'
-		render(resp.data).contains('<th>Revenue ')
+		render(resp.data).contains('>Revenue</th>')
 		!render(resp.data).contains('Umsatz')
 	}
 
@@ -222,15 +222,50 @@ class MspTenantOverviewAnalyticsProviderSpec extends Specification {
 		String hbs = resource('renderer/hbs/mspTenantOverview.hbs')
 
 		expect:
-		!(hbs =~ /#[0-9A-Fa-f]{6}\b/)
+		!(hbs =~ /#[0-9A-Fa-f]{3,6}\b/)
 		hbs.contains('class="finops-msp-tenant-overview"')
+	}
+
+	def "cards and table bring their own layout, so they fit the 857 px analytics pane"() {
+		given:
+		String hbs = resource('renderer/hbs/mspTenantOverview.hbs')
+		String css = hbs.find(/(?s)<style>(.*?)<\/style>/) { all, c -> c }
+
+		expect: 'own class names, not the Morpheus stats classes a whitelabel stylesheet may restyle'
+		!hbs.contains('stats-container')
+		!hbs.contains('count-stats')
+		css.contains('grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))')
+		css.contains('overflow-x: auto')
+		css.contains('white-space: nowrap')
+
+		and: 'every rule is scoped to the plugin root and sets no text color, so it follows the page in light and dark mode'
+		css.readLines()*.trim().findAll { it && !it.startsWith('.finops-msp-tenant-overview ') }.isEmpty()
+		!(css =~ /(^|[\s;{])color\s*:/)
+		!css.contains('var(--')
+	}
+
+	def "the table groups the month columns and leaves out the separate margin % column"() {
+		given:
+		Map paid = MspTenantOverviewCalc.texts([rev: 100.00G, cost: 60.00G, lrev: 50.00G, lcost: 45.00G], Locale.ENGLISH)
+		def p = provider(Locale.US)
+
+		when:
+		String html = render([count: 1, instances: 1, cores: 2, month: '2026-10', lastMonth: '2026-09', t: p.labels(Locale.ENGLISH),
+			items: [[first: true, name: 'Tenant A', currency: 'EUR', users: 1, sites: 1, instances: 1, cores: 2, memoryGb: '2.0', servers: 1] + paid],
+			totals: [[currency: 'EUR'] + paid]])
+
+		then:
+		html.contains('<th colspan="3" class="finops-group">2026-10 (forecast)</th><th colspan="2" class="finops-group">2026-09</th>')
+		!html.contains('Margin %')
+		html.findAll('<td').size() == 13 + 7
+		html.contains('<td><strong>Tenant A</strong></td><td class="num">1</td>')
 	}
 
 	def "the template shows no '- %' for a tenant without invoices and keeps the percentage otherwise"() {
 		given: 'one tenant without invoices, one with revenue in both months, and their totals'
 		Map none = MspTenantOverviewCalc.texts(MspTenantOverviewCalc.zero(), Locale.ENGLISH)
 		Map paid = MspTenantOverviewCalc.texts([rev: 100.00G, cost: 60.00G, lrev: 50.00G, lcost: 45.00G], Locale.ENGLISH)
-		Map data = [count: 2, instances: 0, cores: 0, month: '2026-10', lastMonth: '2026-09', t: [:],
+		Map data = [count: 2, instances: 0, cores: 0, month: '2026-10', lastMonth: '2026-09', t: [forecast: 'forecast', vcpu: 'vCPU'],
 			items: [[first: true, name: 'Empty', currency: 'USD'] + none, [first: true, name: 'Paying', currency: 'EUR'] + paid],
 			totals: [[currency: 'EUR'] + paid, [currency: 'USD'] + none]]
 
@@ -241,10 +276,11 @@ class MspTenantOverviewAnalyticsProviderSpec extends Specification {
 		!html.contains('- %')
 		!html.contains('()')
 		html.contains('(USD)')
-		html.contains('<td>0.00</td></tr>')
+		html.contains('<td class="num">0.00</td><td class="num">0.00</td></tr>')
 		html.contains('(EUR, 40.0 %)')
-		html.contains('<td>5.00 (10.0 %)</td>')
-		html.contains('<td>-</td>')
+		html.contains('<td class="num">40.00<span class="finops-sub">40.0 %</span></td>')
+		html.contains('<td class="num">5.00<span class="finops-sub">10.0 %</span></td>')
+		!html.contains('<td>-</td>')
 	}
 
 	def "labels inside loops, the empty-list branch and the footer come from the provided texts"() {
@@ -260,7 +296,9 @@ class MspTenantOverviewAnalyticsProviderSpec extends Specification {
 
 		then:
 		full.contains('Umsatz 2026-10 (Prognose, EUR)')
-		full.contains('Marge 2026-09')
+		full.contains('>2026-10 (Prognose)</th>')
+		full.contains('>2026-09</th>')
+		full.contains('>Marge</th>')
 		full.contains('<strong>Summe EUR</strong>')
 		full.contains('MSP-Tenant-\u00dcbersicht 2026-10')
 		empty.contains('Keine Sub-Tenants.')

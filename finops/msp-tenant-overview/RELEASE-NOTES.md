@@ -6,6 +6,53 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.2
+
+**Cards and table fit the analytics page in one row each.** Layout only; the numbers are
+calculated as in 1.2.1.
+Built against plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and options are
+unchanged.
+
+### What changed
+
+- **Fits the analytics pane.** Morpheus puts every analytics page, its own included, into a
+  1150 px container, which leaves the plugin 857 px at any window width of 1200 px or more. The
+  page now brings its own scoped CSS (a `<style>` block whose rules all start with the plugin's root
+  class): numbers right-aligned and never broken inside, secondary values in a smaller line under
+  the amount, tighter cell padding, and a horizontal scroll bar instead of wrapping on narrower
+  screens.
+- **Light and dark mode.** The CSS sets no text color; secondary text is the page's own color with
+  reduced opacity, borders and the bar track are a translucent grey. On 9.0.2 the HPE theme
+  variables (`--hpe-color-*`) switch to dark values while the surrounding page can stay light, so
+  they are not used.
+- **Own cards.** The five summary cards use their own classes (`finops-kpis`, `finops-kpi`) in a
+  grid, so all five sit in one row in the 857 px pane. A whitelabel stylesheet that restyled the
+  former Morpheus classes (`.count-stats`, `.stats-container`) no longer applies to them.
+- **Grouped month columns.** The header has two rows: *2026-10 (forecast)* over revenue, cost and
+  margin, and the previous month over revenue and margin. The margin percentage stands in a small
+  line under the margin instead of its own column or brackets.
+
+### Behaviour changes from 1.2.1
+
+- The *Margin %* column is gone; the percentage is under the margin.
+- The summary cards no longer use the Morpheus classes `count-stats` and `stats-container`.
+
+### Verified
+
+- Unit tests (Spock) for the grouped header, the cell layout, the scoped CSS and the absence of
+  fixed colors.
+- Lab appliance (Morpheus 9.0.2, master tenant, Chrome): 1.2.2-rc.1 shows the five cards in one row
+  (161 px each) and the table in 857 px without wrapping or scroll bar; tenant names, amounts and
+  margins stay on one line.
+
+### Not yet verified
+
+- The German page was checked in the unit tests only.
+- Dark mode cannot be switched on in the lab (the theme setting is hidden while whitelabeling is
+  enabled); it was checked by setting `data-mode="dark"` in the browser and by review.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.2.1...msp-tenant-overview-v1.2.2
+
 ## 1.2.1
 
 **Revenue and cost no longer count each priced VM twice, and zero-amount currencies are hidden.**

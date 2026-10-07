@@ -220,18 +220,41 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 		getRenderer().renderTemplate('hbs/tenantChargeback', model)
 	}
 
-	/** The template model: stored rows with their formatted values, and the texts, all in {@code locale}. */
+	/**
+	 * The template model: stored rows with their formatted values, and the texts, all in {@code locale}.
+	 * A currency whose total cost, list price and invoice amount are all zero (e.g. unpriced servers
+	 * in USD) is left out of every section of the page, as long as another currency has an amount.
+	 * The stored rows, and so the CSV export, keep it.
+	 */
 	static Map pageModel(Map<String, List<ReportResultRow>> reportRowsBySection, Locale locale) {
 		Map<String, String> t = texts(locale)
 		List<Map> footer = reportRowsBySection.footer?.collect { it.dataMap } ?: []
 		Map meta = footer.find { it.kind == 'meta' } ?: [:]
+		List<Map> totals = footer.findAll { it.kind == 'total' }
+		Set<String> hidden = zeroCurrencies(totals)
+		Closure<Boolean> shown = { Map m -> !hidden.contains(m.currency as String) }
 		[
-			rows   : (reportRowsBySection.main?.collect { it.dataMap } ?: []).collect { withTexts(it, locale) + [noGroupText: t.noGroup] },
-			tenants: (reportRowsBySection.header?.collect { it.dataMap } ?: []).collect { withTexts(it, locale) },
+			rows   : (reportRowsBySection.main?.collect { it.dataMap } ?: []).findAll(shown).collect { withTexts(it, locale) + [noGroupText: t.noGroup] },
+			tenants: (reportRowsBySection.header?.collect { it.dataMap } ?: []).findAll(shown).collect { withTexts(it, locale) },
 			footer : meta + [isCurrent: isTrue(meta.current), markupPercentText: decimalShort(meta.markupPercent ?: '0', locale)],
-			totals : footer.findAll { it.kind == 'total' }.collect { withTexts(it, locale) },
+			totals : totals.findAll(shown).collect { withTexts(it, locale) },
 			t      : t
 		]
+	}
+
+	/** Currencies of {@code totals} without any amount; empty when no currency has one. */
+	static Set<String> zeroCurrencies(List<Map> totals) {
+		Set<String> zero = totals.findAll { Map m -> ['cost', 'price', 'invoice'].every { isZeroAmount(m[it]) } }
+			.collect { it.currency as String } as Set
+		zero.size() < totals.size() ? zero : ([] as Set)
+	}
+
+	static boolean isZeroAmount(def v) {
+		try {
+			return v == null || new BigDecimal(v.toString().trim()).signum() == 0
+		} catch(NumberFormatException ignored) {
+			return false
+		}
 	}
 
 	/** Adds the locale-formatted texts the template shows next to the plain stored values. */

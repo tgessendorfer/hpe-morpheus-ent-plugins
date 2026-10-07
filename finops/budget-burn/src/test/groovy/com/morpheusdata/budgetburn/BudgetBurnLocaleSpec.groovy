@@ -201,6 +201,46 @@ class BudgetBurnLocaleSpec extends Specification {
 		'de'    | 'de'     | 'Budgetverbrauch' | load('i18n/messages_de.properties').getProperty('budget-burn-analytics.col.monthlyBudget') | '1.234,50' | 'Budget burn'
 	}
 
+	def "owner and scope sit under the budget name, amounts carry the currency once and stay on one line"() {
+		given:
+		Map text = BudgetBurnAnalyticsProvider.texts(Locale.ENGLISH)
+		Map row = [name: 'Budget Contoso 2026', owner: 'Nordwind Cloud Services Ltd.', scopeText: 'Tenant', target: 'Contoso Ltd.',
+			currency: 'EUR', budgetText: '500.00', runningText: '2.75', usedPct: '0.6 %', burnText: '0.39', forecastText: '29.48',
+			forecastPct: '5.9 %', bar: 5.9, color: '#27AE60', statusText: text.status.ok,
+			ytdText: '35.64', ytdBudgetText: '5,000.00', ytdPct: '0.7 %']
+		HandlebarsRenderer renderer = new HandlebarsRenderer('renderer', BudgetBurnLocaleSpec.classLoader)
+
+		when:
+		String master = renderer.renderTemplate('hbs/budgetBurn', new ViewModel<Map>(object: [text: text, language: 'en', master: true, items: [row]])).html
+		String tenant = renderer.renderTemplate('hbs/budgetBurn', new ViewModel<Map>(object: [text: text, language: 'en', master: false, tenant: 'Contoso Ltd.', items: [row]])).html
+
+		then: 'no owner, scope or currency column; the budget cell carries owner and scope'
+		master.findAll(/<th[ >]/).size() == 8
+		master.contains('<span class="finops-sub">Owner: Nordwind Cloud Services Ltd. &middot; Tenant: Contoso Ltd.</span>')
+		tenant.contains('<span class="finops-sub">Tenant: Contoso Ltd.</span>')
+		!tenant.contains('Owner:')
+
+		and: 'the currency once with the monthly budget, percentages under the amounts'
+		master.contains('<td class="num">500.00 EUR</td>')
+		master.contains('<td class="num">2.75<span class="finops-sub">0.6 %</span></td>')
+		master.contains('<td class="num">35.64 / 5,000.00<span class="finops-sub">0.7 %</span></td>')
+		master.contains('style="color:#27AE60"')
+	}
+
+	def "the template keeps its CSS scoped and sets no text color, so it follows the page in light and dark mode"() {
+		given:
+		String hbs = BudgetBurnLocaleSpec.classLoader.getResourceAsStream('renderer/hbs/budgetBurn.hbs').text
+		String css = hbs.find(/(?s)<style>(.*?)<\/style>/) { all, c -> c }
+
+		expect:
+		css.readLines()*.trim().findAll { it && !it.startsWith('.finops-budget-burn ') }.isEmpty()
+		!(hbs =~ /#[0-9A-Fa-f]{3,6}\b/)
+		css.contains('overflow-x: auto')
+		!(css =~ /(^|[\s;{])color\s*:/)
+		!css.contains('var(--')
+		!css.contains('#e6e6e6')
+	}
+
 	def "texts inside a row, in the currency mismatch branches and for an empty list come from the page texts"() {
 		given:
 		Map text = BudgetBurnAnalyticsProvider.texts(Locale.GERMAN)

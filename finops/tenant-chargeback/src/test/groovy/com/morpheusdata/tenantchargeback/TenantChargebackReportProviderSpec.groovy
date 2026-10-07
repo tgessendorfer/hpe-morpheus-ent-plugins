@@ -76,7 +76,7 @@ class TenantChargebackReportProviderSpec extends Specification {
 	def "the template shows no literal German or English text outside i18n calls"() {
 		given:
 		String hbs = getClass().classLoader.getResourceAsStream('renderer/hbs/tenantChargeback.hbs').getText('UTF-8')
-		String text = hbs.replaceAll(/\{\{[^}]*\}\}/, ' ').replaceAll(/<[^>]*>/, ' ').replaceAll(/[\s()%]+/, ' ').trim()
+		String text = hbs.replaceAll(/(?s)<style>.*?<\/style>/, ' ').replaceAll(/\{\{[^}]*\}\}/, ' ').replaceAll(/<[^>]*>/, ' ').replaceAll(/[\s()%]+/, ' ').trim()
 
 		expect:
 		text == ''
@@ -271,6 +271,58 @@ class TenantChargebackReportProviderSpec extends Specification {
 		calls.isEmpty()
 	}
 
+	def "the template brings its own cards and right-aligned number columns, colors from the theme"() {
+		given:
+		String hbs = getClass().classLoader.getResourceAsStream('renderer/hbs/tenantChargeback.hbs').getText('UTF-8')
+		String css = hbs.find(/(?s)<style>(.*?)<\/style>/) { all, c -> c }
+
+		expect:
+		!hbs.contains('stats-container')
+		hbs.findAll('<td class="num">').size() == 6 + 6 + 5
+		css.readLines()*.trim().findAll { it && !it.startsWith('.finops-chargeback ') }.isEmpty()
+		!(hbs =~ /#[0-9A-Fa-f]{3,6}\b/)
+		!(css =~ /(^|[\s;{])color\s*:/)
+		!css.contains('var(--')
+	}
+
+	def "the page leaves out a currency without any amount, but keeps it in the stored rows"() {
+		given: 'zero-priced servers in USD next to priced EUR invoices, as on the lab appliance'
+		Map<String, List<ReportResultRow>> rows = [
+			main  : [row(tenant: 'Contoso', group: 'DC1', currency: 'EUR', resources: '5', cost: '23.96', price: '29.48', margin: '5.52', invoice: '29.48'),
+				row(tenant: 'Contoso', group: 'DC1', currency: 'USD', resources: '3', cost: '0.00', price: '0.00', margin: '0.00', invoice: '0.00'),
+				row(tenant: 'Contoso', group: 'AWS', currency: 'EUR', resources: '1', cost: '0.00', price: '0.00', margin: '0.00', invoice: '0.00')],
+			header: [row(tenant: 'Contoso', currency: 'USD', resources: '3', cost: '0.00', price: '0.00', margin: '0.00', marginPct: '0.0', invoice: '0.00'),
+				row(tenant: 'Contoso', currency: 'EUR', resources: '6', cost: '23.96', price: '29.48', margin: '5.52', marginPct: '18.7', invoice: '29.48')],
+			footer: [row(kind: 'meta', month: '2026-10', current: true, markupPercent: '0', tenants: '1', currencies: 'USD, EUR'),
+				row(kind: 'total', currency: 'USD', resources: '3', cost: '0.00', price: '0.00', margin: '0.00', marginPct: '0.0', invoice: '0.00'),
+				row(kind: 'total', currency: 'EUR', resources: '6', cost: '23.96', price: '29.48', margin: '5.52', marginPct: '18.7', invoice: '29.48')]
+		]
+
+		when:
+		Map m = TenantChargebackReportProvider.pageModel(rows, Locale.ENGLISH)
+
+		then: 'USD is gone everywhere; a zero EUR group of a priced currency stays'
+		m.totals*.currency == ['EUR']
+		m.tenants*.currency == ['EUR']
+		m.rows*.currency == ['EUR', 'EUR']
+		m.rows*.group == ['DC1', 'AWS']
+		m.footer.tenants == '1'
+
+		and: 'the stored rows, which the CSV export writes, are untouched'
+		rows.footer.size() == 3
+		rows.main.size() == 3
+	}
+
+	def "zeroCurrencies hides nothing when every currency is zero, and treats unreadable amounts as amounts"() {
+		expect:
+		TenantChargebackReportProvider.zeroCurrencies([[currency: 'USD', cost: '0', price: '0.00', invoice: '0.00']]) == [] as Set
+		TenantChargebackReportProvider.zeroCurrencies([[currency: 'USD', cost: '0', price: '0', invoice: '0'],
+			[currency: 'EUR', cost: '1', price: '2', invoice: '2']]) == ['USD'] as Set
+		TenantChargebackReportProvider.zeroCurrencies([[currency: 'USD', cost: '0', price: 'n/a', invoice: '0'],
+			[currency: 'EUR', cost: '1', price: '2', invoice: '2']]) == [] as Set
+		TenantChargebackReportProvider.zeroCurrencies([]) == [] as Set
+	}
+
 	def "the page model formats numbers and texts in the resolved locale"() {
 		given:
 		Map<String, List<ReportResultRow>> rows = [
@@ -347,5 +399,9 @@ class TenantChargebackReportProviderSpec extends Specification {
 		assert is != null : "missing resource ${path}"
 		is.withCloseable { p.load(it) }
 		p
+	}
+
+	private static ReportResultRow row(Map data) {
+		new ReportResultRow(dataMap: data)
 	}
 }

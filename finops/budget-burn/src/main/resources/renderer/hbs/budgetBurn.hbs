@@ -1,41 +1,62 @@
 <div class="finops-budget-burn" lang="{{language}}">
+  <style>
+    .finops-budget-burn .finops-scroll { overflow-x: auto; }
+    .finops-budget-burn table.finops-table { width: 100%; margin-bottom: 12px; }
+    .finops-budget-burn .finops-table > thead > tr > th,
+    .finops-budget-burn .finops-table > tbody > tr > td { padding: 6px 5px; vertical-align: top; }
+    .finops-budget-burn .finops-table > thead > tr > th { font-size: 11px; vertical-align: bottom; }
+    .finops-budget-burn .finops-table > thead > tr > th + th { width: 1%; }
+    .finops-budget-burn .finops-table > thead > tr > th.num { min-width: 72px; }
+    .finops-budget-burn .finops-table .num { text-align: right; }
+    .finops-budget-burn .finops-table > tbody > tr > td.num { white-space: nowrap; }
+    .finops-budget-burn .finops-name { font-weight: 600; }
+    .finops-budget-burn .finops-sub { display: block; font-size: 11px; line-height: 1.35; opacity: .75; }
+    .finops-budget-burn .finops-table .num .finops-sub { white-space: nowrap; }
+    .finops-budget-burn .finops-table .num .finops-sub.finops-wrap { white-space: normal; }
+    .finops-budget-burn .finops-bar-cell { min-width: 150px; }
+    .finops-budget-burn .finops-bar-track { height: 10px; margin-top: 4px; border-radius: 2px; background: rgba(128, 128, 128, .25); }
+    .finops-budget-burn .finops-bar { height: 10px; min-width: 1px; border-radius: 2px; }
+    .finops-budget-burn .finops-status { font-weight: 600; white-space: nowrap; }
+  </style>
   <h2>{{text.heading}} {{month}}</h2>
   <p class="text-muted">{{text.day}} {{day}} {{text.dayOf}} {{days}}.
     {{#if master}}{{text.intro.master}}{{else}}{{text.intro.tenant}} {{tenant}}.{{/if}}
     {{text.intro.forecast}}</p>
-  <table class="table table-condensed">
+  <div class="finops-scroll">
+  <table class="table table-condensed finops-table">
     <thead><tr>
-      <th>{{text.col.budget}}</th>{{#if master}}<th>{{text.col.owner}}</th>{{/if}}
-      <th>{{text.col.scope}}</th><th>{{text.col.currency}}</th>
-      <th>{{text.col.monthlyBudget}}</th><th>{{text.col.toDate}}</th>
-      <th>{{text.col.burnRate}}</th><th>{{text.col.forecast}}</th>
-      <th style="width:20%">{{text.col.forecastVsBudget}}</th><th>{{text.col.status}}</th>
-      <th>{{text.col.yearToDate}}</th>
+      <th>{{text.col.budget}}</th>
+      <th class="num">{{text.col.monthlyBudget}}</th><th class="num">{{text.col.toDate}}</th>
+      <th class="num">{{text.col.burnRate}}</th><th class="num">{{text.col.forecast}}</th>
+      <th class="finops-bar-cell">{{text.col.forecastVsBudget}}</th><th>{{text.col.status}}</th>
+      <th class="num">{{text.col.yearToDate}}</th>
     </tr></thead>
     <tbody>
     {{#each items}}
       <tr>
-        <td>{{name}}</td>{{#if ../master}}<td>{{owner}}</td>{{/if}}<td>{{scopeText}}: {{target}}</td><td>{{currency}}</td>
-        <td>{{budgetText}} {{currency}}</td>
+        <td><span class="finops-name">{{name}}</span>
+          <span class="finops-sub">{{#if ../master}}{{../text.col.owner}}: {{owner}} &middot; {{/if}}{{scopeText}}: {{target}}</span></td>
+        <td class="num">{{budgetText}} {{currency}}</td>
         {{#if mismatch}}
-        <td>{{runningText}} {{currency}}{{#if foreignRunning}}<br><small>+ {{foreignRunning}}</small>{{/if}}</td><td>-</td>
-        <td>{{forecastText}} {{currency}}{{#if foreignForecast}}<br><small>+ {{foreignForecast}}</small>{{/if}}</td>
-        <td><small>{{../text.noComparison}} ({{currency}})</small></td>
+        <td class="num">{{runningText}}{{#if foreignRunning}}<span class="finops-sub">+ {{foreignRunning}}</span>{{/if}}</td><td class="num">-</td>
+        <td class="num">{{forecastText}}{{#if foreignForecast}}<span class="finops-sub">+ {{foreignForecast}}</span>{{/if}}</td>
+        <td class="finops-bar-cell"><span class="finops-sub">{{../text.noComparison}} ({{currency}})</span></td>
         {{else}}
-        <td>{{runningText}} {{currency}} ({{usedPct}})</td><td>{{burnText}} {{currency}}</td><td>{{forecastText}} {{currency}}</td>
-        <td><div class="finops-bar-track" style="background:#e6e6e6;height:12px;width:100%"><div class="finops-bar" style="background:{{color}};height:12px;width:{{bar}}%;min-width:1px"></div></div><small>{{forecastPct}}</small></td>
+        <td class="num">{{runningText}}<span class="finops-sub">{{usedPct}}</span></td><td class="num">{{burnText}}</td><td class="num">{{forecastText}}</td>
+        <td class="finops-bar-cell"><div class="finops-bar-track"><div class="finops-bar" style="background:{{color}};width:{{bar}}%"></div></div><span class="finops-sub">{{forecastPct}}</span></td>
         {{/if}}
-        <td><span class="finops-status" style="color:{{color}};font-weight:600">{{statusText}}</span></td>
+        <td><span class="finops-status" style="color:{{color}}">{{statusText}}</span></td>
         {{#if ytdMismatch}}
-        <td>{{ytdText}} / {{ytdBudgetText}} {{currency}}<br><small>+ {{foreignYtd}}, {{../text.status.mismatch}}</small></td>
+        <td class="num">{{ytdText}} / {{ytdBudgetText}}<span class="finops-sub finops-wrap">+ {{foreignYtd}}, {{../text.status.mismatch}}</span></td>
         {{else}}
-        <td>{{ytdText}} / {{ytdBudgetText}} {{currency}} ({{ytdPct}})</td>
+        <td class="num">{{ytdText}} / {{ytdBudgetText}}<span class="finops-sub">{{ytdPct}}</span></td>
         {{/if}}
       </tr>
     {{else}}
-      <tr><td colspan="11">{{text.empty}}</td></tr>
+      <tr><td colspan="8">{{text.empty}}</td></tr>
     {{/each}}
     </tbody>
   </table>
+  </div>
   {{#if anyMismatch}}<p class="text-muted">{{text.mismatchNote}}</p>{{/if}}
 </div>
