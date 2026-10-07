@@ -41,9 +41,10 @@ unchanged.
 
 - Unit tests (Spock) for the grouped header, the cell layout, the scoped CSS and the absence of
   fixed colors.
-- Lab appliance (Morpheus 9.0.2, master tenant, Chrome): 1.2.2-rc.1 shows the five cards in one row
-  (161 px each) and the table in 857 px without wrapping or scroll bar; tenant names, amounts and
-  margins stay on one line.
+- Lab appliance (Morpheus 9.0.2, master tenant, Chrome), 1.2.2-rc.2 built from the same source:
+  the five cards in one row (161 px each), the table in 857 px without wrapping or scroll bar;
+  tenant names, amounts and margins stay on one line. Amounts unchanged from 1.2.1: Contoso Ltd.
+  29.48 EUR revenue (margin 18.7 %), Fabrikam Inc. 13.62 EUR (15.6 %), total 43.10 EUR (17.7 %).
 
 ### Not yet verified
 

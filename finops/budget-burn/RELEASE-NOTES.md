@@ -43,10 +43,10 @@ unchanged.
 
 - Unit tests (Spock) for the new cell layout in English and German, the scoped CSS and the absence
   of fixed text colors.
-- Lab appliance (Morpheus 9.0.2, master tenant, Chrome, window 2560 px wide, so the 857 px pane):
-  1.2.2-rc.1 rendered without wrapped numbers and without a scroll bar; the final column widths
-  (number columns shrunk to content, header minimum 72 px) were checked by applying the CSS in the
-  browser: budget column 231-290 px, rows 59 px instead of up to 92 px.
+- Lab appliance (Morpheus 9.0.2, master tenant, Chrome, the 857 px pane), 1.2.2-rc.2 built from
+  the same source: the table fills 857 px without a scroll bar, no amount or status wraps, the
+  headers take two lines, the budget column is 224 px wide and every row 59 px high (1.2.1: up to
+  92 px, with owner, scope and amounts wrapped over three or four lines).
 
 ### Not yet verified
 

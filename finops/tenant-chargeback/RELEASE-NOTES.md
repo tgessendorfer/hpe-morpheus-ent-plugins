@@ -38,8 +38,9 @@ unchanged.
 
 - Unit tests (Spock) for the zero-currency rule (hidden, kept when every currency is zero, stored
   rows untouched), the right-aligned cells and the scoped CSS.
-- Lab appliance (Morpheus 9.0.2, Chrome): report result 109 for 2026-10 shown with 1.2.2-rc.1: one
-  card *43.10 EUR*, no USD row, numbers right-aligned, nothing wraps.
+- Lab appliance (Morpheus 9.0.2, Chrome): report result 109 for 2026-10 shown with 1.2.2-rc.1 and
+  1.2.2-rc.2: one card *43.10 EUR*, no USD row in any table, numbers right-aligned, nothing wraps
+  in the 1090 px report page.
 
 ### Not yet verified
 
