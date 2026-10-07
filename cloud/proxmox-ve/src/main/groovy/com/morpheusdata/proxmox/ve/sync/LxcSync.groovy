@@ -37,6 +37,7 @@ class LxcSync {
     private HttpApiClient apiClient
     private CloudProvider cloudProvider
     private Map authConfig
+    private GuestPlanResolver planResolver
 
     // The only type this sync owns. Scoping by TYPE CODE and not by the category
     // string is deliberate and load-bearing: HostSync filters on
@@ -68,6 +69,7 @@ class LxcSync {
                 return
             }
             def cloudItems = listResults.data ?: []
+            planResolver = GuestPlanResolver.load(context)
 
             def domainRecords = context.async.computeServer.listIdentityProjections(cloud.id, null).filter {
                 it.computeServerTypeCode == LXC_SERVER_CODE
@@ -129,6 +131,9 @@ class LxcSync {
                         cloud            : cloud,
                         provision        : false,
                         managed          : false,
+                        // Selects the usage ref type Morpheus files this server's usage under;
+                        // see VMSync.addMissingVirtualMachines.
+                        discovered       : true,
                         serverType       : 'vm',
                         status           : 'provisioned',
                         powerState       : cloudItem.status == 'running'
@@ -152,7 +157,9 @@ class LxcSync {
                         // does, and the VMs tab has a Labels filter beside the search.
                         labels           : [new Label(name: 'lxc', account: cloud.owner)],
                         category         : "proxmox.ve.lxc.${cloud.id}",
-                        computeServerType: serverType
+                        computeServerType: serverType,
+                        plan             : planResolver?.resolve(cloudItem.maxmem?.toLong(),
+                                (cloudItem.maxCores ?: cloudItem.maxcpu ?: 0) as Long)
                 )
             } catch (e) {
                 log.error("Error building container record for ${cloudItem?.vmid}: ${e}", e)
@@ -170,6 +177,7 @@ class LxcSync {
 
     private updateMatchedContainers(List<SyncTask.UpdateItem<ComputeServer, Map>> updateItems) {
         def updates = []
+        def repriced = []
         def hostIdentitiesMap = context.async.computeServer.listIdentityProjections(cloud.id, null).filter {
             it.computeServerTypeCode == 'proxmox-ve-node'
         }.toMap { it.externalId }.blockingGet()
@@ -210,9 +218,30 @@ class LxcSync {
                 changed = true
             }
 
+            boolean reprice = false
+            // Repairs records written before the flag was set.
+            if (existing.discovered != true) {
+                existing.discovered = true
+                reprice = true
+            }
+            if (GuestPlanResolver.mayAssign(existing.plan)) {
+                def plan = planResolver?.resolve(existing.maxMemory, existing.maxCores)
+                if (plan && plan.id != existing.plan?.id) {
+                    log.info("Container ${existing.name}: plan ${existing.plan?.code} -> ${plan.code}")
+                    existing.plan = plan
+                    reprice = true
+                }
+            }
+            if (reprice) {
+                repriced << existing.id
+                changed = true
+            }
+
             if (changed) updates << existing
         }
         if (updates) context.async.computeServer.bulkSave(updates).blockingGet()
+        // Closes the open usage records and starts new ones on the new plan.
+        if (repriced) context.async.usage.restartServerUsage(repriced).blockingGet()
     }
 
 

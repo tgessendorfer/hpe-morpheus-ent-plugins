@@ -31,6 +31,7 @@ class VMSync {
     private HttpApiClient apiClient
     private CloudProvider cloudProvider
     private Map authConfig
+    private GuestPlanResolver planResolver
     private static final String UNMANAGED_SERVER_CODE = 'proxmox-qemu-vm-unmanaged'
 
     VMSync(ProxmoxVePlugin proxmoxVePlugin, Cloud cloud, HttpApiClient apiClient, CloudProvider cloudProvider) {
@@ -54,6 +55,7 @@ class VMSync {
                 return
             }
             def cloudItems = listResults.data
+            planResolver = GuestPlanResolver.load(context)
             // Sync BOTH managed and unmanaged VMs
             def domainRecords = context.async.computeServer.listIdentityProjections(cloud.id, null).filter {
                 it.computeServerTypeCode in ['proxmox-qemu-vm', 'proxmox-qemu-vm-unmanaged']
@@ -118,6 +120,10 @@ class VMSync {
                 cloud            : cloud,
                 lvmEnabled       : false,
                 managed          : false,
+                // Morpheus keeps usage of a discovered server under its own ref type and
+                // picks that type by this flag. Without it a usage restart looks for the
+                // wrong records and leaves the old one running.
+                discovered       : true,
                 serverType       : 'vm',
                 status           : 'provisioned',
                 uniqueId         : cloudItem.vmid.toString(),
@@ -132,7 +138,9 @@ class VMSync {
                 osType           : cloudItem.osCode ?: 'unknown',
                 serverOs         : new OsType(code: cloudItem.osCode ?: 'unknown'),
                 category         : "proxmox.ve.vm.${cloud.id}",
-                computeServerType: computeServerType
+                computeServerType: computeServerType,
+                plan             : planResolver?.resolve(cloudItem.maxmem?.toLong(),
+                        (cloudItem.maxCores ?: cloudItem.maxcpu)?.toLong())
             )
             newVMs << newVM
         }
@@ -148,7 +156,8 @@ class VMSync {
         log.debug("Updating ${updateItems.size()} existing VMs")
 
         def updates = []
-        
+        def repriced = []
+
         try {
             for (def updateItem in updateItems) {
                 def existingItem = updateItem.existingItem
@@ -197,6 +206,28 @@ class VMSync {
                     needsUpdate = true
                 }
                 
+                // Discovered VMs only: a managed VM keeps the plan it was provisioned with.
+                if (existingItem.computeServerType?.code == UNMANAGED_SERVER_CODE) {
+                    boolean reprice = false
+                    // Repairs records synced before the flag was set (see addMissingVirtualMachines).
+                    if (existingItem.discovered != true) {
+                        existingItem.discovered = true
+                        reprice = true
+                    }
+                    if (GuestPlanResolver.mayAssign(existingItem.plan)) {
+                        def plan = planResolver?.resolve(existingItem.maxMemory, existingItem.maxCores)
+                        if (plan && plan.id != existingItem.plan?.id) {
+                            log.info("VM ${existingItem.name}: plan ${existingItem.plan?.code} -> ${plan.code}")
+                            existingItem.plan = plan
+                            reprice = true
+                        }
+                    }
+                    if (reprice) {
+                        repriced << existingItem.id
+                        needsUpdate = true
+                    }
+                }
+
                 if ((existingItem.serverOs?.code in [null, '', 'unknown']) && cloudItem.osCode
                         && cloudItem.osCode != 'unknown') {
                     existingItem.serverOs = new OsType(code: cloudItem.osCode)
@@ -210,6 +241,11 @@ class VMSync {
             
             if (updates) {
                 context.async.computeServer.bulkSave(updates).blockingGet()
+            }
+            if (repriced) {
+                // Closes the open usage records and starts new ones on the new plan;
+                // without this the old price runs on until the next power change.
+                context.async.usage.restartServerUsage(repriced).blockingGet()
             }
         } catch(e) {
             log.error("Error updating VM properties and stats: ${e}", e)

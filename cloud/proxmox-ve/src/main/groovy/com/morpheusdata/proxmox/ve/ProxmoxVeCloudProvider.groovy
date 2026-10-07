@@ -66,8 +66,8 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 	@Override
 	Icon getIcon() {
 		return new Icon(
-			path: Assets.PROXMOX_FULL_LOCKUP.path,
-			darkPath: Assets.PROXMOX_FULL_LOCKUP_INVERTED.path
+			path: Assets.PROXMOX_LOGO_90X30.path,
+			darkPath: Assets.PROXMOX_LOGO_90X30_INVERTED.path
 		)
 	}
 

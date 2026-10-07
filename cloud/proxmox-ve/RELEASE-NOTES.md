@@ -15,6 +15,39 @@ new number, and why the digests are recorded.
 
 ## 0.1.30
 
+**Discovered VMs and LXC containers get a service plan, so Morpheus prices their usage.** With
+costing on, Morpheus prices a server's usage from the price sets of its plan. The plugin created
+discovered guests without a plan, so their usage stayed at zero, and the REST API cannot set a
+plan on an existing server. The VM and container syncs now give every discovered guest a plan: one
+of the plugin's `proxmox-ve-vm-*` plans when its cores and memory match exactly, otherwise
+`proxmox-ve-internal-custom`. No price is in the plugin; the plans carry whatever price sets the
+operator attaches, and a price set of type component on the custom plan prices a guest by its own
+cores, memory and storage. Only plans the sync hands out itself are ever changed: a managed VM
+keeps the plan it was provisioned with, and a plan someone else set stays. When a plan changes,
+the sync restarts the guest's usage, so the open usage record is closed and a new one starts with
+the new plan, the current cloud name and the plan's currency.
+
+**The custom plan exists now.** `proxmox-ve-internal-custom` was declared since upstream, but
+Morpheus never created it: a seeded plan without `maxCores` is skipped without a message. It now
+sets `maxCores: 1` and `coresPerSocket: 1`, as the custom plan of HPE's bundled ESXi plugin does.
+`GET /api/service-plans` does not list it; `GET /api/service-plans/<id>` shows it.
+
+**Discovered guests are marked `discovered`.** Morpheus files the usage of a discovered server
+under its own reference type and picks that type by this flag. Without it, a usage restart by
+Morpheus itself (after a tag change, for example) looked for the wrong records, left the running
+one open and started a second one. Existing records are repaired on the next sync.
+
+**The cloud logo has the proportions of Morpheus' own vendor logos.** The cloud and instance lists
+showed the 6:1 Proxmox lockup at 125x40, every built-in cloud logo at 108x40. The plugin now ships
+the lockup on Morpheus' 90x30 canvas (`proxmox-90x30-color.svg` and the inverted variant for the
+dark theme), left-aligned and vertically centred like the built-in ones. The circular icon is
+unchanged.
+
+**Behaviour change:** after the upgrade, the first sync assigns plans to all discovered guests and
+restarts their usage once. Discovered guests on the custom plan are priced only after a price set
+is attached to `proxmox-ve-internal-custom`; until then their new usage records show 0 in the
+system default currency, as before.
+
 **A powered-off VM no longer puts a WARN in the appliance log on every cloud refresh.** The VM
 sync asked every QEMU VM's guest agent for its network interfaces, without looking at the VM's
 state or its agent setting. For a stopped VM Proxmox answers `500 VM <id> is not running`, and
@@ -61,11 +94,30 @@ still asked and still causes the WARN, because that cannot be told apart without
   `Multi-Release: true`.
 - The cause was measured on the lab before the change: the WARN came only for VM 102, which was
   stopped with `agent: 1`; the running VMs with the agent enabled caused none.
+- On the lab appliance (HPE Morpheus Enterprise 9.0.2) with lab builds `0.1.30-rc.1` and
+  `0.1.30-rc.2`, which differ from this version only in the version number and, for rc.1, the
+  missing `discovered` flag and a duplicate `proxmox-ve-vm-8192` declaration it had dropped: the plugin loaded, `proxmox-ve-internal-custom` was created at load
+  (plan id 295, `maxCores` 1), and the first sync assigned plans to all 2 discovered VMs and 9
+  containers (5 matched a `proxmox-ve-vm-*` plan, 6 got the custom plan; the managed VM kept its
+  plan). Their open usage records were closed and new ones started with the plan and the current
+  cloud name; the guests on plans with an EUR price set were priced in EUR at once. Further
+  refreshes changed no plan and restarted no usage. The operator's price sets on the
+  `proxmox-ve-vm-*` plans survived both plugin uploads.
+- A usage restart triggered by Morpheus itself (tag change on a container, `AccountUsageService`
+  at DEBUG): without the flag it used reference type `computeServer`, found no record to stop and
+  started a second one; with the flag it used `discoveredServer`, stopped the open record and
+  started one.
+- Four cloud refreshes after the upload: no WARN for the stopped VM 102 any more.
+- The cloud list renders the new logo at 108x40, the same as the VMware, OpenStack and HVM logos.
+- 53 test cases (13 new, for the plan choice), 0 failures.
 
 ### Not yet verified
 
-- This jar on an appliance, and the WARN gone from the log after a refresh. The lab was down when
-  this version was built.
+- This release jar on an appliance (the lab ran the release candidates).
+- A new guest discovered after the upgrade: it gets its plan at creation, and its first usage
+  record was not watched.
+- A guest resized in Proxmox: the sync moves it to the matching plan only if its current plan is
+  one the sync handed out.
 - The two cases that were not in the lab: a running VM with the agent disabled, and one with the
   agent enabled but not running in the guest.
 - A build with Gradle 10, which is not released yet. `morpheus-plugin-gradle`'s `i18nPackage`

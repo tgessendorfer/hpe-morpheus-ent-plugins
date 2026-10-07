@@ -303,9 +303,12 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 								  maxStorage: 320l * 1024l * 1024l * 1024l, maxMemory: 32l * 1024l * 1024l * 1024l, maxCores:4,
 								  customMaxStorage:true, customMaxDataStorage:true, addVolumes:true])
 
+		// Fallback plan for discovered guests whose size matches no plan above. Morpheus
+		// silently skips a seeded plan without maxCores: this one was never created
+		// until maxCores was set (9.0.2). The bundled ESXi plugin's custom plan sets it too.
 		plans << new ServicePlan([code:'proxmox-ve-internal-custom', editable:false, name:'Proxmox Custom', description:'Proxmox Custom', sortOrder:0,
 								  customMaxStorage:true, customMaxDataStorage:true, addVolumes:true, customCpu: true, customCores: true, customMaxMemory: true, deletable: false, provisionable: false,
-								  maxStorage:0l, maxMemory: 0l,  maxCpu:0])
+								  maxStorage:0l, maxMemory: 0l, maxCpu:0, maxCores:1, coresPerSocket:1])
 		return plans
 	}
 
