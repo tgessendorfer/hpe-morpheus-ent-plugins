@@ -147,7 +147,7 @@ Queries internal tables, tested on 9.0.2 only, may break on upgrade.
 ## Install
 
 Download `morpheus-tenant-chargeback-plugin-<version>-all.jar` from the
-[release tenant-chargeback-v1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.2.0) (tag
+[release tenant-chargeback-v1.2.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.2.1) (tag
 `tenant-chargeback-v<version>`), then upload it under *Administration → Integrations → Plugins →
 Add*. Updating to a newer version with the same plugin code replaces the plugin in place and
 keeps existing report results. The report then appears under *Operations → Reports* in the
