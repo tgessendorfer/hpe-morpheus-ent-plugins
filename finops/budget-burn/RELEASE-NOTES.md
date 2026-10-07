@@ -39,6 +39,11 @@ unchanged.
 
 - Unit tests (Spock) for the new filter.
 - Lab appliance (Morpheus 9.0.2, master tenant), 1.2.1-rc.1 built from the same source: tenant budgets Contoso forecast 29.48 EUR, Fabrikam 13.62 EUR (1.2.0: 56.71 and 26.72 EUR), the same amounts as MSP Tenant Overview and Tenant Chargeback. The new filter runs against the `container` table without error.
+- The release jar loads on the lab appliance (9.0.2) in place of 1.2.1-rc.1.
+
+Built by the release workflow from the source at tag `budget-burn-v1.2.1`.
+
+sha256 `b065b5fa3c932bbf5367b74065183e1279a7af16ba2dc1212ac8c956cda66112`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.2.0...budget-burn-v1.2.1
 

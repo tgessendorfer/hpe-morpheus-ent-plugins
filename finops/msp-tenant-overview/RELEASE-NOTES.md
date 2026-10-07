@@ -44,6 +44,11 @@ unchanged.
 
 - Unit tests (Spock) for the new filter and for hiding zero currencies.
 - Lab appliance (Morpheus 9.0.2, master tenant), 1.2.1-rc.1 built from the same source: Contoso revenue 2026-10 29.48 EUR (cost 23.96, margin 18.7 %), Fabrikam 13.62 EUR (11.50, 15.6 %), total 43.10 EUR (17.7 %); 1.2.0 showed 56.71 and 26.72 EUR with the same margins. No USD rows and no USD total. The new filter runs against the `container` table without error.
+- The release jar loads on the lab appliance (9.0.2) in place of 1.2.1-rc.1.
+
+Built by the release workflow from the source at tag `msp-tenant-overview-v1.2.1`.
+
+sha256 `55e415c8210437622dbdcf13021eacc7c94845bef74dcbbedad204908455844e`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.2.0...msp-tenant-overview-v1.2.1
 

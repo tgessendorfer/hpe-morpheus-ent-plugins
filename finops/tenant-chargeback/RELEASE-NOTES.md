@@ -40,6 +40,11 @@ unchanged.
 
 - Unit tests (Spock) for the new filter.
 - Lab appliance (Morpheus 9.0.2, master tenant), 1.2.1-rc.1 built from the same source: report for 2026-10: Contoso 29.48 EUR list price / 23.96 EUR cost (18.7 %), Fabrikam 13.62 / 11.50 EUR (15.6 %), total 43.10 / 35.46 EUR, the same amounts as MSP Tenant Overview and Budget Burn. The new filter runs against the `container` table without error.
+- The release jar loads on the lab appliance (9.0.2) in place of 1.2.1-rc.1.
+
+Built by the release workflow from the source at tag `tenant-chargeback-v1.2.1`.
+
+sha256 `3c2184e52119a161861e11f1a92f47d13a6d5e31c0aa15639c914d5ab132eb7d`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.2.0...tenant-chargeback-v1.2.1
 
