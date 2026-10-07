@@ -41,11 +41,16 @@ unchanged.
 - Lab appliance (Morpheus 9.0.2, Chrome): report result 109 for 2026-10 shown with 1.2.2-rc.1 and
   1.2.2-rc.2: one card *43.10 EUR*, no USD row in any table, numbers right-aligned, nothing wraps
   in the 1090 px report page.
+- The release jar loads on the lab appliance (9.0.2) in place of 1.2.2-rc.2.
 
 ### Not yet verified
 
 - The German page was checked in the unit tests only.
 - Dark mode was checked by setting `data-mode="dark"` in the browser and by review only.
+
+Built by the release workflow from the source at tag `tenant-chargeback-v1.2.2`.
+
+sha256 `651b0e34a06eff2a187e29c04cbfd8447ca04e02780e3b754a1094c3088a6fe5`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.2.1...tenant-chargeback-v1.2.2
 

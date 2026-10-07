@@ -47,12 +47,18 @@ unchanged.
   the same source: the table fills 857 px without a scroll bar, no amount or status wraps, the
   headers take two lines, the budget column is 224 px wide and every row 59 px high (1.2.1: up to
   92 px, with owner, scope and amounts wrapped over three or four lines).
+- The release jar loads on the lab appliance (9.0.2) in place of 1.2.2-rc.2; the table fills
+  857 px without a scroll bar and every row is 59 px high, as with rc.2.
 
 ### Not yet verified
 
 - The German page (longer headers such as *Monatsbudget*) was checked in the unit tests only.
 - Dark mode cannot be switched on in the lab (the theme setting is hidden while whitelabeling is
   enabled); it was checked by setting `data-mode="dark"` in the browser and by review.
+
+Built by the release workflow from the source at tag `budget-burn-v1.2.2`.
+
+sha256 `6554b8bd554c8922c5457903967998b7a30f719f7797ca5003dfede72d8def92`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.2.1...budget-burn-v1.2.2
 

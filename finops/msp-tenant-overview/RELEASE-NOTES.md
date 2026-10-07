@@ -45,12 +45,18 @@ unchanged.
   the five cards in one row (161 px each), the table in 857 px without wrapping or scroll bar;
   tenant names, amounts and margins stay on one line. Amounts unchanged from 1.2.1: Contoso Ltd.
   29.48 EUR revenue (margin 18.7 %), Fabrikam Inc. 13.62 EUR (15.6 %), total 43.10 EUR (17.7 %).
+- The release jar loads on the lab appliance (9.0.2) in place of 1.2.2-rc.2; cards in one row,
+  table 857 px without a scroll bar, total 43.10 EUR revenue, 35.46 EUR cost, 17.7 % margin.
 
 ### Not yet verified
 
 - The German page was checked in the unit tests only.
 - Dark mode cannot be switched on in the lab (the theme setting is hidden while whitelabeling is
   enabled); it was checked by setting `data-mode="dark"` in the browser and by review.
+
+Built by the release workflow from the source at tag `msp-tenant-overview-v1.2.2`.
+
+sha256 `66506b7bfc1bd30427fdb496599f8378eb9171d7115c5c5fcf8367394a5a2e6f`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.2.1...msp-tenant-overview-v1.2.2
 
