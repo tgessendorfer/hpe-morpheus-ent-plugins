@@ -25,7 +25,7 @@ import com.morpheusdata.views.ViewModel
 import groovy.util.logging.Slf4j
 
 /**
- * Shared behaviour of the three FinOps widgets: the item type skeleton (permission "Costing",
+ * Shared behaviour of the three FinOps widgets: the item type skeleton (permission "Budgets",
  * read or full), the viewer's locale and messages, and the render path. The HTML is complete when
  * it leaves the server; the registered script is a no-op (see SCRIPT_PATH).
  */
@@ -33,7 +33,9 @@ import groovy.util.logging.Slf4j
 abstract class AbstractFinopsItemProvider extends AbstractDashboardItemTypeProvider {
 
 	// Users need Operations > Costing (operations-invoices) to see invoice figures.
-	static final String PERMISSION_CODE = 'operations-invoices'
+	// 1.1.1: 'operations-budgets' instead of 'operations-invoices', so that a tenant FinOps role that
+	// must not see provider invoices (owner decision 2026-10-08) still gets the widgets.
+	static final String PERMISSION_CODE = 'operations-budgets'
 	static final List<String> ACCESS_TYPES = ['read', 'full']
 
 	static final String MESSAGE_PREFIX = 'finops-insights'

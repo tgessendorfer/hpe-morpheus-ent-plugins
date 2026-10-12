@@ -6,6 +6,16 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.1.1
+
+**Widget permission changed from Invoices to Budgets.** Measured on 9.0.2: the dashboard render
+(`/operations/dashboard/<code>`) returns only the items whose item type permission the viewer holds.
+A tenant FinOps role that must not see provider invoices (`operations-invoices` none) therefore got an
+empty dashboard. The three FinOps widgets now require `operations-budgets` (read or full), which such a
+role can hold without exposing invoices. No other change.
+
+---
+
 ## 1.1.0
 
 **The dashboard becomes the home dashboard.** Built against plugin API 1.4.2, minimum appliance 9.0.2.

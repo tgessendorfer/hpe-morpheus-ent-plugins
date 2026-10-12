@@ -42,8 +42,8 @@ trend and the split by cloud and tenant, all read from the monthly invoices.
    keeping the default home dashboard enabled shows the standard widgets twice.
 3. Operations > Dashboard renders every enabled dashboard, one below the other.
 
-Users see the widgets when their role grants **Operations > Costing** (`operations-invoices`, read
-or full).
+Users see the widgets when their role grants **Operations > Costing > Budgets** (`operations-budgets`,
+read or full); since 1.1.1 the invoice permission is not required.
 
 ## How it renders
 
