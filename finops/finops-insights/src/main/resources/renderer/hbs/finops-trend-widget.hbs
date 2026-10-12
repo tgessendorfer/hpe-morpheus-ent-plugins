@@ -1,0 +1,45 @@
+<div class="dashboard-widget finops-insights finops-insights-trend">
+  <style>
+    .finops-insights { font-size: 13px; }
+    .finops-insights .dashboard-widget-header, .finops-insights .dashboard-widget-header * { text-transform: none; }
+    .finops-insights .dashboard-widget-header .fi-title { flex-grow: 1; }
+    .finops-insights .fi-hint { padding: 14px; border: 1px dashed rgba(128,128,128,.45); border-radius: 8px; opacity: .8; }
+    .finops-insights .fi-legend { display: flex; gap: 14px; font-size: 11px; opacity: .8; text-transform: none; }
+    .finops-insights .fi-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+    .finops-insights .fi-chart { width: 100%; height: auto; display: block; }
+    .finops-insights .fi-chart .fi-grid { stroke: rgba(128,128,128,.25); stroke-width: 1; }
+    .finops-insights .fi-chart .fi-axis { stroke: rgba(128,128,128,.6); stroke-width: 1; }
+    .finops-insights .fi-chart text { fill: currentColor; font-size: 10px; opacity: .75; }
+    .finops-insights .fi-chart .fi-rev { fill: #2f80ed; }
+    .finops-insights .fi-chart .fi-rev.fi-current { fill: #2f80ed; opacity: .55; }
+    .finops-insights .fi-chart .fi-cost { fill: #f2994a; }
+    .finops-insights .fi-chart .fi-cost.fi-current { fill: #f2994a; opacity: .55; }
+    .finops-insights .fi-foot { margin-top: 4px; font-size: 11px; opacity: .55; }
+  </style>
+  <div class="dashboard-widget-header"><span class="fi-title">{{title}}</span>
+    {{#if ok}}<span class="fi-legend"><span><i style="background:#2f80ed"></i>{{seriesA}}</span>{{#if seriesB}}<span><i style="background:#f2994a"></i>{{seriesB}}</span>{{/if}}</span>{{/if}}
+  </div>
+  <div class="dashboard-widget-body">
+    <div class="dashboard-widget-content top-space">
+      {{#if ok}}
+      <svg class="fi-chart" viewBox="0 0 {{chart.width}} {{chart.height}}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="{{title}}">
+        {{#each chart.grid}}
+        <line class="fi-grid" x1="40" x2="{{../chart.width}}" y1="{{y}}" y2="{{y}}"></line>
+        <text x="36" y="{{y}}" text-anchor="end" dominant-baseline="middle">{{label}}</text>
+        {{/each}}
+        <line class="fi-axis" x1="40" x2="{{chart.width}}" y1="{{chart.baseY}}" y2="{{chart.baseY}}"></line>
+        {{#each chart.groups}}
+        <rect class="fi-rev{{#if current}} fi-current{{/if}}" x="{{revX}}" y="{{revY}}" width="{{width}}" height="{{revH}}" rx="2"><title>{{label}}: {{revText}} {{../currency}}</title></rect>
+        {{#if ../chart.withCost}}
+        <rect class="fi-cost{{#if current}} fi-current{{/if}}" x="{{costX}}" y="{{costY}}" width="{{width}}" height="{{costH}}" rx="2"><title>{{label}}: {{costText}} {{../currency}}</title></rect>
+        {{/if}}
+        <text x="{{labelX}}" y="{{../chart.height}}" text-anchor="middle" dominant-baseline="auto" dy="-6">{{label}}</text>
+        {{/each}}
+      </svg>
+      <div class="fi-foot">{{t.trend_foot}} ({{currency}})</div>
+      {{else}}
+      <div class="fi-hint">{{hint}}</div>
+      {{/if}}
+    </div>
+  </div>
+</div>

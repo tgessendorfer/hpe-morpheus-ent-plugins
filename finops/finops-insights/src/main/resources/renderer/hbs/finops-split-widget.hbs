@@ -1,0 +1,54 @@
+<div class="dashboard-widget finops-insights finops-insights-split">
+  <style>
+    .finops-insights { font-size: 13px; }
+    .finops-insights .dashboard-widget-header, .finops-insights .dashboard-widget-header * { text-transform: none; }
+    .finops-insights .dashboard-widget-header .fi-title { flex-grow: 1; }
+    .finops-insights .dashboard-widget-header .fi-note { font-size: 11px; opacity: .65; text-transform: none; }
+    .finops-insights .fi-hint { padding: 14px; border: 1px dashed rgba(128,128,128,.45); border-radius: 8px; opacity: .8; }
+    .finops-insights .fi-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    .finops-insights .fi-col h4 { margin: 0 0 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; opacity: .65; }
+    .finops-insights .fi-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 8px; align-items: center; padding: 3px 0; }
+    .finops-insights .fi-row .fi-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .finops-insights .fi-row .fi-amt { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .finops-insights .fi-row .fi-share { white-space: nowrap; font-size: 11px; opacity: .6; min-width: 46px; text-align: right; }
+    .finops-insights .fi-track { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: rgba(128,128,128,.18); margin-bottom: 3px; }
+    .finops-insights .fi-fill { height: 5px; border-radius: 3px; background: #2f80ed; }
+    .finops-insights .fi-row.fi-other .fi-fill { background: #8a8f98; }
+    .finops-insights .fi-empty { font-size: 12px; opacity: .6; }
+  </style>
+  <div class="dashboard-widget-header"><span class="fi-title">{{title}}</span>{{#if ok}}<span class="fi-note">{{month}} · {{currency}}</span>{{/if}}</div>
+  <div class="dashboard-widget-body">
+    <div class="dashboard-widget-content top-space">
+      {{#if ok}}
+      <div class="fi-cols">
+        <div class="fi-col">
+          <h4>{{t.split_byCloud}}</h4>
+          {{#each byCloud}}
+          <div class="fi-row{{#if other}} fi-other{{/if}}">
+            <span class="fi-name">{{name}}</span><span class="fi-amt">{{revText}}</span><span class="fi-share">{{shareText}}</span>
+            <div class="fi-track"><div class="fi-fill" style="width: {{bar}}%"></div></div>
+          </div>
+          {{else}}
+          <div class="fi-empty">{{t.split_empty}}</div>
+          {{/each}}
+        </div>
+        {{#if byTenant}}
+        <div class="fi-col">
+          <h4>{{t.split_byTenant}}</h4>
+          {{#each byTenant}}
+          <div class="fi-row{{#if other}} fi-other{{/if}}">
+            <span class="fi-name">{{name}}</span><span class="fi-amt">{{revText}}</span><span class="fi-share">{{shareText}}</span>
+            <div class="fi-track"><div class="fi-fill" style="width: {{bar}}%"></div></div>
+          </div>
+          {{else}}
+          <div class="fi-empty">{{t.split_empty}}</div>
+          {{/each}}
+        </div>
+        {{/if}}
+      </div>
+      {{else}}
+      <div class="fi-hint">{{hint}}</div>
+      {{/if}}
+    </div>
+  </div>
+</div>

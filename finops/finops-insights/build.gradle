@@ -1,0 +1,144 @@
+import asset.pipeline.AssetPipelineConfigHolder
+import asset.pipeline.AssetSpecLoader
+import asset.pipeline.gradle.AssetCompile
+
+buildscript {
+	repositories {
+		mavenCentral()
+		maven { url = "https://plugins.gradle.org/m2/" }
+	}
+	dependencies {
+		classpath "com.gradleup.shadow:shadow-gradle-plugin:9.6.1"
+		classpath "com.morpheusdata:morpheus-plugin-gradle:$morpheusPluginApiVersion"
+		classpath "com.bertramlabs.plugins:asset-pipeline-gradle:$assetPipelineVersion"
+	}
+}
+
+apply plugin: 'java'
+apply plugin: 'groovy'
+apply plugin: 'idea'
+apply plugin: 'com.gradleup.shadow'
+apply plugin: 'com.morpheusdata.morpheus-plugin-gradle'
+
+group = 'com.morpheusdata.finopsinsights'
+java {
+	sourceCompatibility = JavaVersion.VERSION_11
+	targetCompatibility = JavaVersion.VERSION_11
+}
+ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
+
+repositories {
+	mavenCentral()
+}
+
+configurations {
+	provided
+}
+
+dependencies {
+	provided "com.morpheusdata:morpheus-plugin-api:$morpheusPluginApiVersion"
+	provided "org.codehaus.groovy:groovy-all:$groovyVersion"
+	provided "org.slf4j:slf4j-api:$slf4jVersion"
+	provided 'io.reactivex.rxjava3:rxjava:3.1.8'
+
+	testImplementation "com.morpheusdata:morpheus-plugin-api:$morpheusPluginApiVersion"
+	testImplementation 'io.reactivex.rxjava3:rxjava:3.1.8'
+	testImplementation "org.slf4j:slf4j-api:$slf4jVersion"
+	testImplementation "org.codehaus.groovy:groovy-all:$groovyVersion"
+	testImplementation 'net.bytebuddy:byte-buddy:1.14.11'
+	testImplementation 'org.objenesis:objenesis:3.3'
+	testImplementation "org.spockframework:spock-core:$spockVersion"
+}
+
+sourceSets {
+	main {
+		compileClasspath += configurations.provided
+	}
+}
+
+jar {
+	manifest {
+		attributes(
+			'Plugin-Class': 'com.morpheusdata.finopsinsights.FinopsInsightsPlugin',
+			'Plugin-Version': version,
+			'Morpheus-Name': 'FinOps Insights Dashboard',
+			'Morpheus-Organization': 'community',
+			'Morpheus-Code': 'morpheus-finops-insights-plugin',
+			'Morpheus-Description': 'Dashboard "FinOps Insights": revenue, cost and margin of the current month, a six-month trend and the split by cloud and tenant, read from the invoices. Providers see all sub-tenants, tenants their own spend.',
+			'Morpheus-Labels': 'FinOps, Cost, Dashboard',
+			'Morpheus-Repo': 'https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/finops/finops-insights',
+			'Morpheus-Min-Appliance-Version': morpheusMinApplianceVersion
+		)
+	}
+}
+
+task copyRuntimeLibs(type: Copy) {
+	into "lib"
+	from project.configurations.runtimeClasspath - project.configurations.provided
+}
+
+test {
+	useJUnitPlatform()
+	// The plugin spec compares getCode() and setWebsiteUrl() against the manifest above.
+	systemProperty 'morpheus.code', jar.manifest.attributes['Morpheus-Code']
+	systemProperty 'morpheus.repo', jar.manifest.attributes['Morpheus-Repo']
+	testLogging {
+		exceptionFormat = 'full'
+		showStandardStreams = true
+	}
+}
+
+shadowJar {
+}
+
+// Dashboards and widgets need a script path: Morpheus resolves it through the asset manifest and
+// fails the dashboard when it is missing. The script here is a no-op; every widget is server-rendered.
+// asset-pipeline 4.4.0's AssetCompile reads its classpath through Task.project while it runs, which
+// Gradle 9 deprecates; this subclass gets the classpath as a task input (same as cloud/proxmox-ve).
+@CacheableTask
+abstract class PluginAssetCompile extends AssetCompile {
+	@Classpath
+	abstract ConfigurableFileCollection getAssetClasspath()
+
+	@Inject
+	abstract ObjectFactory getObjects()
+
+	@Internal
+	@Override
+	FileCollection getClasspath() {
+		assetClasspath
+	}
+
+	@Internal
+	@Override
+	FileTree getSource() {
+		objects.fileTree().from(assetsDir)
+	}
+
+	@Override
+	void loadAssetSpecifications() {
+		AssetSpecLoader.loadSpecifications()
+	}
+}
+
+AssetPipelineConfigHolder.config = (AssetPipelineConfigHolder.config ?: [:]) + [cacheLocation: layout.buildDirectory.file('.assetcache').get().asFile.path]
+
+def assetCompile = tasks.register('assetCompile', PluginAssetCompile) {
+	assetsDir = file('src/assets')
+	destinationDir = layout.buildDirectory.dir('assets').get().asFile
+	// No classpath: with the plugin API on it, asset-pipeline would also pack the jQuery webjar (1.7 MB).
+}
+
+[tasks.named('jar'), tasks.named('shadowJar')].each { jarTask ->
+	jarTask.configure {
+		from(assetCompile) {
+			into 'assets'
+		}
+	}
+}
+
+tasks.withType(Sign) {
+	onlyIf { isReleaseVersion }
+}
+
+tasks.assemble.dependsOn tasks.shadowJar

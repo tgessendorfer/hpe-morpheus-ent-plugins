@@ -18,6 +18,7 @@ releases on its own.
 | Instance Showback | FinOps: Instance tab | [`finops/instance-showback`](finops/instance-showback) | [1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/instance-showback-v1.2.0) | *Costs* tab on every instance: month to date, month-end forecast, compute/storage/license split and the three months before. Verified on Morpheus 9.0.2. |
 | Budget Burn | FinOps: Analytics | [`finops/budget-burn`](finops/budget-burn) | [1.2.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/budget-burn-v1.2.2) | Yearly Morpheus budgets against actual spend: monthly budget, spend to date, burn rate, forecast and status. Verified on Morpheus 9.0.2. |
 | MSP Tenant Overview | FinOps: Analytics | [`finops/msp-tenant-overview`](finops/msp-tenant-overview) | [1.2.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/msp-tenant-overview-v1.2.2) | Provider view of every sub-tenant: resources, revenue, cost and margin for this and the previous month. Verified on Morpheus 9.0.2. |
+| FinOps Insights Dashboard | FinOps: Dashboard | [`finops/finops-insights`](finops/finops-insights) | [1.0.4](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/finops-insights-v1.0.4) | Dashboard with this month's revenue, cost and margin, a six-month trend and the split by cloud and tenant; providers see all sub-tenants, tenants their own spend. Verified on Morpheus 9.0.2. |
 | Socket Usage Report | FinOps: Report | [`finops/socket-report`](finops/socket-report) | [1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/socket-report-v1.2.0) | Where the licence socket count comes from: host sockets and the share for VMs without a host, per tenant and cloud. Verified on Morpheus 9.0.2. |
 | Cost Threshold Approval | FinOps: Approval | [`finops/cost-approval`](finops/cost-approval) | [1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/cost-approval-v1.2.0) | Approves provisioning requests at or below a monthly price threshold and rejects the rest with the reason. Verified on Morpheus 9.0.2. |
 
@@ -36,6 +37,7 @@ Integrations > Plugins*. Each plugin's README covers the setup in Morpheus.
 | Instance Showback | `morpheus-instance-showback-plugin-<version>-all.jar` | `morpheus-instance-showback-plugin` |
 | Budget Burn | `morpheus-budget-burn-plugin-<version>-all.jar` | `morpheus-budget-burn-plugin` |
 | MSP Tenant Overview | `morpheus-msp-tenant-overview-plugin-<version>-all.jar` | `morpheus-msp-tenant-overview-plugin` |
+| FinOps Insights Dashboard | `morpheus-finops-insights-plugin-<version>-all.jar` | `morpheus-finops-insights-plugin` |
 | Socket Usage Report | `morpheus-socket-report-plugin-<version>-all.jar` | `morpheus-socket-report-plugin` |
 | Cost Threshold Approval | `morpheus-cost-approval-plugin-<version>-all.jar` | `morpheus-cost-approval-plugin` |
 
@@ -56,6 +58,7 @@ does not run on JDK 21. All plugins build with Gradle 9.8.0.
 (cd finops/instance-showback && ./gradlew clean test shadowJar)     # build/libs/morpheus-instance-showback-plugin-<version>-all.jar
 (cd finops/budget-burn && ./gradlew clean test shadowJar)           # build/libs/morpheus-budget-burn-plugin-<version>-all.jar
 (cd finops/msp-tenant-overview && ./gradlew clean test shadowJar)   # build/libs/morpheus-msp-tenant-overview-plugin-<version>-all.jar
+(cd finops/finops-insights && ./gradlew clean test shadowJar)      # build/libs/morpheus-finops-insights-plugin-<version>-all.jar
 (cd finops/socket-report && ./gradlew clean test shadowJar)         # build/libs/morpheus-socket-report-plugin-<version>-all.jar
 (cd finops/cost-approval && ./gradlew clean test shadowJar)         # build/libs/morpheus-cost-approval-plugin-<version>-all.jar
 ```
@@ -76,6 +79,7 @@ Every plugin has its own tag prefix:
 | Instance Showback | `instance-showback-v<version>` |
 | Budget Burn | `budget-burn-v<version>` |
 | MSP Tenant Overview | `msp-tenant-overview-v<version>` |
+| FinOps Insights Dashboard | `finops-insights-v<version>` |
 | Socket Usage Report | `socket-report-v<version>` |
 | Cost Threshold Approval | `cost-approval-v<version>` |
 
@@ -95,6 +99,7 @@ finops/tenant-chargeback   Tenant chargeback report
 finops/instance-showback   Instance cost tab
 finops/budget-burn         Budget burn analytics page
 finops/msp-tenant-overview MSP tenant overview analytics page
+finops/finops-insights     FinOps insights dashboard
 finops/socket-report       Socket usage report
 finops/cost-approval       Cost threshold approval integration
 docs/hpe                   Bug reports and feature requests sent to HPE
