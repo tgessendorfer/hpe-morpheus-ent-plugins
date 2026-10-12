@@ -6,6 +6,32 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.1.0
+
+**The dashboard becomes the home dashboard.** Built against plugin API 1.4.2, minimum appliance 9.0.2.
+
+### What changes
+
+- The plugin dashboard (code unchanged: `finops-insights-dashboard`, now named **Nordwind Operations**)
+  contains the standard Morpheus home widgets, referenced by their item type codes, interleaved with
+  the three FinOps widgets. Row order (owner decision 2026-10-12): Environment + System Status;
+  Instance Status + Instances by Cloud; Job Executions + Backups + Task Executions; FinOps at a glance;
+  Six-month trend + This month by cloud and tenant; Favorites + Alarms; Activity; Log History.
+- Measured on 9.0.2: a `DashboardItem` whose `type` is `new DashboardItemType(code: '<standard code>')`
+  is resolved by the appliance to the existing item type on plugin load; the 14 items appear in
+  `view_dashboard_item` in the declared order and render with the standard widget scripts, including
+  their own permission checks (for example Log History only with the log permission).
+- Intended appliance setting: Administration > Settings > Appliance > *Dashboards to Display* = only
+  this dashboard (`appliance-settings.dashboardsToDisplay = finops-insights-dashboard`); with the default
+  home dashboard still enabled the standard widgets would appear twice.
+
+### Unchanged
+
+- The three widgets and their data queries (1.0.4). Tenants see their own spend; providers see all
+  sub-tenants. Give a tenant role the feature permission *Dashboard* = read to show it.
+
+---
+
 ## 1.0.4
 
 **First release: a plugin dashboard "FinOps Insights" with three server-rendered widgets.** Versions 1.0.0 to 1.0.3 were lab test builds that never left the lab appliance.

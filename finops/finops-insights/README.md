@@ -35,8 +35,11 @@ trend and the split by cloud and tenant, all read from the monthly invoices.
 ## Enable the dashboard
 
 1. Upload the jar under Administration > Integrations > Plugins.
-2. Administration > Settings > Appliance > **Dashboards to Display**: add *FinOps Insights* (keep
-   *Default Home Dashboard* in the list if the standard widgets should stay) and save.
+2. Administration > Settings > Appliance > **Dashboards to Display**: select *Nordwind Operations*
+   and remove *Default Home Dashboard*, then save. Since 1.1.0 the plugin dashboard already contains
+   the standard home widgets (environment, system status, instances, jobs, backups, tasks,
+   favourites, alarms, activity, log history) in a fixed order with the FinOps widgets in the middle;
+   keeping the default home dashboard enabled shows the standard widgets twice.
 3. Operations > Dashboard renders every enabled dashboard, one below the other.
 
 Users see the widgets when their role grants **Operations > Costing** (`operations-invoices`, read

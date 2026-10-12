@@ -20,6 +20,7 @@ import com.morpheusdata.core.Plugin
 import com.morpheusdata.core.dashboard.AbstractDashboardProvider
 import com.morpheusdata.model.Dashboard
 import com.morpheusdata.model.DashboardItem
+import com.morpheusdata.model.DashboardItemType
 import groovy.util.logging.Slf4j
 
 /**
@@ -32,11 +33,20 @@ class FinopsInsightsDashboardProvider extends AbstractDashboardProvider {
 	static final String CODE = 'finops-insights-dashboard'
 
 	// Group name -> item type codes, in display order. Each group is one row of the dashboard.
+	// Owner layout 2026-10-12: the standard home widgets (Morpheus item types, referenced by code)
+	// interleaved with the FinOps widgets, so this dashboard replaces the default home dashboard
+	// (Administration > Settings > Appliance > Dashboards to Display = only this one).
 	static final Map<String, List<String>> LAYOUT = [
+		'top'        : ['dashboard-item-environment-count', 'dashboard-item-current-health'],
+		'instances'  : ['dashboard-item-instance-count', 'dashboard-item-instance-count-cloud'],
+		'jobs'       : ['dashboard-item-job-execution-stats', 'dashboard-item-backup-stats',
+		                'dashboard-item-task-execution-stats'],
 		'finops-top' : [FinopsKpiItemProvider.CODE],
-		'finops-main': [FinopsTrendItemProvider.CODE, FinopsSplitItemProvider.CODE]
+		'finops-main': [FinopsTrendItemProvider.CODE, FinopsSplitItemProvider.CODE],
+		'main'       : ['dashboard-item-user-favorites', 'dashboard-item-current-alarms'],
+		'activity'   : ['dashboard-item-recent-activity'],
+		'logs'       : ['dashboard-item-log-count']
 	]
-
 	Plugin plugin
 	MorpheusContext morpheus
 
@@ -48,7 +58,7 @@ class FinopsInsightsDashboardProvider extends AbstractDashboardProvider {
 	@Override MorpheusContext getMorpheus() { morpheus }
 	@Override Plugin getPlugin() { plugin }
 	@Override String getCode() { CODE }
-	@Override String getName() { 'FinOps Insights' }
+	@Override String getName() { 'Nordwind Operations' }
 
 	@Override
 	Dashboard getDashboard() {
@@ -57,8 +67,8 @@ class FinopsInsightsDashboardProvider extends AbstractDashboardProvider {
 		rtn.code = getCode()
 		rtn.dashboardId = getCode()
 		rtn.category = 'cost'
-		rtn.title = 'FinOps Insights'
-		rtn.description = 'Revenue, cost and margin, six-month trend, split by cloud and tenant'
+		rtn.title = 'Nordwind Operations'
+		rtn.description = 'Home dashboard with the FinOps widgets: environment, instances, jobs, revenue, cost, margin, trend, split, favourites, alarms, activity, logs'
 		// Measured on 9.0.2: the dashboard controller answers {"success":false} for a dashboard whose
 		// default_view flag is 0; the three standard dashboards all carry true, so this one does too.
 		rtn.defaultDashboard = true
@@ -78,18 +88,19 @@ class FinopsInsightsDashboardProvider extends AbstractDashboardProvider {
 			int column = 0
 			codes.each { String code ->
 				def provider = plugin.getProviderByCode(code)
+				DashboardItem item = new DashboardItem()
 				if(provider instanceof com.morpheusdata.core.dashboard.DashboardItemTypeProvider) {
-					DashboardItem item = new DashboardItem()
 					item.type = provider.dashboardItemType
-					item.itemGroup = group
-					item.groupRow = groupRow
-					item.itemRow = 0
-					item.itemColumn = column
-					items << item
-					column++
 				} else {
-					log.warn("FinOps insights: dashboard item type ${code} is not registered")
+					// Standard Morpheus widget: referenced by code only, the appliance resolves the type.
+					item.type = new DashboardItemType(code: code)
 				}
+				item.itemGroup = group
+				item.groupRow = groupRow
+				item.itemRow = 0
+				item.itemColumn = column
+				items << item
+				column++
 			}
 			groupRow++
 		}
