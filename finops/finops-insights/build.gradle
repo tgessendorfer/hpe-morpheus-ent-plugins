@@ -64,7 +64,7 @@ jar {
 			'Morpheus-Name': 'FinOps Insights Dashboard',
 			'Morpheus-Organization': 'community',
 			'Morpheus-Code': 'morpheus-finops-insights-plugin',
-			'Morpheus-Description': 'Dashboard "FinOps Insights": revenue, cost and margin of the current month, a six-month trend and the split by cloud and tenant, read from the invoices. Providers see all sub-tenants, tenants their own spend.',
+			'Morpheus-Description': 'Dashboard "FinOps Insights": revenue, cost and margin of the current month, a six-month trend, the split by cloud and tenant and the latest log entries with a history page. Providers see all sub-tenants, tenants their own.',
 			'Morpheus-Labels': 'FinOps, Cost, Dashboard',
 			'Morpheus-Repo': 'https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/finops/finops-insights',
 			'Morpheus-Min-Appliance-Version': morpheusMinApplianceVersion
@@ -89,6 +89,26 @@ test {
 }
 
 shadowJar {
+}
+
+// The browser script of the latest log entries widget and history page is tested with plain node
+// (src/test/js, no packages); the task is skipped where node is not installed.
+def nodeInstalled = {
+	try {
+		return new ProcessBuilder('node', '--version').redirectErrorStream(true).start().waitFor() == 0
+	} catch(Exception ignored) {
+		return false
+	}
+}
+tasks.register('jsTest', Exec) {
+	group = 'verification'
+	description = 'Runs the browser script tests with node (src/test/js).'
+	workingDir = projectDir
+	commandLine 'node', 'src/test/js/finops-insights-logs.test.js'
+	onlyIf { nodeInstalled() }
+}
+tasks.named('test') {
+	dependsOn 'jsTest'
 }
 
 // Dashboards and widgets need a script path: Morpheus resolves it through the asset manifest and

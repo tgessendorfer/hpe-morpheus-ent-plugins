@@ -44,6 +44,20 @@ class FinopsInsightsData {
 	static final String VIEWER_SQL = '''SELECT u.id AS user_id, u.locale, a.id AS account_id, a.name AS account_name, a.currency,
 		CAST(a.master_account AS UNSIGNED) AS is_master FROM user u JOIN account a ON a.id = u.account_id WHERE u.id = ?'''
 
+	// Servers that can have log entries: agent installed, logging not switched off, not removed. The
+	// instance is the smallest container.instance_id of the server (a host can carry several).
+	// Newest activity first, so that the cap keeps the servers that are alive.
+	static final int LOG_SOURCE_LIMIT = 50
+	static final String LOG_SOURCES_BASE_SQL = '''SELECT cs.id AS id, cs.name AS name,
+		(SELECT MIN(c.instance_id) FROM container c WHERE c.server_id = cs.id AND c.instance_id IS NOT NULL) AS instance_id
+		FROM compute_server cs
+		WHERE cs.agent_installed = 1 AND (cs.enable_logs IS NULL OR cs.enable_logs = 1)
+		AND (cs.status IS NULL OR cs.status <> 'removed')'''
+	static final String LOG_SOURCES_ORDER_SQL = " ORDER BY cs.last_updated DESC, cs.id DESC LIMIT ${LOG_SOURCE_LIMIT}"
+	/** The master tenant sees every tenant's servers; a sub-tenant only its own. */
+	static final String LOG_SOURCES_MASTER_SQL = LOG_SOURCES_BASE_SQL + LOG_SOURCES_ORDER_SQL
+	static final String LOG_SOURCES_TENANT_SQL = LOG_SOURCES_BASE_SQL + ' AND cs.account_id = ?' + LOG_SOURCES_ORDER_SQL
+
 	// Request option keys that may carry the viewer. Measured on 9.0.2: the dashboard controller
 	// hands the widget an empty option map, so the viewer is normally taken from the request's
 	// security context (securityContextUserId); the keys stay as the first, cheaper attempt.
@@ -162,6 +176,53 @@ class FinopsInsightsData {
 		} catch(Exception e) {
 			log.error("FinOps insights: loading invoice data failed: ${e.message}", e)
 			out.reason = 'loadFailed'
+		} finally {
+			if(c) morpheus.report.releaseDatabaseConnection(c).blockingAwait()
+		}
+		return out
+	}
+
+	/**
+	 * The servers whose log entries the latest log entries widget and the log history page may ask
+	 * for: ids, names and (when the server belongs to an instance) the instance id, newest activity
+	 * first, at most LOG_SOURCE_LIMIT.
+	 *
+	 * <p>The ids come from this query for the signed-in viewer and from nowhere else: the platform's
+	 * {@code /api/logs} does not check tenancy when it is given explicit server ids, so the browser
+	 * must only ever be handed ids of the viewer's own tenant (the master tenant sees all). The
+	 * request options are read for the viewer only (resolveUserId); a server id in them is ignored.
+	 *
+	 * <p>Returns {@code [ok, reason, locale, isMaster, accountName, sources: [[id, name, instanceId]]]}.
+	 */
+	Map logSources(Map<String, Object> opts, Locale locale = null) {
+		Map out = [ok: false, locale: locale, isMaster: false, sources: []]
+		Long userId = resolveUserId(opts)
+		if(userId == null) {
+			log.warn("FinOps insights: no viewer for the log sources (option keys: ${opts?.keySet()}) and no security context")
+			out.reason = 'noViewer'
+			return out
+		}
+		Connection c = null
+		try {
+			c = morpheus.report.getReadOnlyDatabaseConnection().blockingGet()
+			Sql sql = newSql(c)
+			def viewer = sql.firstRow(VIEWER_SQL, [userId])
+			if(viewer == null) { out.reason = 'noViewer'; return out }
+			boolean isMaster = (viewer.is_master as Integer) == 1
+			out.isMaster = isMaster
+			out.accountName = viewer.account_name as String
+			out.locale = parseLocale(viewer.locale) ?: locale
+			List<Map> rows = isMaster ? sql.rows(LOG_SOURCES_MASTER_SQL.toString()) :
+				sql.rows(LOG_SOURCES_TENANT_SQL.toString(), [viewer.account_id])
+			out.sources = rows.take(LOG_SOURCE_LIMIT).collect { Map r ->
+				Long id = r.id as Long
+				[id: id, name: (r.name as String)?.trim() ?: "#${id}".toString(), instanceId: r.instance_id != null ? (r.instance_id as Long) : null]
+			}
+			out.ok = true
+		} catch(Exception e) {
+			log.error("FinOps insights: loading the log sources failed: ${e.message}", e)
+			out.reason = 'loadFailed'
+			out.sources = []
 		} finally {
 			if(c) morpheus.report.releaseDatabaseConnection(c).blockingAwait()
 		}

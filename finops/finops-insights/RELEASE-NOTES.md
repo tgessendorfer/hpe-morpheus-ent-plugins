@@ -8,18 +8,20 @@ One section per version, newest first. The same text is the body of the matching
 
 ## 1.2.0
 
-**Each FinOps widget can be switched off in the plugin settings.** Built against plugin API 1.4.2,
-minimum appliance 9.0.2. Nothing changes until a box is ticked.
+**Each FinOps widget can be switched off in the plugin settings, and the dashboard gets a latest log
+entries widget with a log history page.** Built against plugin API 1.4.2, minimum appliance 9.0.2.
+Nothing changes for the three FinOps widgets until a box is ticked; the log row of the dashboard now
+shows the new widget in place of the standard *Log History*.
 
 ### What changes
 
-- **Three plugin settings, one checkbox per widget:** *Hide FinOps at a Glance*, *Hide Six-Month
-  Trend* and *Hide This Month by Cloud and Tenant*. They are declared with `Plugin.setSettings`, so
-  Morpheus offers them where it offers every plugin setting (Administration > Integrations >
-  Plugins, edit the plugin), and they are stored in the plugin's `config`.
+- **Four plugin settings, one checkbox per widget:** *Hide FinOps at a Glance*, *Hide Six-Month
+  Trend*, *Hide This Month by Cloud and Tenant* and *Hide Latest Log Entries*. They are declared with
+  `Plugin.setSettings`, so Morpheus offers them where it offers every plugin setting (Administration >
+  Integrations > Plugins, edit the plugin), and they are stored in the plugin's `config`.
 - **The setting is global.** A ticked box hides the widget for every user of every tenant. A choice
-  per role stays with the permission *Operations > Costing > Budgets*, which hides all three widgets
-  together.
+  per role stays with the permissions *Operations > Costing > Budgets* (the three FinOps widgets
+  together) and *Logs* (the log widget and its page).
 - **It takes effect on the next dashboard load.** The widgets read the plugin settings on every
   render; the plugin does not need a reload.
 - **A switched-off widget does no work.** It runs no invoice query and renders a template that hides
@@ -30,28 +32,77 @@ minimum appliance 9.0.2. Nothing changes until a box is ticked.
   that is missing, unticked or unreadable keeps the widget shown, which is the behaviour of 1.1.1.
 - The labels and help texts of the settings are English only.
 
+### Latest log entries and log history
+
+- **New widget *Latest log entries*** (half width, item type code `finops-insights-logs`): the ten
+  newest log lines of the last seven days of the viewer's servers, repeated lines of one server folded
+  into one with a count, level badge, time, server and message, each line linked to its instance on
+  the *Logs* tab (`#!monitoring-logs-tab`) or, for a server without an instance, to the server page.
+  The header links to the history page.
+- **It replaces the standard *Log History* widget** in the dashboard's log row. The standard widget
+  looks only at today and at a very small default scope. While the new widget is shown it hides the
+  standard one with `.widget-container:has(#log-count-widget)`; with *Hide Latest Log Entries* ticked
+  the new widget renders the hidden box and the standard widget is shown again. The dashboard layout
+  has 15 items now (log row: the plugin widget first, the standard widget second).
+- **New page `/plugin/finops-insights/logs`**, served by the plugin (a `PluginController` route):
+  newest first, time range 1 hour, 24 hours, 7 days or 30 days, level filter, source filter by server
+  name, a text filter on the loaded lines, *Load more* in steps of 100, optional fold of repeated
+  lines, time in the browser's time zone, links to the instances. The first view can be set with the
+  parameters `window`, `level`, `source`, `q` and `collapse`; each value is cut down to a whitelist.
+- **Expect no Morpheus navigation around that page.** The appliance's route controller hands a plugin
+  route's HTML to `render(status, html)` instead of to a layout view, so the page carries its own
+  header with links back to the dashboard and to the standard log viewer. See the README for why a
+  second dashboard or an instance tab was not used.
+- **Tenancy.** The server ids the browser asks for come from the database for the signed-in user,
+  at most 50: the master tenant sees every tenant's servers, a sub-tenant its own. The platform's
+  `GET /api/logs` does not check tenancy when it is given explicit server ids, so the ids are never
+  taken from a request parameter or from the browser.
+- **Permission *Logs*, level read or full.** The level *user* does not get the widget or the page,
+  because the list covers the whole tenant, not the viewer's own instances.
+- **Plain text only.** Log lines and server names are tenant data: the browser script sets
+  `textContent` only, strips terminal escape sequences and control characters, builds links from
+  digits and takes the level class from a whitelist.
+- **One script, own file** (`finops-insights-logs.js`, ES5, no library). Running it twice is harmless.
+- **New messages** `finops-insights.logs.*` in English and German (the new German texts use `\u`
+  escapes, so they display correctly).
+
 ### Unchanged
 
-- The three widgets, their data queries, the `operations-budgets` permission and the dashboard
-  layout (1.1.1). Plugin code and jar name.
+- The three FinOps widgets, their data queries, the `operations-budgets` permission. Plugin code and
+  jar name.
 
 ### Also fixed
 
 - The unit test for the dashboard layout still expected the three-widget dashboard of 1.0.4 and had
-  failed since 1.1.0; it now checks the 14-item layout. No effect on the jar.
+  failed since 1.1.0; it now checks the 15-item layout. No effect on the jar.
 
 ### Verified
 
-- 75 unit tests green with JDK 17 and Gradle 9.8.0: the option types, the checkbox values, the
-  settings JSON parsing, that only the widget's own box hides it, that every unreadable setting keeps
-  it shown, that a hidden widget loads no data, and that the hidden template renders.
+- 129 unit tests (JDK 17, Gradle 9.8.0): the option types, the checkbox values, the settings JSON
+  parsing, that only the widget's own box hides it, that every unreadable setting keeps it shown,
+  that a hidden widget loads no data, the log sources (SQL and parameters for the master tenant and
+  for a sub-tenant, ids never taken from the request options, the cap of 50, the failure states), the
+  page route as the dispatcher finds it, the Logs level check, the parameter whitelist, hostile
+  server names in both templates, and the English and German message keys.
+- 31 browser script tests with node against a DOM stub, also against the minified file of the jar:
+  hostile messages and terminal escapes stay text, links from digits only, folding, `+0000` time
+  stamps, filters, paging, the fallback route, running the script twice.
+- What the appliance's own sources show (read, no plugin was run): the route `/plugin/<path>` needs a
+  signed-in session and calls the plugin with the user's permission map; a route returning nothing is
+  a 404; the instance page selects a tab from `#!<tab id>`, and its Logs pill has the id
+  `monitoring-logs-tab`; the server page has the pill `monitoring-logs`.
 
 ### Not verified
 
-- On an appliance: that the plugin settings dialog renders the three checkboxes (9.0.2 and 9.1.0),
+- On an appliance: that the plugin settings dialog renders the four checkboxes (9.0.2 and 9.1.0),
   that a saved setting reaches `getSettings`, and that the widget container carries the class
-  `widget-container`, so that the box really disappears. Until a lab test says so this section is
-  the whole story.
+  `widget-container`, so that the box really disappears.
+- On an appliance: that `/api/logs` accepts the browser session for a sub-tenant user (it is only
+  measured for the master tenant), that the history page answers with the Logs level check as
+  written, and that the instance and server links open on the Logs tab.
+- That no Morpheus layout wraps the history page and that its script loads from
+  `/assets/plugin/<plugin name>/finops-insights-logs.js` on the page.
+- That the Log History widget swap works in the browsers in use (`:has()` needs a current browser).
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/finops-insights-v1.2.0
 
