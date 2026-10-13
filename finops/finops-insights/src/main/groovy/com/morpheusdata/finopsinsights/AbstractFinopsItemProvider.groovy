@@ -22,12 +22,18 @@ import com.morpheusdata.model.DashboardItem
 import com.morpheusdata.model.DashboardItemType
 import com.morpheusdata.views.HTMLResponse
 import com.morpheusdata.views.ViewModel
+import groovy.json.JsonSlurper
 import groovy.util.logging.Slf4j
 
 /**
  * Shared behaviour of the three FinOps widgets: the item type skeleton (permission "Budgets",
  * read or full), the viewer's locale and messages, and the render path. The HTML is complete when
  * it leaves the server; the registered script is a no-op (see SCRIPT_PATH).
+ *
+ * Since 1.2.0 a widget can be switched off in the plugin settings (see FinopsInsightsPlugin). The
+ * settings are read on every render, so a change shows on the next dashboard load, and a switched-off
+ * widget renders a template that hides its own grid box and skips the invoice query. A setting that
+ * is missing or cannot be read means the widget is shown.
  */
 @Slf4j
 abstract class AbstractFinopsItemProvider extends AbstractDashboardItemTypeProvider {
@@ -44,6 +50,9 @@ abstract class AbstractFinopsItemProvider extends AbstractDashboardItemTypeProvi
 	// script per widget through the plugin's asset manifest and fails the whole dashboard without
 	// one, so a no-op script is shipped (src/assets/javascripts/finops-insights.js).
 	static final String SCRIPT_PATH = 'finops-insights.js'
+
+	// What a switched-off widget renders instead of its content.
+	static final String HIDDEN_TEMPLATE_PATH = 'hbs/finops-hidden-widget'
 
 	private static final Map<String, Properties> BUNDLES = new java.util.concurrent.ConcurrentHashMap<String, Properties>()
 
@@ -63,6 +72,8 @@ abstract class AbstractFinopsItemProvider extends AbstractDashboardItemTypeProvi
 	abstract String getTitle()
 	abstract String getUiSize()
 	abstract String getTemplatePath()
+	/** fieldName of the plugin setting that hides this widget (FinopsInsightsPlugin.SETTING_HIDE_*). */
+	abstract String getSettingKey()
 	/** Fills the template model from the loaded data. */
 	abstract Map model(Map loaded, Locale locale)
 
@@ -131,9 +142,53 @@ abstract class AbstractFinopsItemProvider extends AbstractDashboardItemTypeProvi
 		out
 	}
 
+	/** True for what a ticked Morpheus checkbox or a JSON boolean carries: 'on', 'true', 'yes', '1', true. */
+	static boolean flagOn(Object value) {
+		if(value == null) return false
+		if(value instanceof Boolean) return (Boolean) value
+		value.toString().trim().toLowerCase() in ['on', 'true', 'yes', '1']
+	}
+
+	/** The stored plugin settings; an empty map for null, blank or anything that is not a JSON object. */
+	static Map parseConfig(String json) {
+		if(!json?.trim()) return [:]
+		try {
+			def parsed = new JsonSlurper().parseText(json)
+			return parsed instanceof Map ? (parsed as Map) : [:]
+		} catch(Exception e) {
+			log.debug("FinOps insights: plugin settings are not a JSON object: ${e.message}")
+			return [:]
+		}
+	}
+
+	/** The plugin settings as stored. The core keeps no cache, so every render sees the latest save. */
+	Map pluginConfig() {
+		try {
+			return parseConfig(morpheus.getSettings(plugin).blockingGet())
+		} catch(Exception e) {
+			log.debug("FinOps insights: plugin settings could not be read: ${e.message}")
+			return [:]
+		}
+	}
+
+	/** True when the administrator ticked this widget's "Hide ..." setting. Unreadable means shown. */
+	boolean isHidden() {
+		flagOn(pluginConfig()[getSettingKey()])
+	}
+
+	/** A switched-off widget: no data, no query; the template hides the grid box (or shows one muted line). */
+	HTMLResponse renderHidden(Locale locale) {
+		ViewModel<Map> model = new ViewModel<>()
+		model.object = [title: message(getTitleKey(), locale), hint: message('hint.hidden', locale)]
+		getRenderer().renderTemplate(HIDDEN_TEMPLATE_PATH, model)
+	}
+
 	@Override
 	HTMLResponse renderDashboardItem(DashboardItem dashboardItem, Map<String, Object> opts) {
 		Locale locale = browserLocale()
+		if(isHidden()) {
+			return renderHidden(locale)
+		}
 		Map loaded = data.load(opts, locale)
 		Locale shown = (loaded.locale as Locale) ?: locale
 		Map m = [ok: loaded.ok, reason: loaded.reason, t: labels(shown), isMaster: loaded.isMaster, title: message(getTitleKey(), shown)]

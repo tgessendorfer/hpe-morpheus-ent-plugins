@@ -45,6 +45,28 @@ trend and the split by cloud and tenant, all read from the monthly invoices.
 Users see the widgets when their role grants **Operations > Costing > Budgets** (`operations-budgets`,
 read or full); since 1.1.1 the invoice permission is not required.
 
+## Switch a widget off
+
+Since 1.2.0 the plugin has three settings (Administration > Integrations > Plugins, edit
+*FinOps Insights Dashboard*), one checkbox per widget:
+
+| Setting | Hides |
+|---|---|
+| Hide FinOps at a Glance | FinOps at a glance |
+| Hide Six-Month Trend | Six-month trend |
+| Hide This Month by Cloud and Tenant | This month by cloud and tenant |
+
+- The setting is **global**: it applies to every user and every tenant. For a choice per role take
+  *Operations > Costing > Budgets* away from the role, which hides all three widgets together.
+- It takes effect on the **next dashboard load**; the plugin does not need a reload. A hidden widget
+  also skips its invoice query.
+- An unticked box, or a setting the plugin cannot read, **shows** the widget.
+- A hidden widget's box disappears from the grid (CSS `:has()`); a browser without `:has()` shows one
+  muted line instead. The other widget of a row keeps its width.
+- The settings are stored in the plugin's `config` (`hideKpi`, `hideTrend`, `hideSplit`, value `on`),
+  so the REST API can set them as well: `PUT /api/plugins/<plugin id>` with
+  `{"plugin": {"config": {"hideTrend": "on"}}}`.
+
 ## How it renders
 
 Every widget is complete HTML when it leaves the server: Handlebars templates with their own scoped
@@ -70,6 +92,7 @@ the chart geometry, the message bundles and the plugin identity.
 | Plugin | Morpheus | Plugin API | Notes |
 |---|---|---|---|
 | 1.0.x | 9.0.2 | 1.4.2 | Reads `user`, `account`, `account_invoice`, `compute_zone`, `container`, `instance` |
+| 1.2.x | 9.0.2 | 1.4.2 | Adds the widget settings; reads the same tables |
 
 ## Trademarks
 

@@ -6,6 +6,57 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.0
+
+**Each FinOps widget can be switched off in the plugin settings.** Built against plugin API 1.4.2,
+minimum appliance 9.0.2. Nothing changes until a box is ticked.
+
+### What changes
+
+- **Three plugin settings, one checkbox per widget:** *Hide FinOps at a Glance*, *Hide Six-Month
+  Trend* and *Hide This Month by Cloud and Tenant*. They are declared with `Plugin.setSettings`, so
+  Morpheus offers them where it offers every plugin setting (Administration > Integrations >
+  Plugins, edit the plugin), and they are stored in the plugin's `config`.
+- **The setting is global.** A ticked box hides the widget for every user of every tenant. A choice
+  per role stays with the permission *Operations > Costing > Budgets*, which hides all three widgets
+  together.
+- **It takes effect on the next dashboard load.** The widgets read the plugin settings on every
+  render; the plugin does not need a reload.
+- **A switched-off widget does no work.** It runs no invoice query and renders a template that hides
+  its own grid box with the CSS rule `.widget-container:has(.fi-off)`. A browser without `:has()`
+  shows one muted line instead, for example *Six-month trend: Switched off in the plugin settings.*
+  (English and German). The other widget of a row keeps its width.
+- **Shown is the default and the safe state.** The checkboxes are inverted ("Hide ..."), so a setting
+  that is missing, unticked or unreadable keeps the widget shown, which is the behaviour of 1.1.1.
+- The labels and help texts of the settings are English only.
+
+### Unchanged
+
+- The three widgets, their data queries, the `operations-budgets` permission and the dashboard
+  layout (1.1.1). Plugin code and jar name.
+
+### Also fixed
+
+- The unit test for the dashboard layout still expected the three-widget dashboard of 1.0.4 and had
+  failed since 1.1.0; it now checks the 14-item layout. No effect on the jar.
+
+### Verified
+
+- 75 unit tests green with JDK 17 and Gradle 9.8.0: the option types, the checkbox values, the
+  settings JSON parsing, that only the widget's own box hides it, that every unreadable setting keeps
+  it shown, that a hidden widget loads no data, and that the hidden template renders.
+
+### Not verified
+
+- On an appliance: that the plugin settings dialog renders the three checkboxes (9.0.2 and 9.1.0),
+  that a saved setting reaches `getSettings`, and that the widget container carries the class
+  `widget-container`, so that the box really disappears. Until a lab test says so this section is
+  the whole story.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/finops-insights-v1.2.0
+
+---
+
 ## 1.1.1
 
 **Widget permission changed from Invoices to Budgets.** Measured on 9.0.2: the dashboard render

@@ -1,10 +1,11 @@
 package com.morpheusdata.finopsinsights
 
+import com.morpheusdata.model.OptionType
 import spock.lang.Specification
 
 /**
  * Guards the identity of the plugin: the code Morpheus persists, the repo link, the registered
- * providers, the dashboard layout and the message bundles.
+ * providers, the dashboard layout, the widget settings and the message bundles.
  */
 class FinopsInsightsPluginSpec extends Specification {
 
@@ -41,18 +42,22 @@ class FinopsInsightsPluginSpec extends Specification {
 		plugin.providers*.code as Set == PROVIDER_CODES
 	}
 
-	def "the dashboard lists every widget once, KPIs on top"() {
+	def "the dashboard lists every widget once, the FinOps KPIs above trend and split"() {
 		given:
 		FinopsInsightsDashboardProvider dash = plugin.getProviderByCode(FinopsInsightsDashboardProvider.CODE) as FinopsInsightsDashboardProvider
 
 		when:
 		def items = dash.buildItems()
+		// Since 1.1.0 the standard home widgets are part of the layout; pick the FinOps ones.
+		def finops = items.findAll { it.type.code.startsWith('finops-insights-') }
 
 		then:
-		items*.type*.code == [FinopsKpiItemProvider.CODE, FinopsTrendItemProvider.CODE, FinopsSplitItemProvider.CODE]
-		items*.itemGroup == ['finops-top', 'finops-main', 'finops-main']
-		items*.groupRow == [0, 1, 1]
-		items*.itemColumn == [0, 0, 1]
+		items.size() == 14
+		(items*.type*.code as Set).size() == items.size()
+		finops*.type*.code == [FinopsKpiItemProvider.CODE, FinopsTrendItemProvider.CODE, FinopsSplitItemProvider.CODE]
+		finops*.itemGroup == ['finops-top', 'finops-main', 'finops-main']
+		finops*.groupRow == [3, 4, 4]
+		finops*.itemColumn == [0, 0, 1]
 	}
 
 	def "widgets declare the Costing permission with read and full and the no-op script"() {
@@ -79,9 +84,38 @@ class FinopsInsightsPluginSpec extends Specification {
 		expect:
 		!en.isEmpty()
 		en.stringPropertyNames() == de.stringPropertyNames()
-		AbstractFinopsItemProvider.labels(Locale.GERMAN).keySet().containsAll(['kpi_title', 'trend_foot', 'split_byCloud', 'split_byTenant', 'split_empty', 'note_otherCurrencies', 'hint_noViewer', 'hint_loadFailed'])
+		AbstractFinopsItemProvider.labels(Locale.GERMAN).keySet().containsAll(['kpi_title', 'trend_foot', 'split_byCloud', 'split_byTenant', 'split_empty', 'note_otherCurrencies', 'hint_noViewer', 'hint_loadFailed', 'hint_hidden'])
 		AbstractFinopsItemProvider.message('kpi.margin', Locale.GERMAN) == 'Marge'
 		AbstractFinopsItemProvider.message('kpi.margin', Locale.FRENCH) == 'Margin'
+	}
+
+	def "the plugin offers one unticked Hide checkbox per widget and each widget reads its own"() {
+		given:
+		List<OptionType> settings = plugin.settings
+		List<AbstractFinopsItemProvider> widgets = [FinopsKpiItemProvider.CODE, FinopsTrendItemProvider.CODE, FinopsSplitItemProvider.CODE]
+			.collect { plugin.getProviderByCode(it) as AbstractFinopsItemProvider }
+
+		expect:
+		settings*.code == ['finops-insights-hide-kpi', 'finops-insights-hide-trend', 'finops-insights-hide-split']
+		settings*.fieldName == ['hideKpi', 'hideTrend', 'hideSplit']
+		settings*.displayOrder == [0, 1, 2]
+		settings.every { it.inputType == OptionType.InputType.CHECKBOX && it.fieldContext == 'config' && !it.required }
+		// A fieldCode would replace the label with an i18n lookup; an unticked box needs no default.
+		settings.every { it.fieldCode == null && it.defaultValue == null }
+		settings.every { it.fieldLabel.startsWith('Hide ') && it.name == it.fieldLabel && it.helpText }
+		widgets*.settingKey == settings*.fieldName
+	}
+
+	def "the switched-off template hides the widget container and keeps a one-line fallback"() {
+		given:
+		File template = new File('src/main/resources/renderer/hbs/finops-hidden-widget.hbs')
+
+		expect:
+		AbstractFinopsItemProvider.HIDDEN_TEMPLATE_PATH == 'hbs/finops-hidden-widget'
+		template.isFile()
+		template.text.contains('.widget-container:has(.fi-off) { display: none; }')
+		template.text.contains('{{title}}')
+		template.text.contains('{{hint}}')
 	}
 
 	def "the viewer id is read from the request options"() {

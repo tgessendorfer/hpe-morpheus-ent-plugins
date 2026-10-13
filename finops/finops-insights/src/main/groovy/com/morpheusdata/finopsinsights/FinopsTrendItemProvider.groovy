@@ -38,6 +38,7 @@ class FinopsTrendItemProvider extends AbstractFinopsItemProvider {
 	@Override String getTitleKey() { 'trend.title' }
 	@Override String getUiSize() { 'lg' }
 	@Override String getTemplatePath() { 'hbs/finops-trend-widget' }
+	@Override String getSettingKey() { FinopsInsightsPlugin.SETTING_HIDE_TREND }
 
 	@Override
 	Map model(Map d, Locale locale) {
