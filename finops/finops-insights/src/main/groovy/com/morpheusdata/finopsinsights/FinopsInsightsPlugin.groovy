@@ -22,12 +22,13 @@ import groovy.util.logging.Slf4j
 /**
  * Plugin entrypoint for the FinOps Insights dashboard.
  *
- * Registers one dashboard ("FinOps Insights") and the three dashboard item types it is made of.
+ * Registers one dashboard ("FinOps Insights"), the three FinOps dashboard item types and the latest
+ * log entries item type it is made of, and the log history page those entries link to.
  * Morpheus lists the dashboard under Administration > Settings > Appliance > Dashboards; once it
  * is enabled there, users pick it from the dashboard selector on Operations > Dashboard.
  *
- * Since 1.2.0 the plugin has three settings (Administration > Integrations > Plugins), one
- * checkbox per FinOps widget that hides it for every viewer. The widgets read them on every render.
+ * Since 1.2.0 the plugin has four settings (Administration > Integrations > Plugins), one
+ * checkbox per widget that hides it for every viewer. The widgets read them on every render.
  */
 @Slf4j
 class FinopsInsightsPlugin extends Plugin {
@@ -41,9 +42,10 @@ class FinopsInsightsPlugin extends Plugin {
 	static final String SETTING_HIDE_KPI = 'hideKpi'
 	static final String SETTING_HIDE_TREND = 'hideTrend'
 	static final String SETTING_HIDE_SPLIT = 'hideSplit'
+	static final String SETTING_HIDE_LOGS = 'hideLogs'
 
 	// plugin_instance.description holds 255 characters.
-	static final String DESCRIPTION ='Dashboard "FinOps Insights": revenue, cost and margin of the current month, a six-month trend and the split by cloud and tenant, read from the invoices. Providers see all sub-tenants, tenants their own spend.'
+	static final String DESCRIPTION ='Dashboard "FinOps Insights": revenue, cost and margin of the current month, a six-month trend, the split by cloud and tenant and the latest log entries with a history page. Providers see all sub-tenants, tenants their own.'
 
 	@Override
 	String getCode() {
@@ -61,11 +63,14 @@ class FinopsInsightsPlugin extends Plugin {
 		this.registerProvider(new FinopsKpiItemProvider(this, morpheus, data))
 		this.registerProvider(new FinopsTrendItemProvider(this, morpheus, data))
 		this.registerProvider(new FinopsSplitItemProvider(this, morpheus, data))
+		this.registerProvider(new FinopsLogsItemProvider(this, morpheus, data))
 		this.registerProvider(new FinopsInsightsDashboardProvider(this, morpheus))
+		// The log history page: the appliance serves it at /plugin/finops-insights/logs.
+		this.controllers.add(new FinopsLogsController(this, morpheus, data))
 	}
 
 	/**
-	 * The three "Hide ..." checkboxes. No defaultValue (unticked means shown) and no fieldCode:
+	 * The four "Hide ..." checkboxes. No defaultValue (unticked means shown) and no fieldCode:
 	 * a fieldCode replaces the fieldLabel with an i18n lookup, and the labels are English only.
 	 */
 	static List<OptionType> settingsOptionTypes() {
@@ -75,7 +80,9 @@ class FinopsInsightsPlugin extends Plugin {
 			setting('hide-trend', SETTING_HIDE_TREND, 'Hide Six-Month Trend', 1,
 				'Hides the widget "Six-month trend" on the dashboard for every user. Takes effect on the next dashboard load.'),
 			setting('hide-split', SETTING_HIDE_SPLIT, 'Hide This Month by Cloud and Tenant', 2,
-				'Hides the widget "This month by cloud and tenant" on the dashboard for every user. Takes effect on the next dashboard load.')
+				'Hides the widget "This month by cloud and tenant" on the dashboard for every user. Takes effect on the next dashboard load.'),
+			setting('hide-logs', SETTING_HIDE_LOGS, 'Hide Latest Log Entries', 3,
+				'Hides the widget "Latest log entries" and switches its log history page off. The standard Log History widget is shown again. Takes effect on the next dashboard load.')
 		]
 	}
 

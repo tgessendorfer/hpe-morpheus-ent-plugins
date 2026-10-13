@@ -1,0 +1,40 @@
+<div class="dashboard-widget finops-insights finops-insights-logs">
+  {{#if ok}}<style data-fi-swap="1">.widget-container:has(#log-count-widget) { display: none; }</style>{{/if}}
+  <style>
+    .finops-insights { font-size: 13px; }
+    .finops-insights .dashboard-widget-header, .finops-insights .dashboard-widget-header * { text-transform: none; }
+    .finops-insights .dashboard-widget-header .fi-title { flex-grow: 1; }
+    .finops-insights .dashboard-widget-header .fi-link { font-size: 11px; }
+    .finops-insights .fi-hint { padding: 14px; border: 1px dashed rgba(128,128,128,.45); border-radius: 8px; opacity: .8; }
+    .finops-insights .fi-hint a { margin-left: 6px; }
+    .finops-insights-logs .fi-log-status { font-size: 12px; opacity: .65; padding: 2px 0 6px; }
+    .finops-insights-logs .fi-log-status:empty { display: none; }
+    .finops-insights-logs .fi-log-list { list-style: none; margin: 0; padding: 0; }
+    .finops-insights-logs .fi-log-row { display: grid; grid-template-columns: auto auto minmax(0, 11em) minmax(0, 1fr) auto; column-gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid rgba(128,128,128,.18); }
+    .finops-insights-logs .fi-log-time { font-size: 11px; opacity: .65; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .finops-insights-logs .fi-log-src { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .finops-insights-logs .fi-log-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .9; }
+    .finops-insights-logs .fi-log-count { font-size: 11px; opacity: .65; white-space: nowrap; }
+    .finops-insights-logs .fi-log-level { display: inline-block; min-width: 46px; padding: 0 5px; border-radius: 3px; font-size: 10px; font-weight: 600; text-align: center; color: #fff; background: #8a8f98; }
+    .finops-insights-logs .fi-lv-debug { background: #8a8f98; }
+    .finops-insights-logs .fi-lv-trace { background: #a5a9b0; }
+    .finops-insights-logs .fi-lv-info { background: #2f80ed; }
+    .finops-insights-logs .fi-lv-warn { background: #e0a100; }
+    .finops-insights-logs .fi-lv-error { background: #d64545; }
+    .finops-insights-logs .fi-lv-fatal { background: #8e1f1f; }
+  </style>
+  <div class="dashboard-widget-header"><span class="fi-title">{{title}}</span>
+    {{#if hasSources}}<a class="fi-link" href="{{historyUrl}}">{{t.logs_history}}</a>{{/if}}
+  </div>
+  <div class="dashboard-widget-body">
+    <div class="dashboard-widget-content top-space">
+      {{#if hasSources}}
+      <div class="fi-logs" data-mode="widget" data-sources="{{sourcesJson}}" data-labels="{{labelsJson}}" data-window-days="{{windowDays}}" data-max="{{fetchMax}}" data-show="{{show}}">
+        <div class="fi-log-status">{{t.logs_loading}}</div>
+      </div>
+      {{else}}
+      <div class="fi-hint">{{hint}}{{#unless ok}} <a href="{{standardUrl}}">{{t.logs_standard}}</a>{{/unless}}</div>
+      {{/if}}
+    </div>
+  </div>
+</div>

@@ -1,6 +1,10 @@
 package com.morpheusdata.finopsinsights
 
+import com.morpheusdata.core.MorpheusContext
+import com.morpheusdata.core.MorpheusPermissionService
 import com.morpheusdata.model.OptionType
+import com.morpheusdata.model.Permission
+import io.reactivex.rxjava3.core.Single
 import spock.lang.Specification
 
 /**
@@ -10,11 +14,22 @@ import spock.lang.Specification
 class FinopsInsightsPluginSpec extends Specification {
 
 	static final Set<String> PROVIDER_CODES = [FinopsKpiItemProvider.CODE, FinopsTrendItemProvider.CODE,
-		FinopsSplitItemProvider.CODE, FinopsInsightsDashboardProvider.CODE] as Set
+		FinopsSplitItemProvider.CODE, FinopsLogsItemProvider.CODE, FinopsInsightsDashboardProvider.CODE] as Set
 
 	FinopsInsightsPlugin plugin = new FinopsInsightsPlugin()
 
+	/** A context whose permission lookup answers every code (the dashboard asks for each item type's permission). */
+	private MorpheusContext contextWithPermissions(Closure lookup) {
+		MorpheusPermissionService permissions = Stub(MorpheusPermissionService) {
+			getByCode(_) >> { List args -> lookup(args[0]) }
+		}
+		Stub(MorpheusContext) {
+			getPermission() >> permissions
+		}
+	}
+
 	def setup() {
+		plugin.morpheus = contextWithPermissions { String code -> Single.just(new Permission('Permission', code, [Permission.AccessType.read])) }
 		plugin.initialize()
 	}
 
@@ -42,6 +57,17 @@ class FinopsInsightsPluginSpec extends Specification {
 		plugin.providers*.code as Set == PROVIDER_CODES
 	}
 
+	def "the plugin serves the log history page through one controller route"() {
+		expect:
+		plugin.controllers.size() == 1
+		plugin.controllers[0] instanceof FinopsLogsController
+		plugin.controllers[0].routes*.url == ['/finops-insights/logs']
+		plugin.controllers[0].routes*.method == ['logsPage']
+		plugin.controllers[0].routes[0].permissions*.code == ['logs']
+		// the widget's link and the route are the same page
+		FinopsLogsSupport.PAGE_PATH == '/plugin' + FinopsLogsController.ROUTE_URL
+	}
+
 	def "the dashboard lists every widget once, the FinOps KPIs above trend and split"() {
 		given:
 		FinopsInsightsDashboardProvider dash = plugin.getProviderByCode(FinopsInsightsDashboardProvider.CODE) as FinopsInsightsDashboardProvider
@@ -50,14 +76,42 @@ class FinopsInsightsPluginSpec extends Specification {
 		def items = dash.buildItems()
 		// Since 1.1.0 the standard home widgets are part of the layout; pick the FinOps ones.
 		def finops = items.findAll { it.type.code.startsWith('finops-insights-') }
+		def logs = items.findAll { it.itemGroup == 'logs' }
+
+		then:
+		items.size() == 15
+		(items*.type*.code as Set).size() == items.size()
+		finops*.type*.code == [FinopsKpiItemProvider.CODE, FinopsTrendItemProvider.CODE, FinopsSplitItemProvider.CODE,
+			FinopsLogsItemProvider.CODE]
+		finops*.itemGroup == ['finops-top', 'finops-main', 'finops-main', 'logs']
+		finops*.groupRow == [3, 4, 4, 7]
+		finops*.itemColumn == [0, 0, 1, 0]
+		// 1.2.0: the latest log entries come first in the row, the standard Log History widget second.
+		logs*.type*.code == [FinopsLogsItemProvider.CODE, 'dashboard-item-log-count']
+		logs*.itemColumn == [0, 1]
+		items[-1].type.code == 'dashboard-item-log-count'
+	}
+
+	def "the log widget is left out of the layout when the Logs permission cannot be loaded"() {
+		given:
+		FinopsInsightsPlugin broken = new FinopsInsightsPlugin()
+		broken.morpheus = contextWithPermissions { String code ->
+			code == 'logs' ? Single.error(new IllegalStateException('no such permission')) :
+				Single.just(new Permission('Permission', code, [Permission.AccessType.read]))
+		}
+		broken.initialize()
+		FinopsInsightsDashboardProvider dash = broken.getProviderByCode(FinopsInsightsDashboardProvider.CODE) as FinopsInsightsDashboardProvider
+
+		when:
+		def items = dash.buildItems()
+		def row = items.findAll { it.itemGroup == 'logs' }
 
 		then:
 		items.size() == 14
-		(items*.type*.code as Set).size() == items.size()
-		finops*.type*.code == [FinopsKpiItemProvider.CODE, FinopsTrendItemProvider.CODE, FinopsSplitItemProvider.CODE]
-		finops*.itemGroup == ['finops-top', 'finops-main', 'finops-main']
-		finops*.groupRow == [3, 4, 4]
-		finops*.itemColumn == [0, 0, 1]
+		!(FinopsLogsItemProvider.CODE in items*.type*.code)
+		// the standard Log History widget stays, in the first column
+		row*.type*.code == ['dashboard-item-log-count']
+		row*.itemColumn == [0]
 	}
 
 	def "widgets declare the Costing permission with read and full and the no-op script"() {
@@ -84,7 +138,10 @@ class FinopsInsightsPluginSpec extends Specification {
 		expect:
 		!en.isEmpty()
 		en.stringPropertyNames() == de.stringPropertyNames()
-		AbstractFinopsItemProvider.labels(Locale.GERMAN).keySet().containsAll(['kpi_title', 'trend_foot', 'split_byCloud', 'split_byTenant', 'split_empty', 'note_otherCurrencies', 'hint_noViewer', 'hint_loadFailed', 'hint_hidden'])
+		AbstractFinopsItemProvider.labels(Locale.GERMAN).keySet().containsAll(['kpi_title', 'trend_foot', 'split_byCloud', 'split_byTenant', 'split_empty', 'note_otherCurrencies', 'hint_noViewer', 'hint_loadFailed', 'hint_hidden',
+			'logs_title', 'logs_history', 'logs_loading', 'logs_empty', 'logs_error', 'logs_noSources', 'logs_page_title',
+			'logs_back', 'logs_standard', 'logs_window_1h', 'logs_window_24h', 'logs_window_7d', 'logs_window_30d',
+			'logs_level', 'logs_source', 'logs_allSources', 'logs_text', 'logs_collapse', 'logs_more', 'logs_retention'])
 		AbstractFinopsItemProvider.message('kpi.margin', Locale.GERMAN) == 'Marge'
 		AbstractFinopsItemProvider.message('kpi.margin', Locale.FRENCH) == 'Margin'
 	}
@@ -92,13 +149,16 @@ class FinopsInsightsPluginSpec extends Specification {
 	def "the plugin offers one unticked Hide checkbox per widget and each widget reads its own"() {
 		given:
 		List<OptionType> settings = plugin.settings
-		List<AbstractFinopsItemProvider> widgets = [FinopsKpiItemProvider.CODE, FinopsTrendItemProvider.CODE, FinopsSplitItemProvider.CODE]
+		List<AbstractFinopsItemProvider> widgets = [FinopsKpiItemProvider.CODE, FinopsTrendItemProvider.CODE,
+			FinopsSplitItemProvider.CODE, FinopsLogsItemProvider.CODE]
 			.collect { plugin.getProviderByCode(it) as AbstractFinopsItemProvider }
 
 		expect:
-		settings*.code == ['finops-insights-hide-kpi', 'finops-insights-hide-trend', 'finops-insights-hide-split']
-		settings*.fieldName == ['hideKpi', 'hideTrend', 'hideSplit']
-		settings*.displayOrder == [0, 1, 2]
+		settings*.code == ['finops-insights-hide-kpi', 'finops-insights-hide-trend', 'finops-insights-hide-split',
+			'finops-insights-hide-logs']
+		settings*.fieldName == ['hideKpi', 'hideTrend', 'hideSplit', 'hideLogs']
+		settings*.fieldLabel[3] == 'Hide Latest Log Entries'
+		settings*.displayOrder == [0, 1, 2, 3]
 		settings.every { it.inputType == OptionType.InputType.CHECKBOX && it.fieldContext == 'config' && !it.required }
 		// A fieldCode would replace the label with an i18n lookup; an unticked box needs no default.
 		settings.every { it.fieldCode == null && it.defaultValue == null }

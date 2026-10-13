@@ -34,6 +34,10 @@ import groovy.util.logging.Slf4j
  * settings are read on every render, so a change shows on the next dashboard load, and a switched-off
  * widget renders a template that hides its own grid box and skips the invoice query. A setting that
  * is missing or cannot be read means the widget is shown.
+ *
+ * The permission, the access types and the script of an item type are overridable getters since
+ * 1.2.0: the latest log entries widget needs the Logs permission and its own browser script. The
+ * invoice path lives in renderContent so that widget can replace it.
  */
 @Slf4j
 abstract class AbstractFinopsItemProvider extends AbstractDashboardItemTypeProvider {
@@ -69,6 +73,13 @@ abstract class AbstractFinopsItemProvider extends AbstractDashboardItemTypeProvi
 	@Override MorpheusContext getMorpheus() { morpheus }
 	@Override Plugin getPlugin() { plugin }
 
+	/** The permission code a viewer needs (an item is only rendered when the viewer holds it). */
+	String getPermissionCode() { PERMISSION_CODE }
+	/** The access levels of that permission that are enough. */
+	List<String> getAccessTypes() { ACCESS_TYPES }
+	/** The script the dashboard loads for this item type (relative to src/assets/javascripts). */
+	String getScriptPath() { SCRIPT_PATH }
+
 	abstract String getTitle()
 	abstract String getUiSize()
 	abstract String getTemplatePath()
@@ -87,14 +98,14 @@ abstract class AbstractFinopsItemProvider extends AbstractDashboardItemTypeProvi
 		rtn.description = getTitle()
 		rtn.uiSize = getUiSize()
 		rtn.templatePath = getTemplatePath()
-		rtn.scriptPath = SCRIPT_PATH
+		rtn.scriptPath = getScriptPath()
 		rtn.enabled = true
 		try {
-			rtn.permission = morpheus.permission.getByCode(PERMISSION_CODE).blockingGet()
+			rtn.permission = morpheus.permission.getByCode(getPermissionCode()).blockingGet()
 		} catch(Exception e) {
-			log.warn("FinOps insights: permission ${PERMISSION_CODE} could not be loaded: ${e.message}")
+			log.warn("FinOps insights: permission ${getPermissionCode()} could not be loaded: ${e.message}")
 		}
-		rtn.accessTypes = ACCESS_TYPES
+		rtn.accessTypes = getAccessTypes()
 		return rtn
 	}
 
@@ -189,6 +200,11 @@ abstract class AbstractFinopsItemProvider extends AbstractDashboardItemTypeProvi
 		if(isHidden()) {
 			return renderHidden(locale)
 		}
+		return renderContent(opts, locale)
+	}
+
+	/** The visible widget: loads the invoice figures, fills the template model, renders the template. */
+	HTMLResponse renderContent(Map<String, Object> opts, Locale locale) {
 		Map loaded = data.load(opts, locale)
 		Locale shown = (loaded.locale as Locale) ?: locale
 		Map m = [ok: loaded.ok, reason: loaded.reason, t: labels(shown), isMaster: loaded.isMaster, title: message(getTitleKey(), shown)]
