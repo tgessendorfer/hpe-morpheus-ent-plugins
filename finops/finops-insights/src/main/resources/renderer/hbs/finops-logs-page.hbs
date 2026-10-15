@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="{{lang}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{pageTitle}}</title>
+  <style>
+    .fi-page { margin: 0; padding: 0 0 32px; background: #f5f6f8; color: #1d2330; }
+    .fi-wrap { max-width: 1280px; margin: 0 auto; padding: 0 20px; color-scheme: light dark; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: #1d2330; }
+    .fi-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 24px; padding: 18px 0 12px; }
+    .fi-head h1 { margin: 0; font-size: 20px; font-weight: 600; flex-grow: 1; }
+    .fi-head nav a { margin-left: 16px; }
+    .fi-wrap a { color: #2f6fdb; text-decoration: none; }
+    .fi-wrap a:hover { text-decoration: underline; }
+    .fi-hint { padding: 14px; border: 1px dashed rgba(128,128,128,.55); border-radius: 8px; opacity: .85; }
+    .fi-logs { background: #fff; border: 1px solid rgba(128,128,128,.3); border-radius: 8px; padding: 14px 16px; }
+    .fi-bar { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-end; padding-bottom: 12px; border-bottom: 1px solid rgba(128,128,128,.25); }
+    .fi-field { display: flex; flex-direction: column; gap: 3px; }
+    .fi-field-name { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .65; }
+    .fi-input { min-width: 150px; padding: 4px 6px; border: 1px solid rgba(128,128,128,.5); border-radius: 4px; background: inherit; color: inherit; font: inherit; }
+    .fi-levels { display: flex; gap: 10px; padding: 4px 0; }
+    .fi-check { display: inline-flex; align-items: center; gap: 4px; }
+    .fi-collapse { padding-bottom: 5px; }
+    .fi-log-status { padding: 10px 0 6px; font-size: 12px; opacity: .7; }
+    .fi-log-list { list-style: none; margin: 0; padding: 0; }
+    .fi-log-row { display: grid; grid-template-columns: 11.5em auto minmax(0, 14em) minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid rgba(128,128,128,.18); }
+    .fi-log-time { font-size: 12px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .fi-log-src { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fi-log-msg { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .fi-log-count { font-size: 12px; opacity: .7; white-space: nowrap; }
+    .fi-log-level { display: inline-block; min-width: 52px; padding: 0 6px; border-radius: 3px; font-size: 10px; font-weight: 600; text-align: center; color: #fff; background: #8a8f98; }
+    .fi-lv-debug { background: #8a8f98; }
+    .fi-lv-trace { background: #a5a9b0; }
+    .fi-lv-info { background: #2f80ed; }
+    .fi-lv-warn { background: #e0a100; }
+    .fi-lv-error { background: #d64545; }
+    .fi-lv-fatal { background: #8e1f1f; }
+    .fi-foot { padding: 12px 0 0; text-align: center; }
+    .fi-more { padding: 6px 18px; border: 1px solid rgba(128,128,128,.55); border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+    .fi-more:disabled { opacity: .5; cursor: default; }
+    .fi-note { padding-top: 12px; font-size: 11px; opacity: .6; }
+    @media (prefers-color-scheme: dark) {
+      .fi-page { background: #14171c; }
+      .fi-wrap { color: #e3e6eb; }
+      .fi-logs { background: #1c2027; }
+      .fi-wrap a { color: #7fb0ff; }
+    }
+    @media (max-width: 760px) {
+      .fi-log-row { grid-template-columns: auto minmax(0, 1fr); row-gap: 2px; }
+      .fi-log-msg { grid-column: 1 / -1; }
+    }
+  </style>
+</head>
+<body class="fi-page">
+  <div class="fi-wrap">
+    <div class="fi-head">
+      <h1>{{pageTitle}}</h1>
+      <nav><a href="{{backUrl}}">{{t.logs_back}}</a><a href="{{standardUrl}}">{{t.logs_standard}}</a></nav>
+    </div>
+    {{#if ready}}
+    <div class="fi-logs" data-mode="page" data-sources="{{sourcesJson}}" data-initial="{{initialJson}}" data-labels="{{labelsJson}}" data-page-size="{{pageSize}}">
+      <noscript><div class="fi-hint">{{t.logs_noScript}}</div></noscript>
+    </div>
+    <script nonce="{{nonce}}" src="{{asset '/finops-insights-logs.js'}}"></script>
+    {{else}}
+    <div class="fi-hint">{{hint}}</div>
+    {{/if}}
+  </div>
+</body>
+</html>

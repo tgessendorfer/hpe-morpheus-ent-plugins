@@ -36,6 +36,7 @@ class FinopsSplitItemProvider extends AbstractFinopsItemProvider {
 	@Override String getTitleKey() { 'split.title' }
 	@Override String getUiSize() { 'lg' }
 	@Override String getTemplatePath() { 'hbs/finops-split-widget' }
+	@Override String getSettingKey() { FinopsInsightsPlugin.SETTING_HIDE_SPLIT }
 
 	@Override
 	Map model(Map d, Locale locale) {

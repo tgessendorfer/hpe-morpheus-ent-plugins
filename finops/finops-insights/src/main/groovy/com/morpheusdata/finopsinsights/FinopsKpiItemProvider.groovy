@@ -39,6 +39,7 @@ class FinopsKpiItemProvider extends AbstractFinopsItemProvider {
 	@Override String getTitleKey() { 'kpi.title' }
 	@Override String getUiSize() { 'xl widget-short' }
 	@Override String getTemplatePath() { 'hbs/finops-kpi-widget' }
+	@Override String getSettingKey() { FinopsInsightsPlugin.SETTING_HIDE_KPI }
 
 	@Override
 	Map model(Map d, Locale locale) {
