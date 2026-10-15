@@ -75,6 +75,12 @@ shows the new widget in place of the standard *Log History*.
 
 ### Also fixed
 
+- **The plugin sets its own renderer, so it loads on Morpheus 9.1.0.** A plugin with a controller
+  and no renderer of its own gets its class loader added to the appliance's shared template
+  loader; on 9.1.0 (plugin API 1.5.0) that loader list has a fixed size, the add throws
+  `UnsupportedOperationException`, and the upload answers *Failed to parse plugin file*. The first
+  release candidate failed exactly this way. The widgets and the page already rendered with their
+  own renderers, so nothing else changes.
 - The unit test for the dashboard layout still expected the three-widget dashboard of 1.0.4 and had
   failed since 1.1.0; it now checks the 15-item layout. No effect on the jar.
 - **The German note *Nicht gezeigt, andere Währung* no longer shows `WÃ¤hrung`.** The bundle line held
@@ -89,27 +95,37 @@ shows the new widget in place of the standard *Log History*.
   for a sub-tenant, ids never taken from the request options, the cap of 50, the failure states), the
   page route as the dispatcher finds it, the Logs level check, the parameter whitelist, hostile
   server names in both templates, that the security context decides who the viewer is, that the
-  widget is left out of the layout without its permission, and the English and German message keys.
+  widget is left out of the layout without its permission, that the plugin has its own renderer,
+  and the English and German message keys.
 - 36 browser script tests with node against a DOM stub, also against the minified file of the jar:
   hostile messages and terminal escapes stay text, links from digits only, folding, `+0000` time
   stamps, filters, paging (frozen time bound, repeated entries skipped), overlapping requests, the
   fallback route and the restored standard widget, running the script twice.
-- Expected from the appliance's documented plugin interfaces and its tab script, not yet run: the route
-  `/plugin/<path>` needs a signed-in session; a route that returns nothing is a 404; the instance page
-  selects a tab from `#!<tab id>` (its Logs pill is `monitoring-logs-tab`, the server page's
-  `monitoring-logs`).
+- **On Morpheus 9.1.0, as master tenant administrator, with a release candidate of this code**
+  (upgrade over 1.1.1):
+  - The upload loads the plugin (`loaded`, valid); `GET /api/plugins/<id>` lists the four checkbox
+    option types with their field names.
+  - The dashboard shows the three FinOps widgets and *Latest log entries* with ten lines, each
+    linked to `/provisioning/instances/<id>#!monitoring-logs-tab`; the standard *Log History* box is
+    hidden (`display: none`) while the plugin widget is shown.
+  - `PUT /api/plugins/<id>` with `{"plugin":{"config":{"hideTrend":"on","hideLogs":"on"}}}` hides
+    the six-month trend and the log widget on the next dashboard load, with no plugin reload; the
+    standard *Log History* widget is back and the history page answers *switched off in the plugin
+    settings*. Setting the values to `""` shows all widgets again. The boxes really disappear, so
+    the grid box class `widget-container` is right.
+  - `/plugin/finops-insights/logs` is served as a page of its own without Morpheus navigation, as
+    expected; its script loads from `/assets/plugin/<plugin name>/finops-insights-logs.js`, the
+    filters offer all servers with logging, and the browser console shows no content security
+    policy error. The page follows the browser language (German texts seen).
 
 ### Not verified
 
-- On an appliance: that the plugin settings dialog renders the four checkboxes (9.0.2 and 9.1.0),
-  that a saved setting reaches `getSettings`, and that the widget container carries the class
-  `widget-container`, so that the box really disappears.
-- On an appliance: that `/api/logs` accepts the browser session for a sub-tenant user (it is only
-  measured for the master tenant), that the history page answers with the Logs level check as
-  written, and that the instance and server links open on the Logs tab.
-- That no Morpheus layout wraps the history page and that its script loads from
-  `/assets/plugin/<plugin name>/finops-insights-logs.js` on the page.
-- That the Log History widget swap works in the browsers in use (`:has()` needs a current browser).
+- The settings dialog (Administration > Integrations > Plugins, edit) was not opened; the settings
+  were set through the REST API.
+- A sub-tenant user (whether `/api/logs` accepts that browser session or the fallback route is
+  used), a role without *Logs* or with the level *user*, and a tenant without servers.
+- That a click on a log line opens the instance on its *Logs* tab.
+- Morpheus 9.0.2 with this version.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/finops-insights-v1.2.0
 

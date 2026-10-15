@@ -64,6 +64,8 @@ class FinopsInsightsPluginSpec extends Specification {
 		plugin.controllers[0].routes*.url == ['/finops-insights/logs']
 		plugin.controllers[0].routes*.method == ['logsPage']
 		plugin.controllers[0].routes[0].permissions*.code == ['logs']
+		// 9.1.0 fails the upload of a plugin with a controller but no renderer of its own
+		plugin.hasCustomRender()
 		// the widget's link and the route are the same page
 		FinopsLogsSupport.PAGE_PATH == '/plugin' + FinopsLogsController.ROUTE_URL
 	}

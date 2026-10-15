@@ -157,7 +157,7 @@ skipped where node is not installed.
 | Plugin | Morpheus | Plugin API | Notes |
 |---|---|---|---|
 | 1.0.x | 9.0.2 | 1.4.2 | Reads `user`, `account`, `account_invoice`, `compute_zone`, `container`, `instance` |
-| 1.2.x | 9.0.2 | 1.4.2 | Adds the widget settings, the latest log entries widget and the history page; also reads `compute_server` for the log sources |
+| 1.2.x | 9.0.2 | 1.4.2 | Adds the widget settings, the latest log entries widget and the history page; also reads `compute_server` for the log sources; verified on 9.1.0 |
 
 ## Trademarks
 

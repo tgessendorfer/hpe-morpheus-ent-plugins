@@ -17,6 +17,7 @@ package com.morpheusdata.finopsinsights
 
 import com.morpheusdata.core.Plugin
 import com.morpheusdata.model.OptionType
+import com.morpheusdata.views.HandlebarsRenderer
 import groovy.util.logging.Slf4j
 
 /**
@@ -67,6 +68,11 @@ class FinopsInsightsPlugin extends Plugin {
 		this.registerProvider(new FinopsInsightsDashboardProvider(this, morpheus))
 		// The log history page: the appliance serves it at /plugin/finops-insights/logs.
 		this.controllers.add(new FinopsLogsController(this, morpheus, data))
+		// A plugin with a controller and no renderer of its own gets its class loader added to the
+		// appliance's shared template loader. On 9.1.0 (plugin API 1.5.0) that loader list has a fixed
+		// size, so the add throws UnsupportedOperationException and the upload fails with "Failed to
+		// parse plugin file". The providers and the controller render with their own renderers anyway.
+		this.setRenderer(new HandlebarsRenderer('renderer', this.classLoader))
 	}
 
 	/**
