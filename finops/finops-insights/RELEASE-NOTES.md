@@ -38,12 +38,20 @@ changes.
     Logs*.
   - The plugin settings dialog (Administration > Integrations > Plugins, edit) shows the four
     checkboxes with their help texts. It was closed without saving.
+- The release jar loads on the same appliance in place of 1.2.0 (`loaded`, valid); the stored
+  settings are kept across the upgrade.
+- With the release jar, in the master tenant view: lines of sub-tenant servers link to
+  `/infrastructure/servers/<id>#!monitoring-logs`, and a click opens the server page with its *Logs*
+  view.
 
 ### Not verified
 
-- 1.2.1 itself on an appliance at the time of writing.
 - A role without *Logs* or with the level *user*, a tenant without servers, and saving the settings
   through the dialog (they were set through the REST API).
+
+Built by the release workflow from the source at tag `finops-insights-v1.2.1`.
+
+sha256 `354bf7feceaa114140862b8618dbbbd2a2a186ee24b3ab86d816be47114f3d53`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/finops-insights-v1.2.0...finops-insights-v1.2.1
 
