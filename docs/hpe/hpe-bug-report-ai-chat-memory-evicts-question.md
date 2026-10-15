@@ -69,3 +69,25 @@ push the question out.
 - Or run the compaction inside a tool loop when the window is nearly full, keeping the question
   and the latest tool results.
 - Log at INFO when the memory evicts messages during a question, with the counts.
+
+## Addendum: two more AI chat problems seen on 9.1.0 while building automation from the chat
+
+### A workflow cannot be created from the chat
+
+- Asked to create an operational workflow from an existing task, the agent calls `create_workflow`, the chat shows
+  the approval card *Create workflow*, the user clicks **Allow** - and the core then answers *LLM hallucinated tool
+  name 'create_workflow'*. Afterwards `use_tasks_tools` is rejected the same way, and the conversation ends in *An
+  error occurred*. Reproduced twice, with two different LLM integrations.
+- The same tool works over the MCP endpoint (`POST /api/mcp`): `use_tasks_tools`, then `create_workflow` creates the
+  workflow. The chat loses the loaded tool category between the approval and the call.
+
+### The `create_task` schema does not mention the script
+
+- The MCP input schema of `create_task` describes `task` as *"Task config with name, taskType:{code}, taskOptions
+  (type-specific config), executeTarget, retryable, retryCount, retryDelaySeconds, allowCustomConfig"*. The REST API
+  expects the script of a script task in `task.file` (`{sourceType: local, content: ...}`), which the schema does not
+  name.
+- Result in the chat: a shell script task is created without a script, and the model keeps calling `create_task`
+  again (five approvals in five minutes). Naming `task.file` in the prompt makes `update_task` set the script at once.
+- Suggested fix: describe `file` in the `create_task` and `update_task` schemas, with the shape used by `POST
+  /api/tasks`.
