@@ -1,0 +1,71 @@
+# Morpheus 9.1.0: the AI chat forgets the user's question during a long tool loop
+
+## Summary
+
+A chat question that needs many MCP tool calls ends with an answer such as *"It looks like your
+message came through empty — I don't see an actual question or request in your last turn"*. The
+model never sees the question again after a few dozen tool messages, because the chat memory is a
+token window that evicts the oldest message first, and within one question the oldest message is
+the question itself.
+
+On 9.1.0 the effect is triggered easily, because large MCP results come back truncated and the
+model pages through them with `get_result_excerpt`. Each page fills the window further.
+
+## Environment
+
+| | |
+|---|---|
+| Appliance | HPE Morpheus Enterprise 9.1.0 |
+| Agent | an AI agent on a Claude model (Anthropic Messages API), built-in MCP server plus one external MCP server |
+| Memory settings | defaults (`morpheus.ai.chat.maxMemoryTokens` and `morpheus.ai.chat.compactionThresholdPercent` not set) |
+
+## Steps to reproduce
+
+1. Open the chat as an administrator of an appliance with a few dozen servers in two public clouds.
+2. In a new conversation ask: *List the servers in the clouds Amazon AWS and Microsoft Azure as one
+   table with name, OS, vCPU, RAM, power state and tag costcenter.*
+
+## Expected
+
+A table of the servers, as on 9.0.2 (measured there: about 90 seconds).
+
+## Actual
+
+After 4 min 25 s: *"It looks like your message came through empty ..."*. The provider log shows
+about 15 model turns with more than 100 `get_result_excerpt` calls (up to 55 in one turn); the
+last request carried about 60,000 input tokens. A second broad question (latest release and its
+changes, through an external documentation MCP server) took 8 min 7 s, 41 turns, and ended the
+same way.
+
+## Cause (from the 9.1.0 byte code)
+
+- `AiChatService` builds the memory as `ToolAwareChatMemory`, which delegates to langchain4j's
+  `TokenWindowChatMemory`. The budget is the model context window minus output tokens,
+  `TOOL_TOKEN_RESERVE` (30,000) and `SAFETY_MARGIN` (5,000), capped by `DEFAULT_MAX_MEMORY_TOKENS`
+  (32,000) or the config key `morpheus.ai.chat.maxMemoryTokens`.
+- `TokenWindowChatMemory` evicts the oldest messages once the estimated tokens exceed the budget.
+  It keeps only the system message. Inside a single question, the oldest non-system message is the
+  user's question.
+- `McpToolResultStoreService` stores MCP results over `INLINE_CHAR_LIMIT` (8,000 characters) as
+  artifacts and returns a preview; the model reads the rest with `get_result_excerpt`.
+- `AiChatMemoryCompactionService` (threshold `morpheus.ai.chat.compactionThresholdPercent`, 50)
+  summarises the memory between questions, not inside one.
+
+With a 32,000-token window and excerpts of up to 8,000 characters, a dozen pages are enough to
+push the question out.
+
+## Workarounds
+
+- Raise `morpheus.ai.chat.maxMemoryTokens` (it is read through the application config, so a JVM
+  system property works), at the price of larger requests per turn.
+- Ask narrow questions that need one or two tools.
+- An LLM provider plugin can remember the question per tool call id and put it back when a request
+  arrives without one (implemented in a community Anthropic plugin).
+
+## Suggested fix
+
+- Pin the current turn's user message in the chat memory, the same way the system message is
+  kept, and evict tool messages first.
+- Or run the compaction inside a tool loop when the window is nearly full, keeping the question
+  and the latest tool results.
+- Log at INFO when the memory evicts messages during a question, with the counts.
