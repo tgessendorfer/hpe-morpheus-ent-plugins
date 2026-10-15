@@ -6,6 +6,49 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.1
+
+**A provider user's log lines of a sub-tenant server now open the server page instead of the
+instance list.** Built against plugin API 1.4.2, minimum appliance 9.0.2. Fix release; nothing else
+changes.
+
+### What changes
+
+- **Links of the *Latest log entries* widget and the log history page.** In 1.2.0 a line linked to
+  its instance whenever its server carried exactly one instance. Morpheus opens an instance page only
+  in the instance's own tenant: a master tenant user who followed a line of a sub-tenant's server
+  landed on the instance list (measured on 9.1.0). Since 1.2.1 a line links to the instance only when
+  the instance belongs to the viewer's tenant; every other line links to the server page on its
+  *Logs* tab (`/infrastructure/servers/<id>#!monitoring-logs`), which a provider user can open.
+- **One more column in the log source query:** the tenant of the server's instance
+  (`instance.account_id`). Which servers are listed is unchanged.
+- **Behaviour change from 1.2.0:** a provider user's lines of sub-tenant servers link to the server
+  page; sub-tenant users and the provider's own instances are unchanged.
+
+### Verified
+
+- 132 unit tests and 36 browser script tests (JDK 17, Gradle 9.8.0); the log source test now covers
+  an instance of the viewer's own tenant, one of another tenant and a server without an instance.
+- **On Morpheus 9.1.0 with 1.2.0** (what led to this release, and what 1.2.0 left open):
+  - As master tenant administrator, the instance link of a sub-tenant's server led to the instance
+    list; the server page of the same server opened with its *Logs* view.
+  - As a sub-tenant administrator (impersonated from the master tenant): the widget lists only that
+    tenant's servers (eight, all of that tenant), `/api/logs` answers with the browser session, so
+    the fallback route is not needed, and the instance link opens the instance on *Monitoring >
+    Logs*.
+  - The plugin settings dialog (Administration > Integrations > Plugins, edit) shows the four
+    checkboxes with their help texts. It was closed without saving.
+
+### Not verified
+
+- 1.2.1 itself on an appliance at the time of writing.
+- A role without *Logs* or with the level *user*, a tenant without servers, and saving the settings
+  through the dialog (they were set through the REST API).
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/finops-insights-v1.2.0...finops-insights-v1.2.1
+
+---
+
 ## 1.2.0
 
 **Each FinOps widget can be switched off in the plugin settings, and the dashboard gets a latest log

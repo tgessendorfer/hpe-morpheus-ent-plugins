@@ -75,7 +75,9 @@ servers instead, and while it is shown it hides the standard widget with a CSS r
 - **Repeated lines** of one server with the same level and text are folded into one line with a count.
 - **Each line links** to its instance, opened on the *Logs* tab (`/provisioning/instances/<id>#!monitoring-logs-tab`),
   or to the server page (`/infrastructure/servers/<id>#!monitoring-logs`) when the server belongs to
-  no instance or to several (a container host). The tab is selected by the appliance's own tab script
+  no instance or to several (a container host), and when the instance belongs to another tenant than
+  the viewer: Morpheus opens an instance page only in the instance's own tenant, so a provider user
+  would land on the instance list, while the server page opens (since 1.2.1). The tab is selected by the appliance's own tab script
   from the URL fragment; when the instance has no Logs tab the instance page simply opens on its
   first tab.
 - **Texts are plain text.** Log lines and server names are written by tenants, so the script sets

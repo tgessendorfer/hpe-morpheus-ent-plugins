@@ -85,13 +85,15 @@ class FinopsLogSourcesSpec extends Specification {
 			q.contains('FROM compute_server cs') && !q.contains('cs.account_id') && q.contains('cs.agent_installed = 1') &&
 				q.contains('cs.enable_logs IS NULL OR cs.enable_logs = 1') && q.contains("cs.status <> 'removed'") &&
 				q.contains('MIN(c.instance_id)') && q.contains('ORDER BY cs.last_updated DESC') && q.endsWith('LIMIT 50')
-		}) >> [[id: 31L, name: 'web-01', instance_id: 410L], [id: 32L, name: 'db-01', instance_id: null]]
+		}) >> [[id: 31L, name: 'web-01', instance_id: 410L, instance_account_id: 1L], [id: 32L, name: 'db-01', instance_id: null, instance_account_id: null],
+			[id: 33L, name: 'tenant-web', instance_id: 420L, instance_account_id: 22L]]
 		0 * sql.rows(_, _)
 		out.ok
 		out.isMaster
 		out.accountName == 'Provider'
 		out.locale == Locale.GERMANY
-		out.sources == [[id: 31L, name: 'web-01', instanceId: 410L], [id: 32L, name: 'db-01', instanceId: null]]
+		// a sub-tenant's instance does not open for a master tenant user, so that line links to the server
+		out.sources == [[id: 31L, name: 'web-01', instanceId: 410L], [id: 32L, name: 'db-01', instanceId: null], [id: 33L, name: 'tenant-web', instanceId: null]]
 	}
 
 	def "a sub-tenant gets only its own servers: the account id from the viewer's row is the only parameter"() {
@@ -103,11 +105,11 @@ class FinopsLogSourcesSpec extends Specification {
 
 		then:
 		1 * sql.firstRow(FinopsInsightsData.VIEWER_SQL, [7L]) >> viewer(0)
-		1 * sql.rows({ String q -> q.contains('AND cs.account_id = ?') && q.endsWith('LIMIT 50') }, [22L]) >> [[id: 5L, name: 'app-01', instance_id: 9L]]
+		1 * sql.rows({ String q -> q.contains('AND cs.account_id = ?') && q.endsWith('LIMIT 50') }, [22L]) >> [[id: 5L, name: 'app-01', instance_id: 9L, instance_account_id: 22L]]
 		0 * sql.rows(_)
 		out.ok
 		!out.isMaster
-		out.sources*.id == [5L]
+		out.sources == [[id: 5L, name: 'app-01', instanceId: 9L]]
 	}
 
 	def "server, account and instance ids in the request options are never used"() {
@@ -145,6 +147,7 @@ class FinopsLogSourcesSpec extends Specification {
 		expect:
 		FinopsInsightsData.LOG_SOURCES_MASTER_SQL.contains('CASE WHEN COUNT(DISTINCT c.instance_id) = 1 THEN MIN(c.instance_id) END')
 		FinopsInsightsData.LOG_SOURCES_TENANT_SQL.contains('CASE WHEN COUNT(DISTINCT c.instance_id) = 1')
+		FinopsInsightsData.LOG_SOURCES_MASTER_SQL.contains('MIN(i.account_id) FROM container c JOIN instance i ON i.id = c.instance_id')
 	}
 
 	def "at most 50 sources are returned however many rows come back"() {

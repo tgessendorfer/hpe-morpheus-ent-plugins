@@ -46,12 +46,17 @@ class FinopsInsightsData {
 
 	// Servers that can have log entries: agent installed, logging not switched off, not removed. The
 	// instance is the container.instance_id of the server when there is exactly one (a host that carries
-	// several instances, or none, gets no instance: its line links to the server page).
+	// several instances, or none, gets no instance: its line links to the server page). The instance's
+	// tenant comes along, because the UI opens an instance only for its own tenant: a master tenant
+	// user who opens a sub-tenant's instance lands on the instance list (measured on 9.1.0), while the
+	// server page opens. Such a line links to the server page as well.
 	// Newest activity first, so that the cap keeps the servers that are alive.
 	static final int LOG_SOURCE_LIMIT = 50
 	static final String LOG_SOURCES_BASE_SQL = '''SELECT cs.id AS id, cs.name AS name,
 		(SELECT CASE WHEN COUNT(DISTINCT c.instance_id) = 1 THEN MIN(c.instance_id) END
-			FROM container c WHERE c.server_id = cs.id AND c.instance_id IS NOT NULL) AS instance_id
+			FROM container c WHERE c.server_id = cs.id AND c.instance_id IS NOT NULL) AS instance_id,
+		(SELECT MIN(i.account_id) FROM container c JOIN instance i ON i.id = c.instance_id
+			WHERE c.server_id = cs.id) AS instance_account_id
 		FROM compute_server cs
 		WHERE cs.agent_installed = 1 AND (cs.enable_logs IS NULL OR cs.enable_logs = 1)
 		AND (cs.status IS NULL OR cs.status <> 'removed')'''
@@ -226,9 +231,12 @@ class FinopsInsightsData {
 			out.locale = parseLocale(viewer.locale) ?: locale
 			List<Map> rows = isMaster ? sql.rows(LOG_SOURCES_MASTER_SQL.toString()) :
 				sql.rows(LOG_SOURCES_TENANT_SQL.toString(), [viewer.account_id])
+			Long viewerAccount = viewer.account_id as Long
 			out.sources = rows.take(LOG_SOURCE_LIMIT).collect { Map r ->
 				Long id = r.id as Long
-				[id: id, name: (r.name as String)?.trim() ?: "#${id}".toString(), instanceId: r.instance_id != null ? (r.instance_id as Long) : null]
+				boolean ownInstance = r.instance_id != null && r.instance_account_id != null &&
+					(r.instance_account_id as Long) == viewerAccount
+				[id: id, name: (r.name as String)?.trim() ?: "#${id}".toString(), instanceId: ownInstance ? (r.instance_id as Long) : null]
 			}
 			out.ok = true
 		} catch(Exception e) {
