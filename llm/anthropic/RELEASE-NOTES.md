@@ -19,21 +19,27 @@ against plugin API 1.4.2. Fix release; no new setting.
   Measured on 9.1.0 with two broad questions: 4:25 min and 8:07 min, up to 55 excerpt calls in one
   turn.
 - **What the plugin does now.** It maps every tool call id the model issues to the question of
-  that request (kept for one hour, at most 10,000 entries). When a request reaches the plugin
+  that request (kept for one hour; above 10,000 entries the oldest are dropped). Only ids that look
+  random are used: a backend that numbers its tool calls (`call_0`, `functions.list_servers:0`)
+  could otherwise hand one conversation the question of another, since the map is shared by every
+  integration and user. When a request reaches the plugin
   without any user question but with tool calls it knows, the plugin puts the question back at the
   start of the conversation, with a one-line note that the chat application had dropped it, and
   logs *Restored the user's question, which the Morpheus chat memory had dropped during a tool
-  loop*. The question text is not logged.
+  loop*. The question text is not logged. The cost footer keeps counting on the question's first requests,
+  so it covers the whole question.
 - **Behaviour change from 1.6.3:** only requests that have lost their question are changed. Long
   tool loops still cost what they cost; raising `morpheus.ai.chat.maxMemoryTokens` on the
   appliance shortens them, and narrow questions avoid them.
 
 ### Verified
 
-- 120 unit tests (JDK 17, Gradle 9.8.0), four of them new: a request without its question gets it
+- 124 unit tests (JDK 17, Gradle 9.8.0), eight of them new: a request without its question gets it
   back from a known tool call, the restored question carries on to the next tool calls without the
   note piling up, requests that still have their question or whose tool calls are unknown or older
-  than an hour are left alone, and only tool calls of a request with a question are remembered.
+  than an hour are left alone, only tool calls of a request with a question are remembered, numbered tool call ids are never
+  trusted, a restored question keeps its cost key, a full map drops only its oldest entries, and a
+  question asked through `generateResponse` comes back in a later request that lost it.
 - The cause, read from `morpheus-core-9.1.0.jar`: `ToolAwareChatMemory` wraps langchain4j's
   `TokenWindowChatMemory`; `AiChatService.DEFAULT_MAX_MEMORY_TOKENS` is 32,000;
   `McpToolResultStoreService.INLINE_CHAR_LIMIT` is 8,000.

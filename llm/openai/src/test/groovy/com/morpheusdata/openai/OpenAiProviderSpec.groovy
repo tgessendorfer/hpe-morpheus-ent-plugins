@@ -1134,14 +1134,14 @@ class OpenAiProviderSpec extends Specification {
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
 		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
 		LlmChatResponse first = new LlmChatResponse()
-		first.metadata = [tool_calls: [[id: 'call_1', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]
+		first.metadata = [tool_calls: [[id: 'call_AbCdEfGhIjKlMnOp', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]
 		OpenAiProvider.rememberQuestion(firstBody, first)
 
 		and: 'a later request where Morpheus evicted the question, only the tool loop is left'
 		LlmChatRequest evicted = new LlmChatRequest(messages: [
 			message('system', 'You are Murph.'),
-			message('assistant', '', [tool_calls: [[id: 'call_1', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
-			message('tool', '{"artifactId":"a1","truncated":true}', [tool_call_id: 'call_1'])
+			message('assistant', '', [tool_calls: [[id: 'call_AbCdEfGhIjKlMnOp', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '{"artifactId":"a1","truncated":true}', [tool_call_id: 'call_AbCdEfGhIjKlMnOp'])
 		])
 
 		when:
@@ -1160,10 +1160,10 @@ class OpenAiProviderSpec extends Specification {
 		given:
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
 		long old = System.currentTimeMillis() - OpenAiProvider.QUESTION_BY_TOOL_CALL_TTL_MS - 1000L
-		OpenAiProvider.QUESTION_BY_TOOL_CALL.put('call_old', [question: 'Stale question', updated: old])
-		List<Map> withQuestion = [[role: 'user', content: 'How many VMs?'], [role: 'assistant', content: '', tool_calls: [[id: 'call_old']]]]
-		List<Map> unknown = [[role: 'assistant', content: '', tool_calls: [[id: 'call_x']]]]
-		List<Map> expired = [[role: 'tool', tool_call_id: 'call_old', content: 'x']]
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.put('call_OldAbCdEfGhIjKl', [question: 'Stale question', updated: old])
+		List<Map> withQuestion = [[role: 'user', content: 'How many VMs?'], [role: 'assistant', content: '', tool_calls: [[id: 'call_OldAbCdEfGhIjKl']]]]
+		List<Map> unknown = [[role: 'assistant', content: '', tool_calls: [[id: 'call_UnknownAbCdEfGh']]]]
+		List<Map> expired = [[role: 'tool', tool_call_id: 'call_OldAbCdEfGhIjKl', content: 'x']]
 
 		expect:
 		!OpenAiProvider.restoreLostQuestion(withQuestion)
@@ -1172,6 +1172,106 @@ class OpenAiProviderSpec extends Specification {
 		unknown.size() == 1
 		!OpenAiProvider.restoreLostQuestion(expired)
 		expired.size() == 1
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	private static LlmChatResponse response(List calls) {
+		LlmChatResponse r = new LlmChatResponse()
+		r.metadata = [tool_calls: calls]
+		return r
+	}
+
+	def "numbered tool call ids are never trusted, so another conversation's question cannot come back"() {
+		given:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'call_0'
+		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+		OpenAiProvider.rememberQuestion(firstBody, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+
+		expect:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.isEmpty()
+		!OpenAiProvider.isDistinctToolCallId('functions.list_servers:0')
+		!OpenAiProvider.isDistinctToolCallId('call_AbCdEfGhIjKlMn_12')
+		OpenAiProvider.isDistinctToolCallId('call_AbCdEfGhIjKlMnOp')
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a restored question keeps counting on its original cost key and carries on to the next tool calls"() {
+		given:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'call_AbCdEfGhIjKlMnOp'
+		String ID2 = 'call_ZyXwVuTsRqPoNmLk'
+		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+		String originalKey = OpenAiProvider.questionKey(firstBody)
+		OpenAiProvider.rememberQuestion(firstBody, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		List<Map> msgs = [[role: 'system', content: 'You are Murph.'], [role: 'assistant', content: '', tool_calls: [[id: ID]]], [role: 'tool', tool_call_id: ID, content: 'part']]
+
+		when:
+		boolean restored = OpenAiProvider.restoreLostQuestion(msgs)
+		OpenAiProvider.rememberQuestion([messages: msgs], response([[id: ID2, type: 'function', function: [name: 'get_result_excerpt', arguments: '{}']]]))
+
+		then:
+		restored
+		OpenAiProvider.questionKey([model: firstBody.model, messages: msgs]) == originalKey
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.get(ID2).question == 'List the AWS servers'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.get(ID2).costKey == originalKey
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a full map drops only its oldest entries"() {
+		given:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		long now = System.currentTimeMillis()
+		(OpenAiProvider.QUESTION_BY_TOOL_CALL_MAX).times { int i ->
+			OpenAiProvider.QUESTION_BY_TOOL_CALL.put('call_old' + String.format('%012d', i) + 'x', [question: 'old', costKey: 'k', updated: now - 1000L + (i % 500)])
+		}
+		String ID = 'call_NewAbCdEfGhIjKlMn'
+		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+
+		when:
+		OpenAiProvider.rememberQuestion(firstBody, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+
+		then:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.size() == OpenAiProvider.QUESTION_BY_TOOL_CALL_MAX
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.get(ID).question == 'List the AWS servers'
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "generateResponse remembers the question and restores it on a later request that lost it"() {
+		given:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		List<Map> sent = []
+		OpenAiApiService api = Stub()
+		api.createChatCompletion(*_) >> { args ->
+			sent << (args[2] as Map)
+			[success: true, data: [id: 'chatcmpl-1', model: 'm', choices: [[index: 0, finish_reason: 'tool_calls',
+				message: [role: 'assistant', content: null, tool_calls: [[id: 'call_E2eAbCdEfGhIjKlMn', type: 'function',
+					function: [name: 'list_servers', arguments: '{}']]]]]], usage: [prompt_tokens: 10, completion_tokens: 5]]]
+		}
+		provider.apiService = api
+		AccountIntegration ai = new AccountIntegration(id: 4L, serviceUrl: OpenAiProvider.DEFAULT_API_URL, servicePassword: 'sk-test-0000000000')
+		LlmIntegration llm = new LlmIntegration(accountIntegration: ai)
+
+		when:
+		provider.generateResponse(llm, new LlmChatRequest(model: 'm', messages: [message('user', 'List the AWS servers')]), [:])
+		provider.generateResponse(llm, new LlmChatRequest(model: 'm', messages: [
+			message('system', 'You are Murph.'),
+			message('assistant', '', [tool_calls: [[id: 'call_E2eAbCdEfGhIjKlMn', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '{"truncated":true}', [tool_call_id: 'call_E2eAbCdEfGhIjKlMn'])
+		]), [:])
+
+		then:
+		sent.size() == 2
+		sent[1].messages*.role == ['system', 'user', 'assistant', 'tool']
+		sent[1].messages[1].content == OpenAiProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
 
 		cleanup:
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()

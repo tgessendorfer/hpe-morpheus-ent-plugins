@@ -1271,6 +1271,18 @@ class OpenAiProvider implements LlmProvider {
 	 */
 	protected static String questionKey(Map requestBody) {
 		List messages = (requestBody?.messages ?: []) as List
+		boolean restored = messages.any { def message ->
+			message instanceof Map && message.role == 'user' && message.content instanceof CharSequence &&
+				message.content.toString().startsWith(RESTORED_QUESTION_NOTE)
+		}
+		if (restored) {
+			// The question was put back after the chat memory dropped it: keep counting on
+			// the key its first requests used, so the footer covers the whole question.
+			String original = knownQuestionEntry(messages)?.costKey as String
+			if (original) {
+				return original
+			}
+		}
 		int last = -1
 		messages.eachWithIndex { def message, int index ->
 			if (message instanceof Map && message.role == 'user' && message.content instanceof CharSequence) {
@@ -1317,11 +1329,43 @@ class OpenAiProvider implements LlmProvider {
 			return
 		}
 		long now = System.currentTimeMillis()
-		QUESTION_BY_TOOL_CALL.values().removeIf { Map entry -> now - (entry.updated as long) > QUESTION_BY_TOOL_CALL_TTL_MS }
-		if (QUESTION_BY_TOOL_CALL.size() > QUESTION_BY_TOOL_CALL_MAX) {
-			QUESTION_BY_TOOL_CALL.clear()
+		String costKey = questionKey(requestBody)
+		ids.findAll { String id -> isDistinctToolCallId(id) }.each { String id ->
+			QUESTION_BY_TOOL_CALL.put(id, [question: question, costKey: costKey, updated: now])
 		}
-		ids.each { String id -> QUESTION_BY_TOOL_CALL.put(id, [question: question, updated: now]) }
+		QUESTION_BY_TOOL_CALL.values().removeIf { Map entry -> now - (entry.updated as long) > QUESTION_BY_TOOL_CALL_TTL_MS }
+		int excess = QUESTION_BY_TOOL_CALL.size() - QUESTION_BY_TOOL_CALL_MAX
+		if (excess > 0) {
+			// Drop the oldest entries only: a loop still running keeps its question.
+			QUESTION_BY_TOOL_CALL.entrySet().sort { Map.Entry<String, Map> entry -> entry.value.updated as long }
+				.take(excess).each { Map.Entry<String, Map> entry -> QUESTION_BY_TOOL_CALL.remove(entry.key) }
+		}
+	}
+
+	/**
+	 * Only ids that look random are trusted. The map is shared by every integration and user,
+	 * and a backend that numbers its tool calls (call_0, functions.list_servers:0) would
+	 * otherwise hand one conversation another conversation's question.
+	 */
+	protected static boolean isDistinctToolCallId(String id) {
+		return id != null && id.length() >= 16 && !(id ==~ /.*[:_.\-]\d{1,4}/)
+	}
+
+	/** The remembered entry of the first known tool call in these messages, or null. */
+	protected static Map knownQuestionEntry(List messages) {
+		long now = System.currentTimeMillis()
+		for (def message : (messages ?: [])) {
+			if (!(message instanceof Map)) {
+				continue
+			}
+			for (String id : toolCallIds(message as Map)) {
+				Map entry = isDistinctToolCallId(id) ? QUESTION_BY_TOOL_CALL.get(id) : null
+				if (entry && now - (entry.updated as long) <= QUESTION_BY_TOOL_CALL_TTL_MS) {
+					return entry
+				}
+			}
+		}
+		return null
 	}
 
 	/**
@@ -1333,20 +1377,7 @@ class OpenAiProvider implements LlmProvider {
 		if (!messages || latestQuestion(messages)) {
 			return false
 		}
-		long now = System.currentTimeMillis()
-		String question = null
-		for (Map message : messages) {
-			for (String id : toolCallIds(message)) {
-				Map entry = QUESTION_BY_TOOL_CALL.get(id)
-				if (entry && now - (entry.updated as long) <= QUESTION_BY_TOOL_CALL_TTL_MS) {
-					question = entry.question as String
-					break
-				}
-			}
-			if (question) {
-				break
-			}
-		}
+		String question = knownQuestionEntry(messages)?.question as String
 		if (!question) {
 			return false
 		}

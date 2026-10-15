@@ -1466,13 +1466,13 @@ class AnthropicProviderSpec extends Specification {
 		given: 'the model answered the question with a tool call'
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
 		Map firstBody = provider.buildMessagesRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
-		AnthropicProvider.rememberQuestion(firstBody, [content: [[type: 'tool_use', id: 'toolu_1', name: 'list_servers', input: [:]]]])
+		AnthropicProvider.rememberQuestion(firstBody, [content: [[type: 'tool_use', id: 'toolu_01AbCdEfGhIjKlMn', name: 'list_servers', input: [:]]]])
 
 		and: 'a later request where Morpheus evicted the question, only the tool loop is left'
 		LlmChatRequest evicted = new LlmChatRequest(messages: [
 			message('system', 'You are Murph.'),
-			message('assistant', null, [tool_calls: [[id: 'toolu_1', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
-			message('tool', '{"artifactId":"a1","truncated":true}', [tool_call_id: 'toolu_1'])
+			message('assistant', null, [tool_calls: [[id: 'toolu_01AbCdEfGhIjKlMn', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '{"artifactId":"a1","truncated":true}', [tool_call_id: 'toolu_01AbCdEfGhIjKlMn'])
 		])
 
 		when:
@@ -1483,7 +1483,7 @@ class AnthropicProviderSpec extends Specification {
 		body.messages[0].role == 'user'
 		body.messages[0].content == AnthropicProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
 		body.messages[1].role == 'assistant'
-		body.messages[2].content[0].tool_use_id == 'toolu_1'
+		body.messages[2].content[0].tool_use_id == 'toolu_01AbCdEfGhIjKlMn'
 		AnthropicProvider.latestQuestion(body.messages) == 'List the AWS servers'
 
 		cleanup:
@@ -1493,19 +1493,19 @@ class AnthropicProviderSpec extends Specification {
 	def "the restored question carries on to the next tool calls without the note piling up"() {
 		given:
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
-		AnthropicProvider.QUESTION_BY_TOOL_CALL.put('toolu_1', [question: 'List the AWS servers', updated: System.currentTimeMillis()])
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.put('toolu_01AbCdEfGhIjKlMn', [question: 'List the AWS servers', updated: System.currentTimeMillis()])
 		List<Map> messages = [
-			[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_1', name: 'get_result_excerpt', input: [:]]]],
-			[role: 'user', content: [[type: 'tool_result', tool_use_id: 'toolu_1', content: 'part 2']]]
+			[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_01AbCdEfGhIjKlMn', name: 'get_result_excerpt', input: [:]]]],
+			[role: 'user', content: [[type: 'tool_result', tool_use_id: 'toolu_01AbCdEfGhIjKlMn', content: 'part 2']]]
 		]
 
 		when:
 		boolean restored = AnthropicProvider.restoreLostQuestion(messages)
-		AnthropicProvider.rememberQuestion([messages: messages], [content: [[type: 'tool_use', id: 'toolu_2', name: 'get_result_excerpt', input: [:]]]])
+		AnthropicProvider.rememberQuestion([messages: messages], [content: [[type: 'tool_use', id: 'toolu_02AbCdEfGhIjKlMn', name: 'get_result_excerpt', input: [:]]]])
 
 		then:
 		restored
-		AnthropicProvider.QUESTION_BY_TOOL_CALL.get('toolu_2').question == 'List the AWS servers'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get('toolu_02AbCdEfGhIjKlMn').question == 'List the AWS servers'
 
 		cleanup:
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
@@ -1515,13 +1515,13 @@ class AnthropicProviderSpec extends Specification {
 		given:
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
 		long old = System.currentTimeMillis() - AnthropicProvider.QUESTION_BY_TOOL_CALL_TTL_MS - 1000L
-		AnthropicProvider.QUESTION_BY_TOOL_CALL.put('toolu_old', [question: 'Stale question', updated: old])
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.put('toolu_0OldAbCdEfGhIj', [question: 'Stale question', updated: old])
 		List<Map> withQuestion = [
 			[role: 'user', content: 'How many VMs?'],
-			[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_old', name: 'list_instances', input: [:]]]]
+			[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_0OldAbCdEfGhIj', name: 'list_instances', input: [:]]]]
 		]
-		List<Map> unknown = [[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_x', name: 'list_instances', input: [:]]]]]
-		List<Map> expired = [[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_old', name: 'list_instances', input: [:]]]]]
+		List<Map> unknown = [[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_0UnknownAbCdEf', name: 'list_instances', input: [:]]]]]
+		List<Map> expired = [[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_0OldAbCdEfGhIj', name: 'list_instances', input: [:]]]]]
 
 		expect:
 		!AnthropicProvider.restoreLostQuestion(withQuestion)
@@ -1542,11 +1542,107 @@ class AnthropicProviderSpec extends Specification {
 
 		when:
 		AnthropicProvider.rememberQuestion([messages: [[role: 'user', content: [[type: 'tool_result', tool_use_id: 't0', content: 'x']]]]],
-			[content: [[type: 'tool_use', id: 't1', name: 'a', input: [:]]]])
+			[content: [[type: 'tool_use', id: 'toolu_t1AbCdEfGhIjKl', name: 'a', input: [:]]]])
 		AnthropicProvider.rememberQuestion([messages: [[role: 'user', content: 'Q']]], [content: [[type: 'text', text: 'Done.']]])
 
 		then:
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.isEmpty()
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "numbered tool call ids are never trusted, so another conversation's question cannot come back"() {
+		given:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'call_0'
+		Map firstBody = provider.buildMessagesRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+		AnthropicProvider.rememberQuestion(firstBody, [content: [[type: 'tool_use', id: ID, name: 'list_servers', input: [:]]]])
+
+		expect:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.isEmpty()
+		!AnthropicProvider.isDistinctToolCallId('functions.list_servers:0')
+		!AnthropicProvider.isDistinctToolCallId('call_AbCdEfGhIjKlMn_12')
+		AnthropicProvider.isDistinctToolCallId('call_AbCdEfGhIjKlMnOp')
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a restored question keeps counting on its original cost key and carries on to the next tool calls"() {
+		given:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'call_AbCdEfGhIjKlMnOp'
+		String ID2 = 'call_ZyXwVuTsRqPoNmLk'
+		Map firstBody = provider.buildMessagesRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+		String originalKey = AnthropicProvider.questionKey(firstBody)
+		AnthropicProvider.rememberQuestion(firstBody, [content: [[type: 'tool_use', id: ID, name: 'list_servers', input: [:]]]])
+		List<Map> msgs = [[role: 'assistant', content: [[type: 'tool_use', id: ID, name: 'list_servers', input: [:]]]], [role: 'user', content: [[type: 'tool_result', tool_use_id: ID, content: 'part']]]]
+
+		when:
+		boolean restored = AnthropicProvider.restoreLostQuestion(msgs)
+		AnthropicProvider.rememberQuestion([messages: msgs], [content: [[type: 'tool_use', id: ID2, name: 'get_result_excerpt', input: [:]]]])
+
+		then:
+		restored
+		AnthropicProvider.questionKey([model: firstBody.model, messages: msgs]) == originalKey
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(ID2).question == 'List the AWS servers'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(ID2).costKey == originalKey
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a full map drops only its oldest entries"() {
+		given:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		long now = System.currentTimeMillis()
+		(AnthropicProvider.QUESTION_BY_TOOL_CALL_MAX).times { int i ->
+			AnthropicProvider.QUESTION_BY_TOOL_CALL.put('call_old' + String.format('%012d', i) + 'x', [question: 'old', costKey: 'k', updated: now - 1000L + (i % 500)])
+		}
+		String ID = 'call_NewAbCdEfGhIjKlMn'
+		Map firstBody = provider.buildMessagesRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+
+		when:
+		AnthropicProvider.rememberQuestion(firstBody, [content: [[type: 'tool_use', id: ID, name: 'list_servers', input: [:]]]])
+
+		then:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.size() == AnthropicProvider.QUESTION_BY_TOOL_CALL_MAX
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(ID).question == 'List the AWS servers'
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "generateResponse remembers the question and restores it on a later request that lost it"() {
+		given:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		List<Map> sent = []
+		AnthropicProvider withApi = new AnthropicProvider(null, null)
+		withApi.apiService = new AnthropicApiService() {
+			@Override
+			Map createMessage(String baseUrl, String apiKey, Map requestBody, String apiVersion, List<String> betas, Map opts) {
+				sent << requestBody
+				return [success: true, data: [id: 'msg_1', model: 'claude-sonnet-5', role: 'assistant', stop_reason: 'tool_use',
+					content: [[type: 'tool_use', id: 'toolu_01E2eAbCdEfGhIjKl', name: 'list_servers', input: [:]]],
+					usage: [input_tokens: 10, output_tokens: 5]]]
+			}
+		}
+		AccountIntegration ai = configured([:])
+		ai.servicePassword = 'sk-ant-test'
+		LlmIntegration llm = new LlmIntegration(accountIntegration: ai)
+
+		when:
+		withApi.generateResponse(llm, new LlmChatRequest(model: 'claude-sonnet-5', messages: [message('user', 'List the AWS servers')]), [:])
+		withApi.generateResponse(llm, new LlmChatRequest(model: 'claude-sonnet-5', messages: [
+			message('assistant', null, [tool_calls: [[id: 'toolu_01E2eAbCdEfGhIjKl', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '{"truncated":true}', [tool_call_id: 'toolu_01E2eAbCdEfGhIjKl'])
+		]), [:])
+
+		then:
+		sent.size() == 2
+		sent[1].messages[0].role == 'user'
+		sent[1].messages[0].content == AnthropicProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
 
 		cleanup:
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
