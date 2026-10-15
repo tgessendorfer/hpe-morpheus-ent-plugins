@@ -10,7 +10,7 @@ releases on its own.
 
 | Plugin | Provider type | Folder | Latest release | Status |
 |---|---|---|---|---|
-| Anthropic Claude | LLM | [`llm/anthropic`](llm/anthropic) | [1.6.3](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/anthropic-v1.6.3) | Claude over the native Messages API, direct or through OpenRouter. Verified on Morpheus 9.0.1. |
+| Anthropic Claude | LLM | [`llm/anthropic`](llm/anthropic) | [1.6.4](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/anthropic-v1.6.4) | Claude over the native Messages API, direct or through OpenRouter. Verified on Morpheus 9.0.1. |
 | OpenRouter | LLM | [`llm/openrouter`](llm/openrouter) | [0.2.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openrouter-v0.2.2) | Every other model OpenRouter serves, over its OpenAI-compatible API. Verified on Morpheus 9.0.2. |
 | OpenAI-Compatible API | LLM | [`llm/openai`](llm/openai) | [0.1.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/openai-v0.1.2) | Any OpenAI-compatible chat API — api.openai.com, OpenRouter, LiteLLM, vLLM, Ollama — over HTTP or HTTPS, where HPE's Local LLM plugin fails on SNI. Verified on Morpheus 9.0.2. |
 | Proxmox VE | Cloud | [`cloud/proxmox-ve`](cloud/proxmox-ve) | [0.1.30-lab](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/proxmox-ve-v0.1.30-lab) | Lab build of HPE's community Proxmox VE plugin, with Proxmox VE 9 support and working provisioning. Verified on Morpheus 9.0.2 with Proxmox VE 9.2.20. Community code without support. |

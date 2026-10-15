@@ -1461,4 +1461,94 @@ class AnthropicProviderSpec extends Specification {
 		then:
 		probed == ['claude-broken']
 	}
+
+	def "a request whose question the chat memory dropped gets it back from the tool calls that worked on it"() {
+		given: 'the model answered the question with a tool call'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		Map firstBody = provider.buildMessagesRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+		AnthropicProvider.rememberQuestion(firstBody, [content: [[type: 'tool_use', id: 'toolu_1', name: 'list_servers', input: [:]]]])
+
+		and: 'a later request where Morpheus evicted the question, only the tool loop is left'
+		LlmChatRequest evicted = new LlmChatRequest(messages: [
+			message('system', 'You are Murph.'),
+			message('assistant', null, [tool_calls: [[id: 'toolu_1', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '{"artifactId":"a1","truncated":true}', [tool_call_id: 'toolu_1'])
+		])
+
+		when:
+		Map body = provider.buildMessagesRequestBody(evicted, integration, false)
+
+		then:
+		body.messages.size() == 3
+		body.messages[0].role == 'user'
+		body.messages[0].content == AnthropicProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+		body.messages[1].role == 'assistant'
+		body.messages[2].content[0].tool_use_id == 'toolu_1'
+		AnthropicProvider.latestQuestion(body.messages) == 'List the AWS servers'
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "the restored question carries on to the next tool calls without the note piling up"() {
+		given:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.put('toolu_1', [question: 'List the AWS servers', updated: System.currentTimeMillis()])
+		List<Map> messages = [
+			[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_1', name: 'get_result_excerpt', input: [:]]]],
+			[role: 'user', content: [[type: 'tool_result', tool_use_id: 'toolu_1', content: 'part 2']]]
+		]
+
+		when:
+		boolean restored = AnthropicProvider.restoreLostQuestion(messages)
+		AnthropicProvider.rememberQuestion([messages: messages], [content: [[type: 'tool_use', id: 'toolu_2', name: 'get_result_excerpt', input: [:]]]])
+
+		then:
+		restored
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get('toolu_2').question == 'List the AWS servers'
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a request that still has its question, or whose tool calls are unknown or too old, is left alone"() {
+		given:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		long old = System.currentTimeMillis() - AnthropicProvider.QUESTION_BY_TOOL_CALL_TTL_MS - 1000L
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.put('toolu_old', [question: 'Stale question', updated: old])
+		List<Map> withQuestion = [
+			[role: 'user', content: 'How many VMs?'],
+			[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_old', name: 'list_instances', input: [:]]]]
+		]
+		List<Map> unknown = [[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_x', name: 'list_instances', input: [:]]]]]
+		List<Map> expired = [[role: 'assistant', content: [[type: 'tool_use', id: 'toolu_old', name: 'list_instances', input: [:]]]]]
+
+		expect:
+		!AnthropicProvider.restoreLostQuestion(withQuestion)
+		withQuestion.size() == 2
+		!AnthropicProvider.restoreLostQuestion(unknown)
+		unknown.size() == 1
+		!AnthropicProvider.restoreLostQuestion(expired)
+		expired.size() == 1
+		!AnthropicProvider.restoreLostQuestion([])
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "only tool calls of a request with a question are remembered"() {
+		given:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		when:
+		AnthropicProvider.rememberQuestion([messages: [[role: 'user', content: [[type: 'tool_result', tool_use_id: 't0', content: 'x']]]]],
+			[content: [[type: 'tool_use', id: 't1', name: 'a', input: [:]]]])
+		AnthropicProvider.rememberQuestion([messages: [[role: 'user', content: 'Q']]], [content: [[type: 'text', text: 'Done.']]])
+
+		then:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.isEmpty()
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
 }
