@@ -6,6 +6,40 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 0.1.3
+
+**The model no longer loses the user's question in a long tool loop on Morpheus 9.1.** Built
+against plugin API 1.4.2. Fix release; no new setting. The same fix as Anthropic 1.6.4.
+
+- **What went wrong.** Morpheus 9.1 keeps the chat memory in a token window, 32,000 tokens unless
+  `morpheus.ai.chat.maxMemoryTokens` is set, and evicts the oldest message first. MCP results over
+  8,000 characters come back truncated, and the agent pages through them with `get_result_excerpt`.
+  A question that needs many of those pages fills the window inside one question: the question
+  itself drops out, and the model answers as if the message had been empty.
+- **What the plugin does now.** It maps every tool call id the model issues to the question of
+  that request (kept for one hour, at most 10,000 entries). When a request reaches the plugin
+  without any user question but with tool calls it knows, the plugin puts the question back right
+  after the system messages, with a one-line note that the chat application had dropped it, and
+  logs *Restored the user's question, which the Morpheus chat memory had dropped during a tool
+  loop*. The question text is not logged.
+- **Behaviour change from 0.1.2:** only requests that have lost their question are changed.
+
+### Verified
+
+- Unit tests (JDK 17, Gradle 9.8.0), two of them new: a request without its question gets it back
+  after the system messages; requests that still have their question, or whose tool calls are
+  unknown or older than an hour, are left alone.
+- The cause was read from `morpheus-core-9.1.0.jar` and measured with an Anthropic agent; see the
+  Anthropic 1.6.4 notes.
+
+### Not yet verified
+
+- On an appliance, with any model behind this plugin.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.2...openai-v0.1.3
+
+---
+
 ## 0.1.2
 
 **Build update only: the build no longer uses a Gradle API that Gradle 10 removes.** No change in

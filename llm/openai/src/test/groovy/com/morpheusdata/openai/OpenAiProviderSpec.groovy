@@ -1128,4 +1128,52 @@ class OpenAiProviderSpec extends Specification {
 			}
 		}
 	}
+
+	def "a request whose question the chat memory dropped gets it back after the system messages"() {
+		given: 'the model answered the question with a tool call'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+		LlmChatResponse first = new LlmChatResponse()
+		first.metadata = [tool_calls: [[id: 'call_1', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]
+		OpenAiProvider.rememberQuestion(firstBody, first)
+
+		and: 'a later request where Morpheus evicted the question, only the tool loop is left'
+		LlmChatRequest evicted = new LlmChatRequest(messages: [
+			message('system', 'You are Murph.'),
+			message('assistant', '', [tool_calls: [[id: 'call_1', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '{"artifactId":"a1","truncated":true}', [tool_call_id: 'call_1'])
+		])
+
+		when:
+		Map body = provider.buildChatRequestBody(evicted, integration, false)
+
+		then:
+		body.messages*.role == ['system', 'user', 'assistant', 'tool']
+		body.messages[1].content == OpenAiProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+		OpenAiProvider.latestQuestion(body.messages) == 'List the AWS servers'
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a request that still has its question, or whose tool calls are unknown or too old, is left alone"() {
+		given:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		long old = System.currentTimeMillis() - OpenAiProvider.QUESTION_BY_TOOL_CALL_TTL_MS - 1000L
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.put('call_old', [question: 'Stale question', updated: old])
+		List<Map> withQuestion = [[role: 'user', content: 'How many VMs?'], [role: 'assistant', content: '', tool_calls: [[id: 'call_old']]]]
+		List<Map> unknown = [[role: 'assistant', content: '', tool_calls: [[id: 'call_x']]]]
+		List<Map> expired = [[role: 'tool', tool_call_id: 'call_old', content: 'x']]
+
+		expect:
+		!OpenAiProvider.restoreLostQuestion(withQuestion)
+		withQuestion.size() == 2
+		!OpenAiProvider.restoreLostQuestion(unknown)
+		unknown.size() == 1
+		!OpenAiProvider.restoreLostQuestion(expired)
+		expired.size() == 1
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
 }

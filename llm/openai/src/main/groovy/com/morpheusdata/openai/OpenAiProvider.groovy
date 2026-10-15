@@ -144,6 +144,17 @@ class OpenAiProvider implements LlmProvider {
 	// last of them carries the answer the footer goes on - so cost is kept per question.
 	protected static final ConcurrentHashMap<String, Map> QUESTION_COSTS = new ConcurrentHashMap<>()
 	static final long QUESTION_COST_TTL_MS = 60L * 60L * 1000L
+	// Morpheus 9.1 keeps the chat memory in a token window (32,000 tokens unless
+	// morpheus.ai.chat.maxMemoryTokens says otherwise) and evicts the oldest message
+	// first. An agent paging through truncated MCP results with get_result_excerpt fills
+	// that window within one question, the question itself drops out, and the model then
+	// answers as if the message had been empty. Each tool call id the model issues is
+	// mapped to the question it worked on, so a request that lost its question gets it back.
+	protected static final ConcurrentHashMap<String, Map> QUESTION_BY_TOOL_CALL = new ConcurrentHashMap<>()
+	static final long QUESTION_BY_TOOL_CALL_TTL_MS = 60L * 60L * 1000L
+	static final int QUESTION_BY_TOOL_CALL_MAX = 10000
+	static final String RESTORED_QUESTION_NOTE = '(The chat application dropped this question from the conversation ' +
+		'memory while the tool calls below were working on it. It is restored here; answer it.)\n\n'
 	static final String REPLACEMENT_CHARACTER_NOTE = 'Some earlier turns of this conversation came back from the chat ' +
 		'application with characters replaced by U+FFFD. Treat each such character as unknown and never copy it; ' +
 		'write every character of your answer correctly, including umlauts and other accented letters.'
@@ -478,6 +489,7 @@ class OpenAiProvider implements LlmProvider {
 					"Chat completion failed: ${message}".toString())
 			}
 			LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(data))
+			rememberQuestion(requestBody, response)
 			dropEmptyToolArguments(response, accountIntegration)
 			return ServiceResponse.success(appendUsageFooter(response, accountIntegration))
 		}
@@ -641,6 +653,7 @@ class OpenAiProvider implements LlmProvider {
 
 			if (result?.success && result.data instanceof Map) {
 				LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(result.data as Map))
+				rememberQuestion(requestBody, response)
 				dropEmptyToolArguments(response, accountIntegration)
 				handler?.onCompleteResponse(appendUsageFooter(response, accountIntegration))
 				return
@@ -752,6 +765,9 @@ class OpenAiProvider implements LlmProvider {
 		}
 		// The shape of the request, never its content: enough to see from the log what a
 		// model was asked for when its answer comes back empty or cut off.
+		if (restoreLostQuestion(messages)) {
+			log.info("Restored the user's question, which the Morpheus chat memory had dropped during a tool loop (${messages.size()} messages)")
+		}
 		log.info("Request: model=${requestBody.model} messages=${messages.size()} tools=${tools ? tools.size() : 0} " +
 			"${requestBody.containsKey('max_completion_tokens') ? 'max_completion_tokens=' + requestBody.max_completion_tokens : 'max_tokens=' + requestBody.max_tokens} " +
 			"temperature=${requestBody.temperature} reasoning_effort=${requestBody.reasoning_effort} stream=${requestBody.stream}")
@@ -1263,6 +1279,83 @@ class OpenAiProvider implements LlmProvider {
 		}
 		String prefix = JsonOutput.toJson([model: requestBody?.model, messages: last >= 0 ? messages[0..last] : []])
 		return MessageDigest.getInstance('SHA-256').digest(prefix.getBytes('UTF-8')).encodeHex().toString()
+	}
+
+	/** The text of the latest user message that is a question, not a tool result; null when there is none. */
+	protected static String latestQuestion(List messages) {
+		String question = null
+		(messages ?: []).each { def message ->
+			if (message instanceof Map && message.role == 'user' && message.content instanceof CharSequence &&
+				message.content.toString().trim()) {
+				question = message.content.toString()
+			}
+		}
+		return question?.startsWith(RESTORED_QUESTION_NOTE) ? question.substring(RESTORED_QUESTION_NOTE.length()) : question
+	}
+
+	/** Ids of the tool calls an assistant message makes, or the id a tool message answers. */
+	protected static List<String> toolCallIds(Map message) {
+		if (message?.tool_call_id) {
+			return [message.tool_call_id.toString()]
+		}
+		def calls = message?.tool_calls
+		if (!(calls instanceof List)) {
+			return []
+		}
+		(calls as List).findResults { def call -> call instanceof Map && call.id ? call.id.toString() : null } as List<String>
+	}
+
+	/**
+	 * Maps every tool call of this turn to the question of the request, so the question
+	 * can be put back once the chat memory has dropped it.
+	 */
+	protected static void rememberQuestion(Map requestBody, LlmChatResponse response) {
+		String question = latestQuestion(requestBody?.messages as List)
+		def calls = response?.metadata?.get('tool_calls')
+		List<String> ids = toolCallIds([tool_calls: calls instanceof List ? calls : null])
+		if (!question || !ids) {
+			return
+		}
+		long now = System.currentTimeMillis()
+		QUESTION_BY_TOOL_CALL.values().removeIf { Map entry -> now - (entry.updated as long) > QUESTION_BY_TOOL_CALL_TTL_MS }
+		if (QUESTION_BY_TOOL_CALL.size() > QUESTION_BY_TOOL_CALL_MAX) {
+			QUESTION_BY_TOOL_CALL.clear()
+		}
+		ids.each { String id -> QUESTION_BY_TOOL_CALL.put(id, [question: question, updated: now]) }
+	}
+
+	/**
+	 * Puts the question back, after the system messages, into a request that has none
+	 * left: Morpheus evicted it from its chat memory, but the tool calls that worked on
+	 * it are still there. Returns true when a question was restored.
+	 */
+	protected static boolean restoreLostQuestion(List<Map> messages) {
+		if (!messages || latestQuestion(messages)) {
+			return false
+		}
+		long now = System.currentTimeMillis()
+		String question = null
+		for (Map message : messages) {
+			for (String id : toolCallIds(message)) {
+				Map entry = QUESTION_BY_TOOL_CALL.get(id)
+				if (entry && now - (entry.updated as long) <= QUESTION_BY_TOOL_CALL_TTL_MS) {
+					question = entry.question as String
+					break
+				}
+			}
+			if (question) {
+				break
+			}
+		}
+		if (!question) {
+			return false
+		}
+		int position = 0
+		while (position < messages.size() && messages[position].role == 'system') {
+			position++
+		}
+		messages.add(position, [role: 'user', content: RESTORED_QUESTION_NOTE + question])
+		return true
 	}
 
 	/** en, de or pl - whichever the answer reads as; English when in doubt. */

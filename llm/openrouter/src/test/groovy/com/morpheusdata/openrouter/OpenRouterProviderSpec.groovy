@@ -1095,4 +1095,52 @@ class OpenRouterProviderSpec extends Specification {
 			}
 		}
 	}
+
+	def "a request whose question the chat memory dropped gets it back after the system messages"() {
+		given: 'the model answered the question with a tool call'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+		LlmChatResponse first = new LlmChatResponse()
+		first.metadata = [tool_calls: [[id: 'call_1', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]
+		OpenRouterProvider.rememberQuestion(firstBody, first)
+
+		and: 'a later request where Morpheus evicted the question, only the tool loop is left'
+		LlmChatRequest evicted = new LlmChatRequest(messages: [
+			message('system', 'You are Murph.'),
+			message('assistant', '', [tool_calls: [[id: 'call_1', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '{"artifactId":"a1","truncated":true}', [tool_call_id: 'call_1'])
+		])
+
+		when:
+		Map body = provider.buildChatRequestBody(evicted, integration, false)
+
+		then:
+		body.messages*.role == ['system', 'user', 'assistant', 'tool']
+		body.messages[1].content == OpenRouterProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+		OpenRouterProvider.latestQuestion(body.messages) == 'List the AWS servers'
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a request that still has its question, or whose tool calls are unknown or too old, is left alone"() {
+		given:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		long old = System.currentTimeMillis() - OpenRouterProvider.QUESTION_BY_TOOL_CALL_TTL_MS - 1000L
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.put('call_old', [question: 'Stale question', updated: old])
+		List<Map> withQuestion = [[role: 'user', content: 'How many VMs?'], [role: 'assistant', content: '', tool_calls: [[id: 'call_old']]]]
+		List<Map> unknown = [[role: 'assistant', content: '', tool_calls: [[id: 'call_x']]]]
+		List<Map> expired = [[role: 'tool', tool_call_id: 'call_old', content: 'x']]
+
+		expect:
+		!OpenRouterProvider.restoreLostQuestion(withQuestion)
+		withQuestion.size() == 2
+		!OpenRouterProvider.restoreLostQuestion(unknown)
+		unknown.size() == 1
+		!OpenRouterProvider.restoreLostQuestion(expired)
+		expired.size() == 1
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
 }
