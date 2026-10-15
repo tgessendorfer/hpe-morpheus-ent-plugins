@@ -77,6 +77,9 @@ shows the new widget in place of the standard *Log History*.
 
 - The unit test for the dashboard layout still expected the three-widget dashboard of 1.0.4 and had
   failed since 1.1.0; it now checks the 15-item layout. No effect on the jar.
+- **The German note *Nicht gezeigt, andere Währung* no longer shows `WÃ¤hrung`.** The bundle line held
+  a raw UTF-8 umlaut, but `Properties.load` reads ISO-8859-1; it is now a `\u00e4` escape like the
+  rest of the bundle. Present since 1.0.4.
 
 ### Verified
 

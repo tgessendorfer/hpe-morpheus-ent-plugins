@@ -144,6 +144,7 @@ class FinopsInsightsPluginSpec extends Specification {
 			'logs_level', 'logs_source', 'logs_allSources', 'logs_text', 'logs_collapse', 'logs_more', 'logs_retention'])
 		AbstractFinopsItemProvider.message('kpi.margin', Locale.GERMAN) == 'Marge'
 		AbstractFinopsItemProvider.message('kpi.margin', Locale.FRENCH) == 'Margin'
+		AbstractFinopsItemProvider.message('note.otherCurrencies', Locale.GERMAN) == 'Nicht gezeigt, andere W\u00e4hrung:'
 	}
 
 	def "the plugin offers one unticked Hide checkbox per widget and each widget reads its own"() {

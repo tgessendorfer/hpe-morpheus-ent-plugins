@@ -16,6 +16,7 @@ on:
       - 'msp-tenant-overview-v*'
       - 'socket-report-v*'
       - 'cost-approval-v*'
+      - 'finops-insights-v*'
 
 permissions:
   contents: write
@@ -41,6 +42,7 @@ jobs:
             msp-tenant-overview-v*) dir=finops/msp-tenant-overview; name="MSP Tenant Overview";     version="${tag#msp-tenant-overview-v}" ;;
             socket-report-v*)       dir=finops/socket-report;       name="Socket Usage Report";     version="${tag#socket-report-v}" ;;
             cost-approval-v*)       dir=finops/cost-approval;       name="Cost Threshold Approval"; version="${tag#cost-approval-v}" ;;
+            finops-insights-v*)     dir=finops/finops-insights;     name="FinOps Insights Dashboard"; version="${tag#finops-insights-v}" ;;
             *) echo "::error::Unknown tag prefix: $tag"; exit 1 ;;
           esac
           # A Proxmox VE lab build carries -lab in its tag but not in gradle.properties.
