@@ -117,6 +117,8 @@ shows the new widget in place of the standard *Log History*.
     expected; its script loads from `/assets/plugin/<plugin name>/finops-insights-logs.js`, the
     filters offer all servers with logging, and the browser console shows no content security
     policy error. The page follows the browser language (German texts seen).
+- The release jar loads on the same appliance in place of the release candidate; the stored
+  settings are kept across the upgrade and the dashboard shows all four widgets.
 
 ### Not verified
 
@@ -126,6 +128,10 @@ shows the new widget in place of the standard *Log History*.
   used), a role without *Logs* or with the level *user*, and a tenant without servers.
 - That a click on a log line opens the instance on its *Logs* tab.
 - Morpheus 9.0.2 with this version.
+
+Built by the release workflow from the source at tag `finops-insights-v1.2.0`.
+
+sha256 `31233409ce89d9280a9f2e24ab877da3bd69220c4b27ba9c90f2f57c4c2bb1a4`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/commits/finops-insights-v1.2.0
 
