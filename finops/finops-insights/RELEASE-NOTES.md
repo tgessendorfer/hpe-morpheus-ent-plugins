@@ -25,10 +25,17 @@ appliance 9.0.2. Fix release; nothing else changes.
 
 - 133 unit tests and 36 browser script tests (JDK 17, Gradle 9.8.0); the new test checks the name,
   the title and that the dashboard code is unchanged.
+- The release jar on Morpheus 9.1.0-1 in place of 1.2.1: `loaded`, valid; Administration > Settings >
+  Appliance shows the selected dashboard as *Operations Overview*, and the setting
+  (`dashboardsToDisplay`: `finops-insights-dashboard`) stayed as it was.
 
 ### Not verified
 
-- The rename on an appliance.
+- The dashboard title on a page that shows more than one dashboard.
+
+Built by the release workflow from the source at tag `finops-insights-v1.2.2`.
+
+sha256 `12f839dea616531eeb4ba565ce393ff770f89a7efd948ac58367a4c9ad942c67`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/finops-insights-v1.2.1...finops-insights-v1.2.2
 
