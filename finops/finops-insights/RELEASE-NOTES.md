@@ -6,6 +6,34 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.2
+
+**The dashboard has a neutral name: *Operations Overview*.** Built against plugin API 1.4.2, minimum
+appliance 9.0.2. Fix release; nothing else changes.
+
+### What changes
+
+- **Dashboard name and title.** Since 1.1.0 the dashboard was named after one provider's brand
+  (*Nordwind Operations*), on every appliance. 1.2.2 names it **Operations Overview**, in the list
+  under Administration > Settings > Appliance > *Dashboards to Display* and as the title on
+  Operations > Dashboard.
+- **Behaviour change from 1.2.1:** only the name. The dashboard code stays
+  `finops-insights-dashboard`, so an appliance that has the dashboard selected keeps it selected
+  after the upgrade, and the widgets, settings and permissions are unchanged.
+
+### Verified
+
+- 133 unit tests and 36 browser script tests (JDK 17, Gradle 9.8.0); the new test checks the name,
+  the title and that the dashboard code is unchanged.
+
+### Not verified
+
+- The rename on an appliance.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/finops-insights-v1.2.1...finops-insights-v1.2.2
+
+---
+
 ## 1.2.1
 
 **A provider user's log lines of a sub-tenant server now open the server page instead of the

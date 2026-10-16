@@ -94,6 +94,22 @@ class FinopsInsightsPluginSpec extends Specification {
 		items[-1].type.code == 'dashboard-item-log-count'
 	}
 
+	def "the dashboard carries a neutral name and keeps its code"() {
+		given:
+		FinopsInsightsDashboardProvider dash = plugin.getProviderByCode(FinopsInsightsDashboardProvider.CODE) as FinopsInsightsDashboardProvider
+
+		when:
+		def board = dash.getDashboard()
+
+		then:
+		dash.name == 'Operations Overview'
+		board.name == 'Operations Overview'
+		board.title == 'Operations Overview'
+		// the code is what the appliance setting stores, so an upgrade keeps the dashboard selected
+		board.code == 'finops-insights-dashboard'
+		board.dashboardId == 'finops-insights-dashboard'
+	}
+
 	def "the log widget is left out of the layout when the Logs permission cannot be loaded"() {
 		given:
 		FinopsInsightsPlugin broken = new FinopsInsightsPlugin()

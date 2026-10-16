@@ -33,6 +33,10 @@ class FinopsInsightsDashboardProvider extends AbstractDashboardProvider {
 
 	static final String CODE = 'finops-insights-dashboard'
 
+	// Neutral on purpose: the name shows in Administration > Settings > Appliance and as the dashboard
+	// title on every appliance, whatever the provider's own brand.
+	static final String NAME = 'Operations Overview'
+
 	// Group name -> item type codes, in display order. Each group is one row of the dashboard.
 	// Owner layout 2026-10-12: the standard home widgets (Morpheus item types, referenced by code)
 	// interleaved with the FinOps widgets, so this dashboard replaces the default home dashboard
@@ -62,7 +66,7 @@ class FinopsInsightsDashboardProvider extends AbstractDashboardProvider {
 	@Override MorpheusContext getMorpheus() { morpheus }
 	@Override Plugin getPlugin() { plugin }
 	@Override String getCode() { CODE }
-	@Override String getName() { 'Nordwind Operations' }
+	@Override String getName() { NAME }
 
 	@Override
 	Dashboard getDashboard() {
@@ -71,7 +75,7 @@ class FinopsInsightsDashboardProvider extends AbstractDashboardProvider {
 		rtn.code = getCode()
 		rtn.dashboardId = getCode()
 		rtn.category = 'cost'
-		rtn.title = 'Nordwind Operations'
+		rtn.title = NAME
 		rtn.description = 'Home dashboard with the FinOps widgets: environment, instances, jobs, revenue, cost, margin, trend, split, favourites, alarms, activity, latest log entries'
 		// Measured on 9.0.2: the dashboard controller answers {"success":false} for a dashboard whose
 		// default_view flag is 0; the three standard dashboards all carry true, so this one does too.

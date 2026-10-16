@@ -37,7 +37,7 @@ entries of the tenant's servers with a log history page.
 ## Enable the dashboard
 
 1. Upload the jar under Administration > Integrations > Plugins.
-2. Administration > Settings > Appliance > **Dashboards to Display**: select *Nordwind Operations*
+2. Administration > Settings > Appliance > **Dashboards to Display**: select *Operations Overview*
    and remove *Default Home Dashboard*, then save. Since 1.1.0 the plugin dashboard already contains
    the standard home widgets (environment, system status, instances, jobs, backups, tasks,
    favourites, alarms, activity, log history) in a fixed order with the FinOps widgets in the middle;
