@@ -43,18 +43,23 @@ against plugin API 1.4.2. Fix release; no new setting.
 - The cause, read from `morpheus-core-9.1.0.jar`: `ToolAwareChatMemory` wraps langchain4j's
   `TokenWindowChatMemory`; `AiChatService.DEFAULT_MAX_MEMORY_TOKENS` is 32,000;
   `McpToolResultStoreService.INLINE_CHAR_LIMIT` is 8,000.
-
 - On Morpheus 9.1.0-1 with a release candidate of this code (1.6.4-rc.1), an agent on
   `claude-sonnet-5` with the built-in MCP server: the cross-cloud server table that ended in *"your
   message came through empty"* after 4:25 min with 1.6.3 came back correct after 60 s (10 turns,
   27 `list_servers`, 4 `get_result_excerpt`). The log showed the restore once. Integrations of this
   plugin stayed `ok` after the upload.
+- The release jar on the same appliance: loaded, its integrations refreshed `ok`. The same question
+  came back correct after 137 s (17 turns, 25 `list_servers`, 30 `get_result_excerpt`), and the log
+  showed the restore once. How long such a question takes varies with the number of excerpt calls
+  the model chooses.
 
 ### Not yet verified
 
-- The release jar itself in a chat: the account behind the lab integration had no API credit when
-  it was uploaded. It loaded and its integrations refreshed `ok`.
 - With plugin API 1.4.1 (Morpheus 9.0.2), whose chat memory was not measured.
+
+Built by the release workflow from the source at tag `anthropic-v1.6.4`.
+
+sha256 `69f9d031fd648cd7feda4f423e6fcd740670612858c4e3ce2c9d1e6306524ae2`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.6.3...anthropic-v1.6.4
 

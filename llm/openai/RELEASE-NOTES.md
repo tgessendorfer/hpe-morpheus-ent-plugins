@@ -42,10 +42,15 @@ against plugin API 1.4.2. Fix release; no new setting. The same fix as Anthropic
 - On Morpheus 9.1.0-1 with a release candidate of this code (0.1.3-rc.1), an agent on
   `deepseek-v4.1-flash` through a LiteLLM proxy: the same cross-cloud server table came back correct
   after 30 s. That model needed fewer, smaller turns, so the restore did not have to act.
+- The release jar on the same appliance: loaded, its integrations refreshed `ok`.
 
 ### Not yet verified
 
 - The restore acting on an appliance with a model behind this plugin.
+
+Built by the release workflow from the source at tag `openai-v0.1.3`.
+
+sha256 `6c06c9969bbbb5bfadf4e7b3405b88882032bc60e265ce3b0215165734fbee36`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.2...openai-v0.1.3
 

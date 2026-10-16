@@ -41,10 +41,15 @@ against plugin API 1.4.2. Fix release; no new setting. The same fix as Anthropic
 
 - On Morpheus 9.1.0-1 a release candidate of this code (0.2.3-rc.1) loaded and its integrations
   refreshed `ok`.
+- The release jar on the same appliance: loaded, its integrations refreshed `ok`.
 
 ### Not yet verified
 
 - A chat on an appliance with a model behind this plugin.
+
+Built by the release workflow from the source at tag `openrouter-v0.2.3`.
+
+sha256 `1d112b7ea15eaa09cd19acfbf875a0fc3861571281f2e24d369660ec06d9dda6`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.2.2...openrouter-v0.2.3
 
