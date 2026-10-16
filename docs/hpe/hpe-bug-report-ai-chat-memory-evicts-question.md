@@ -70,7 +70,7 @@ push the question out.
   and the latest tool results.
 - Log at INFO when the memory evicts messages during a question, with the counts.
 
-## Addendum: two more AI chat problems seen on 9.1.0 while building automation from the chat
+## Addendum: more AI chat problems seen on 9.1.0 while building automation from the chat
 
 ### A workflow cannot be created from the chat
 
@@ -91,3 +91,30 @@ push the question out.
   again (five approvals in five minutes). Naming `task.file` in the prompt makes `update_task` set the script at once.
 - Suggested fix: describe `file` in the `create_task` and `update_task` schemas, with the shape used by `POST
   /api/tasks`.
+
+### A task cannot be created from the chat either, and the reason is not logged
+
+- Measured a day later on the same appliance (9.1.0, agent on a Claude model, built-in MCP server). Prompt: *Create a
+  shell script task named web-health-check that runs on the target instance with sudo. Use create_task and set
+  task.file to {sourceType: local, content: "..."}. Do not create a workflow and do not run anything. Reply with the
+  task id.*
+- The chat shows the approval card *Create task* after about 6 seconds. After **Allow** the audit log records
+  `morpheus_api:tasks#save | task Failed to create`, with no error text. The model then reads the tool details and
+  calls `create_task` again, which shows a second card.
+- The same happens with a two-step wording (first `create_task` without a script, then `update_task` with
+  `task.file`): the first step already fails. The day before, a `create_task` without a script had worked.
+- The same task through `POST /api/tasks` is created at once: `taskType: {code: script}`,
+  `executeTarget: resource`, `taskOptions: {"shell.sudo": "on"}`, `file: {sourceType: local, content: ...}`.
+- Neither the arguments of the tool call nor the validation errors of the failed save are logged, so the cause
+  cannot be found from the appliance. The model gets no usable error either and simply retries.
+- Suggested fix: return the API's validation errors to the model as the tool result and log them; log the
+  arguments of write tools at DEBUG.
+
+### An unanswered approval card expires after 60 seconds
+
+- When the second card above was left alone, the chat answered after 60 seconds: *"The request timed out waiting for
+  approval. Let me know if you'd like to try again."* The card itself does not show the time limit.
+- 60 seconds is short for a user who reads what the AI wants to change before deciding, which is the point of the
+  card.
+- Suggested fix: show the remaining time on the card, make the timeout configurable, or keep the card open until
+  the user decides.
