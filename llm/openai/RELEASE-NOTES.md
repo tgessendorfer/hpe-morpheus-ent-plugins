@@ -39,9 +39,13 @@ against plugin API 1.4.2. Fix release; no new setting. The same fix as Anthropic
 - The cause was read from `morpheus-core-9.1.0.jar` and measured with an Anthropic agent; see the
   Anthropic 1.6.4 notes.
 
+- On Morpheus 9.1.0-1 with a release candidate of this code (0.1.3-rc.1), an agent on
+  `deepseek-v4.1-flash` through a LiteLLM proxy: the same cross-cloud server table came back correct
+  after 30 s. That model needed fewer, smaller turns, so the restore did not have to act.
+
 ### Not yet verified
 
-- On an appliance, with any model behind this plugin.
+- The restore acting on an appliance with a model behind this plugin.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.2...openai-v0.1.3
 

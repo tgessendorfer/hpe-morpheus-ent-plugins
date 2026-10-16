@@ -39,9 +39,12 @@ against plugin API 1.4.2. Fix release; no new setting. The same fix as Anthropic
 - The cause was read from `morpheus-core-9.1.0.jar` and measured with an Anthropic agent; see the
   Anthropic 1.6.4 notes.
 
+- On Morpheus 9.1.0-1 a release candidate of this code (0.2.3-rc.1) loaded and its integrations
+  refreshed `ok`.
+
 ### Not yet verified
 
-- On an appliance, with any model behind this plugin.
+- A chat on an appliance with a model behind this plugin.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.2.2...openrouter-v0.2.3
 
