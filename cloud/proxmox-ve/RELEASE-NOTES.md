@@ -89,6 +89,10 @@ which the plugin API does not bring transitively. Without it `compileTestGroovy`
   provision and adopted by the sync for the existing managed VM; the refusal after a VMID reuse;
   a deleted template keeping an uploaded image.
 
+Built by the release workflow from the source at tag `proxmox-ve-v0.1.31-lab`.
+
+sha256 `761399e39a7f4337708b6e740ed42b11161370d6208bac72fa7b607d455ebc3d`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.30-lab...proxmox-ve-v0.1.31-lab
 
 ---
