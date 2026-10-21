@@ -55,6 +55,9 @@ dependencies {
 	testImplementation 'org.apache.httpcomponents:httpclient:4.5.3'
 	testImplementation 'org.apache.httpcomponents:httpcore:4.4.5'
 	testImplementation "org.slf4j:slf4j-parent:$slf4jVersion"
+	// Spock inspects the model classes a condition calls; ComputeServer's methods reference
+	// Jackson, which the plugin API does not bring transitively (same as the LLM plugins).
+	testImplementation 'com.fasterxml.jackson.core:jackson-databind:2.15.3'
 
 	testImplementation "org.codehaus.groovy:groovy-all:$groovyVersion"
 	testImplementation 'net.bytebuddy:byte-buddy:1.9.3'

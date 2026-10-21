@@ -523,6 +523,14 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 		log.debug("Refresh triggered, service url is: " + cloudInfo.serviceUrl)
 		HttpApiClient client = new HttpApiClient()
 		try {
+			// Reach the API before any sync runs. Every sync skips itself on a failed listing,
+			// but a refresh that cannot even log in must report the cloud offline instead of
+			// success, so the status shows the outage and nothing is synced against it.
+			ServiceResponse ticket = ProxmoxApiComputeUtil.getApiV2Token(plugin.getAuthConfig(cloudInfo))
+			if (!ticket?.success) {
+				log.warn("Proxmox API of cloud ${cloudInfo.name} not reachable: ${ticket?.msg}")
+				return ServiceResponse.error("Proxmox API not reachable: ${ticket?.msg}", null, [status: Cloud.Status.offline])
+			}
 			// Record the Proxmox VE version on the cloud, so it is visible in Morpheus
 			// without opening the Proxmox UI. Never fatal: a cloud that cannot report
 			// its version should still sync.

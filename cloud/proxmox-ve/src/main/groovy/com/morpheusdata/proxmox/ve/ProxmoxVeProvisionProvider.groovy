@@ -619,6 +619,15 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 
 			server.internalId = rtnClone.data.vmId
 			server.externalId = rtnClone.data.vmId
+			// Keep the clone's smbios uuid: the VMID alone does not identify the guest, Proxmox
+			// reuses a freed id, and stop or destroy must never hit the VM that took it over.
+			String cloneUuid = ProxmoxApiComputeUtil.vmUuid(
+					ProxmoxApiComputeUtil.getVMConfigById(client, authConfig, rtnClone.data.vmId as String, nodeId))
+			if (cloneUuid) {
+				server.setConfigProperty(GUEST_UUID_PROPERTY, cloneUuid)
+			} else {
+				log.warn("VM ${rtnClone.data.vmId} reports no smbios uuid; its identity cannot be checked later")
+			}
 			server = saveAndGet(server)
 
 			def installAgentAfter = false
@@ -1007,6 +1016,32 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 		return ServiceResponse.success()
 	}
 
+	/** Server config key holding the smbios uuid of the VM a managed server was provisioned as. */
+	static final String GUEST_UUID_PROPERTY = 'proxmoxUuid'
+
+	/**
+	 * Refuses a stop or destroy when the VM behind the server's id is not the guest Morpheus
+	 * provisioned. The check compares the uuid stored at provision time with the VM's current
+	 * smbios uuid; a server without a stored uuid (provisioned before 0.1.31) passes. A VM whose
+	 * config cannot be read fails the check: without proof it is ours, nothing is powered off.
+	 */
+	ServiceResponse verifyGuestIdentity(HttpApiClient client, Map authConfig, String nodeId, ComputeServer server) {
+		String stored = server.getConfigProperty(GUEST_UUID_PROPERTY)
+		if (!stored) {
+			return ServiceResponse.success()
+		}
+		Map vmConfig = ProxmoxApiComputeUtil.getVMConfigById(client, authConfig, server.externalId, nodeId)
+		if (vmConfig == null) {
+			return ServiceResponse.error("VM ${server.externalId} on node ${nodeId} cannot be read, so its identity cannot be checked; nothing was changed")
+		}
+		if (!ProxmoxApiComputeUtil.sameGuest(stored, vmConfig)) {
+			String actual = ProxmoxApiComputeUtil.vmUuid(vmConfig) ?: 'none'
+			log.error("VM ${server.externalId} on node ${nodeId} is not the guest of server ${server.name}: stored uuid ${stored}, VM has ${actual}; refusing")
+			return ServiceResponse.error("VM ${server.externalId} is another guest now (uuid ${actual}, expected ${stored}); the id was reused in Proxmox. Nothing was changed. Remove the server record without deleting the VM.")
+		}
+		return ServiceResponse.success()
+	}
+
 	/**
 	 * Issues the remote calls necessary top stop a workload element from running.
 	 * @param workload the Workload we want to shut down
@@ -1019,6 +1054,10 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 			ComputeServer computeServer = workload.server
 			Map authConfig = plugin.getAuthConfig(computeServer.cloud)
 
+			ServiceResponse identity = verifyGuestIdentity(client, authConfig, computeServer.parentServer.name, computeServer)
+			if (!identity.success) {
+				return identity
+			}
 			return ProxmoxApiComputeUtil.stopVM(client, authConfig, computeServer.parentServer.name, computeServer.externalId)
 		} catch (e) {
 			log.error "Error performing stop on VM: ${e}", e
@@ -1096,6 +1135,10 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 				return ServiceResponse.success()
 			}
 
+			ServiceResponse identity = verifyGuestIdentity(deleteClient, authConfig, nodeId, server)
+			if (!identity.success) {
+				return identity
+			}
 			ProxmoxApiComputeUtil.stopVM(stopClient, authConfig, nodeId, server.externalId)
 			sleep(5000)
 			def destroyResult = ProxmoxApiComputeUtil.destroyVM(deleteClient, authConfig, nodeId, server.externalId)
@@ -1158,6 +1201,10 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 			HttpApiClient client = new HttpApiClient()
 			Map authConfig = plugin.getAuthConfig(computeServer.cloud)
 
+			ServiceResponse identity = verifyGuestIdentity(client, authConfig, computeServer.parentServer.name, computeServer)
+			if (!identity.success) {
+				return identity
+			}
 			return ProxmoxApiComputeUtil.stopVM(client, authConfig, computeServer.parentServer.name, computeServer.externalId)
 		} catch (e) {
 			log.error "Error performing stop on VM: ${e}", e

@@ -303,16 +303,35 @@ class VirtualImageLocationSync {
         removeList.each { removeItem ->
             log.debug("VirtualImage ID is: $removeItem.virtualImage.id")
             def virtualImage = virtualImagesById[removeItem.virtualImage.id]
-            if (virtualImage.imageLocations.size() == 1 && !virtualImage.systemImage) {
+            if (virtualImage && syncOwnsImage(virtualImage)) {
                 removeVirtualImages << virtualImage
+            } else if (virtualImage) {
+                log.info("Template ${removeItem.externalId} is gone from Proxmox; its location is removed, image '${virtualImage.name}' is kept")
             }
         }
         log.debug("Removing Locations: $removeList")
         context.async.virtualImage.location.bulkRemove(removeList).blockingGet()
-        //removeVirtualImages.each {
-            log.debug("Removing Virtual Images: $removeVirtualImages")
+        if (removeVirtualImages) {
+            log.info("Removing synced images whose template is gone from Proxmox: ${removeVirtualImages.collect { "${it.name}(${it.externalId})" }}")
             context.async.virtualImage.bulkRemove(removeVirtualImages).blockingGet()
-        //}
+        }
+    }
+
+    /**
+     * Whether a VirtualImage is the sync's own record of a Proxmox template, and so may go
+     * when the template goes: category `proxmox.image`, not a system image, not uploaded by a
+     * user, and this cloud's location its only one. Every other image (an uploaded qcow2, a
+     * system image, an image also present elsewhere) only loses this cloud's location: the
+     * location is what the sync created for it, the image is not.
+     */
+    static boolean syncOwnsImage(VirtualImage virtualImage) {
+        if (virtualImage.category != 'proxmox.image') {
+            return false
+        }
+        if (virtualImage.systemImage || virtualImage.userUploaded) {
+            return false
+        }
+        return (virtualImage.imageLocations?.size() ?: 0) <= 1
     }
 
 

@@ -483,6 +483,32 @@ class ProxmoxApiComputeUtil {
 
 
 
+    /**
+     * The disk entries resizeVM may add to the VM config: one `<storage>:<sizeG>,size=<size>G`
+     * per non-root volume whose device name is not yet a key of the VM's config. A disk the
+     * VM already has is never re-allocated, whatever its size; disk resizes go through the
+     * resize endpoint. A null config (VM not readable) allocates nothing.
+     */
+    static Map<String, String> disksToAllocate(Map vmConfig, List<StorageVolume> volumes) {
+        Map<String, String> rtn = [:]
+        if (vmConfig == null) {
+            log.warn("VM config not readable; no data disks are allocated")
+            return rtn
+        }
+        volumes?.each { vol ->
+            if (vol.rootVolume || !vol.deviceName) {
+                return
+            }
+            if (vmConfig.containsKey(vol.deviceName)) {
+                log.debug("Disk ${vol.deviceName} exists on the VM; leaving it as it is")
+                return
+            }
+            def size = "${vol.maxStorage as Long / 1024 / 1024 / 1024}"
+            rtn[vol.deviceName as String] = "${vol.datastore.externalId}:$size,size=${size}G".toString()
+        }
+        return rtn
+    }
+
     static resizeVM(HttpApiClient client, Map authConfig, String node, String vmId, Long cpu, Long ram, List<StorageVolume> volumes, List<ComputeServerInterface> nics, String nicModel = NIC_MODEL_LINUX) {
         log.debug("resizeVMCompute")
         Long ramValue = ram / 1024 / 1024
@@ -533,14 +559,14 @@ class ProxmoxApiComputeUtil {
                 ignoreSSL: true
             ]
 
-            volumes.each { vol ->
-                if (!vol.rootVolume) {
-                    def size = "${vol.maxStorage as Long / 1024 / 1024 / 1024}"
-                    opts.body["$vol.deviceName"] = "${vol.datastore.externalId}:$size,size=${size}G"
-                }
-            }
-
             Map vmConfig = getVMConfigById(client, authConfig, vmId, node)
+            // `<storage>:<size>` on a disk key allocates a NEW empty volume and moves the one
+            // the key had to unusedN. Only disks the VM does not have yet may be written that
+            // way (the clone-time data disks); a plan change on a running VM must leave every
+            // existing disk alone, or each data disk is replaced by a blank one.
+            Map<String, String> newDisks = disksToAllocate(vmConfig, volumes)
+            opts.body.putAll(newDisks)
+
             nics.each { nic ->
                 opts.body["$nic.externalId"] = buildNicConfig(vmConfig?.get(nic.externalId)?.toString(), nic.network.externalId, nicModel)
             }
@@ -832,7 +858,8 @@ class ProxmoxApiComputeUtil {
             
             // Fallback: Check each node individually
             log.debug("VM/template $vmId not found in cluster resources, checking nodes individually")
-            List<String> nodes = getProxmoxHypervisorNodeIds(client, authConfig).data
+            ServiceResponse nodeIds = getProxmoxHypervisorNodeIds(client, authConfig)
+            List<String> nodes = nodeIds.success ? (nodeIds.data as List<String>) : []
             
             for (String node : nodes) {
                 try {
@@ -1407,6 +1434,7 @@ class ProxmoxApiComputeUtil {
                         ? vmConfigInfo.data.data
                         : (vmConfigInfo?.data instanceof Map ? vmConfigInfo.data : [:])
                 vm.osCode = morpheusOsCode(vmCfg.ostype as String)
+                vm.uuid = vmUuid(vmCfg)
                 vm.maxCores = (vmConfigInfo?.data?.sockets?.toInteger() ?: 0) * (vmConfigInfo?.data?.cores?.toInteger() ?: 0)
                 vm.coresPerSocket = vmConfigInfo?.data?.cores?.toInteger() ?: 0
 
@@ -1512,6 +1540,33 @@ class ProxmoxApiComputeUtil {
     }
 
 
+    /**
+     * The guest's stable identity from its config: the `uuid=` of `smbios1`, which Proxmox
+     * sets on every clone and keeps for the VM's life, or null when the config has none.
+     * The VMID is not an identity: `cluster/nextid` hands a freed id to the next VM.
+     */
+    static String vmUuid(Map vmConfig) {
+        String smbios = vmConfig?.smbios1?.toString()
+        if (!smbios) {
+            return null
+        }
+        def m = (smbios =~ /(?:^|,)uuid=([0-9a-fA-F-]{36})(?:,|$)/)
+        return m.find() ? m.group(1).toLowerCase() : null
+    }
+
+    /**
+     * Whether a stored identity still names the VM behind an id. True when nothing is stored
+     * (a record from before identities were kept) or when the stored and the actual uuid are
+     * equal; false when the VM behind the id is another guest, or when its uuid cannot be read.
+     */
+    static boolean sameGuest(String storedUuid, Map vmConfig) {
+        if (!storedUuid) {
+            return true
+        }
+        String actual = vmUuid(vmConfig)
+        return actual != null && actual == storedUuid.toLowerCase()
+    }
+
     static ServiceResponse listVMs(HttpApiClient client, Map authConfig) {
         log.debug("API Util listVMs")
         def vms = []
@@ -1549,6 +1604,7 @@ class ProxmoxApiComputeUtil {
                     }
                 }
                 vm.osCode = morpheusOsCode(vmCfg.ostype as String)
+                vm.uuid = vmUuid(vmCfg)
                 vm.maxCores = (vmConfigInfo?.data?.data?.sockets?.toInteger() ?: 0) * (vmConfigInfo?.data?.data?.cores?.toInteger() ?: 0)
                 vm.coresPerSocket = vmConfigInfo?.data?.data?.cores?.toInteger() ?: 0
 
@@ -1635,16 +1691,41 @@ class ProxmoxApiComputeUtil {
 
     static ServiceResponse getProxmoxHypervisorHostByName(HttpApiClient client, Map authConfig, String nodeId) {
         def resp = listProxmoxHypervisorHosts(client, authConfig)
+        if (!resp?.success || !(resp.data instanceof Collection)) {
+            return ServiceResponse.error(resp?.msg ?: "Unable to list the cluster's nodes")
+        }
         def node = resp.data.find { it.node == nodeId }
 
-        return new ServiceResponse(success: resp.success, data: node)
+        return new ServiceResponse(success: true, data: node)
+    }
+
+
+    /**
+     * The cluster's node list, or an error. A failed or empty `nodes` call is an error, never
+     * an empty list: the host and network syncs delete every record that is not in the listing,
+     * so an empty answer during an API outage would wipe the cloud's hosts and networks.
+     */
+    static ServiceResponse listClusterNodes(HttpApiClient client, Map authConfig) {
+        ServiceResponse nodeList = callListApiV2(client, "nodes", authConfig)
+        if (!nodeList?.success || !(nodeList.data instanceof Collection)) {
+            return ServiceResponse.error("Unable to list the cluster's nodes: ${nodeList?.msg ?: 'no response'}")
+        }
+        List<Map> nodes = nodeList.data.findAll { it instanceof Map && it.node }
+        if (!nodes) {
+            return ServiceResponse.error("Unable to list the cluster's nodes: the API returned no node")
+        }
+        return new ServiceResponse(success: true, data: nodes)
     }
 
 
     static ServiceResponse getProxmoxHypervisorNodeIds(HttpApiClient client, Map authConfig) {
         log.debug("listProxmoxHosts...")
 
-        List<String> hvHostIds = callListApiV2(client, "nodes", authConfig).data.collect { it.node as String }
+        ServiceResponse nodes = listClusterNodes(client, authConfig)
+        if (!nodes.success) {
+            return nodes
+        }
+        List<String> hvHostIds = nodes.data.collect { it.node as String }
 
         return new ServiceResponse(success: true, data: hvHostIds)
     }
@@ -1677,7 +1758,11 @@ class ProxmoxApiComputeUtil {
             allDatastores = []
         }
 
-        def nodes = callListApiV2(client, "nodes", authConfig).data
+        ServiceResponse nodeList = listClusterNodes(client, authConfig)
+        if (!nodeList.success) {
+            return nodeList
+        }
+        List<Map> nodes = nodeList.data
         nodes.each { Map hvHost ->
             try {
                 def nodeNetworkInfo = callListApiV2(client, "nodes/$hvHost.node/network", authConfig)

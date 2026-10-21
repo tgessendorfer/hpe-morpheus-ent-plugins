@@ -13,6 +13,86 @@ new number, and why the digests are recorded.
 
 ---
 
+## 0.1.31
+
+Four fixes from a code review of the plugin. All four are in the paths that delete or rewrite
+things: the host and network syncs, the plan resize, the stop and destroy calls, and the image
+sync. None of them changes the API calls of a healthy cloud.
+
+**An API outage no longer deletes the cloud's hosts and networks.** The node listing behind the
+host sync returned success with an empty list when the `nodes` call failed (login refused,
+pveproxy restarting, network blip), and the network listing accepted that empty list as a valid
+cluster. One refresh in that state made the host sync delete every node record and the network
+sync every network, the failure class of the 0.1.21 incident, and VMs lost their parent host.
+Both listings now return an error when the `nodes` call fails or returns no node, and every sync
+that reads them already skips itself on an error. `refresh()` also logs in to the API before any
+sync runs; when that fails, the cloud is reported **offline** instead of `ok`, so the outage shows
+in the cloud status and nothing is synced against it.
+
+**A plan change no longer replaces the VM's data disks with empty ones.** `resizeVM` wrote
+`scsiN: <storage>:<size>` for every non-root volume, on the clone and again on every CPU or
+memory change. On an existing disk key, that syntax makes Proxmox allocate a new empty volume and
+move the old disk to `unusedN`. The 0.1.22 resize test had no data disk, so it did not show. The
+resize now reads the VM config first and only allocates volumes the VM does not have yet (the
+clone-time data disks); a disk the VM already has is left alone whatever its size (disk resizes go
+through the resize endpoint). A VM whose config cannot be read gets no disk allocated.
+
+**Stop and destroy check that the VM is still the guest Morpheus provisioned.** Proxmox hands a
+freed VMID to the next VM (`cluster/nextid`). A managed server whose VM was removed in Proxmox
+kept its record, the sync matched that record to whatever VM took the id next, and deleting the
+instance in Morpheus stopped and destroyed that unrelated guest. The plugin now stores the clone's
+smbios uuid on the server (config key `proxmoxUuid`) at provision time. Stop, stop server and
+destroy read the VM config and refuse when the uuid differs (or cannot be read), with the message
+*VM N is another guest now (uuid …, expected …); the id was reused in Proxmox. Nothing was
+changed.* The VM sync carries the uuid in every listing, flags a managed record whose VMID now
+belongs to another guest in its status message, and adopts the uuid for a server provisioned
+before this version as long as the VM still has the name it was provisioned with. A managed VM
+that is gone from Proxmox is no longer silently kept as if it were there: the sync marks it
+*VM N no longer exists in Proxmox* and powered off. It is not deleted from Morpheus; the operator
+decides.
+
+**A template that disappears no longer deletes the image a user uploaded.** When a Proxmox
+template was gone, the image sync removed its location and, for any image with one location that
+was not a system image, the VirtualImage itself. That included user-uploaded qcow2 images, whose
+template the plugin created on first provision: deleting that template in the Proxmox UI (to free
+space, for example) deleted the user's image from Morpheus on the next refresh. The sync now
+deletes an image only when it is its own record of a Proxmox template: category `proxmox.image`,
+not a system image, not user-uploaded, and this cloud's location its only one. Every other image
+loses the location and is kept, with an INFO line that says so.
+
+**Behaviour changes from 0.1.30:**
+
+- A cloud whose API login fails shows `offline` after the refresh instead of `ok`.
+- A managed server whose VM is gone from Proxmox shows the status message *VM N no longer exists
+  in Proxmox* and `off`; before, it kept its last state. Deleting the instance still works (the
+  destroy finds no VM and reports nothing to destroy).
+- Stop and destroy of a server provisioned by 0.1.31 fail when the VM behind its id is another
+  guest. Servers from earlier versions are checked only after the sync has adopted their uuid.
+- `clean()` (run by cloud delete) is unchanged and still selects `proxmox.image` images of every
+  cloud; this is a known open item.
+
+**Build:** the test classpath gains `jackson-databind` 2.15.3, as the LLM plugins have: Spock
+inspects the model classes a condition calls, and `ComputeServer`'s methods reference Jackson,
+which the plugin API does not bring transitively. Without it `compileTestGroovy` failed with
+`NoClassDefFoundError: com.fasterxml.jackson.core.JsonProcessingException`. No change to the jar.
+
+### Verified
+
+- Local build with JDK 17 and Gradle 9.8.0: 77 test cases (24 new: disk allocation against an
+  existing config, uuid parsing and comparison, the sync's uuid adoption and mismatch flag, the
+  image ownership rule), 0 failures.
+
+### Not yet verified
+
+- On the lab appliance: a refresh during a Proxmox outage reporting `offline` and keeping hosts
+  and networks; a plan change on a VM with a data disk keeping the disk; the uuid stored at
+  provision and adopted by the sync for the existing managed VM; the refusal after a VMID reuse;
+  a deleted template keeping an uploaded image.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.30-lab...proxmox-ve-v0.1.31-lab
+
+---
+
 ## 0.1.30
 
 **Discovered VMs and LXC containers get a service plan, so Morpheus prices their usage.** With

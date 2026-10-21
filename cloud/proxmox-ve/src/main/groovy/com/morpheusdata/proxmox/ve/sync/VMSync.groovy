@@ -14,6 +14,7 @@ import com.morpheusdata.model.MetadataTagType
 import com.morpheusdata.model.OsType
 import com.morpheusdata.model.projection.ComputeServerIdentityProjection
 import com.morpheusdata.proxmox.ve.ProxmoxVePlugin
+import com.morpheusdata.proxmox.ve.ProxmoxVeProvisionProvider
 import com.morpheusdata.proxmox.ve.util.ProxmoxApiComputeUtil
 import com.morpheusdata.proxmox.ve.util.ProxmoxMiscUtil
 import groovy.util.logging.Slf4j
@@ -33,6 +34,7 @@ class VMSync {
     private Map authConfig
     private GuestPlanResolver planResolver
     private static final String UNMANAGED_SERVER_CODE = 'proxmox-qemu-vm-unmanaged'
+    private static final String MANAGED_SERVER_CODE = 'proxmox-qemu-vm'
 
     VMSync(ProxmoxVePlugin proxmoxVePlugin, Cloud cloud, HttpApiClient apiClient, CloudProvider cloudProvider) {
         this.@plugin = proxmoxVePlugin
@@ -234,6 +236,10 @@ class VMSync {
                     needsUpdate = true
                 }
 
+                if (existingItem.computeServerType?.code == MANAGED_SERVER_CODE && trackIdentity(existingItem, cloudItem)) {
+                    needsUpdate = true
+                }
+
                 if (needsUpdate) {
                     updates << existingItem
                 }
@@ -253,7 +259,67 @@ class VMSync {
     }
 
 
+    /**
+     * Keeps the managed server's record in step with the VM's smbios uuid. A record with no
+     * stored uuid (provisioned before 0.1.31) adopts the VM's uuid once, but only while the VM
+     * still carries the name it was provisioned with. A stored uuid that differs from the VM's
+     * means the VMID was freed and reused: the record is flagged, so the operator sees it, and
+     * the provision provider refuses to stop or destroy that VM. Returns true when the record
+     * changed.
+     */
+    static boolean trackIdentity(ComputeServer existingItem, Map cloudItem) {
+        String actual = cloudItem?.uuid
+        if (!actual) {
+            return false
+        }
+        String stored = existingItem.getConfigProperty(ProxmoxVeProvisionProvider.GUEST_UUID_PROPERTY)
+        if (!stored) {
+            if (cloudItem.name && cloudItem.name == existingItem.name) {
+                existingItem.setConfigProperty(ProxmoxVeProvisionProvider.GUEST_UUID_PROPERTY, actual)
+                return true
+            }
+            return false
+        }
+        if (stored.toLowerCase() == actual.toLowerCase()) {
+            return false
+        }
+        String message = "VM ${cloudItem.vmid} is another guest now (uuid ${actual}, expected ${stored}); the id was reused in Proxmox"
+        if (existingItem.statusMessage != message) {
+            log.warn("Server ${existingItem.name}: ${message}")
+            existingItem.statusMessage = message
+            return true
+        }
+        return false
+    }
+
+
     private removeMissingVMs(List<ComputeServerIdentityProjection> removeItems) {
+        // A managed VM that is gone from Proxmox is not deleted from Morpheus: the operator
+        // decides. The record is flagged and powered off, so it is not matched to the next
+        // VM that takes the freed id, and stop or destroy find nothing to act on.
+        def missingManaged = context.services.computeServer.listIdentityProjections(
+                new DataQuery().withFilter("id", "in", removeItems.collect { it.id })
+                        .withFilter("computeServerType.code", MANAGED_SERVER_CODE)
+        )
+        if (missingManaged) {
+            try {
+                List<ComputeServer> flagged = []
+                context.async.computeServer.listById(missingManaged.collect { it.id }).blockingSubscribe { ComputeServer server ->
+                    String message = "VM ${server.externalId} no longer exists in Proxmox"
+                    if (server.statusMessage != message || server.powerState != ComputeServer.PowerState.off) {
+                        log.warn("Managed server ${server.name}: ${message}")
+                        server.statusMessage = message
+                        server.powerState = ComputeServer.PowerState.off
+                        flagged << server
+                    }
+                }
+                if (flagged) {
+                    context.async.computeServer.bulkSave(flagged).blockingGet()
+                }
+            } catch (e) {
+                log.error("Error flagging managed VMs missing in Proxmox: ${e}", e)
+            }
+        }
         def removeUnmanagedItems = context.services.computeServer.listIdentityProjections(
                 new DataQuery().withFilter("id", "in", removeItems.collect { it.id })
                         .withFilter("computeServerType.code", UNMANAGED_SERVER_CODE)
