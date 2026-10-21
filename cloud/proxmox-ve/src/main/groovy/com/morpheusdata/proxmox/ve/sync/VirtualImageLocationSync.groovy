@@ -335,27 +335,42 @@ class VirtualImageLocationSync {
     }
 
 
+    /**
+     * Cloud delete: drops this cloud's image locations and the images the sync created for
+     * them, nothing else. The selection goes through the locations of this cloud (refType
+     * ComputeZone, refId cloud.id): an image is deleted only when it is the sync's own record
+     * of a Proxmox template and this cloud's location is its only one (syncOwnsImage); an image
+     * that is also located in another cloud, a system image or an uploaded one loses only this
+     * cloud's location. Before 0.1.32 this selected every `proxmox.image` image of every cloud
+     * and tenant, so deleting one Proxmox cloud deleted the templates of all the others.
+     */
     public clean() {
+        List<VirtualImageLocationIdentityProjection> locations = context.async.virtualImage.location
+                .listIdentityProjections(new DataQuery().withFilters([
+                        new DataFilter("refType", "ComputeZone"),
+                        new DataFilter("refId", cloud.id)
+                ])).toList().blockingGet()
+        if (!locations) {
+            log.info("Cloud ${cloud.name}: no image locations to clean")
+            return
+        }
+        Map<Long, VirtualImage> imagesById = context.async.virtualImage
+                .listById(locations.collect { it.virtualImage.id }.unique()).toMap { it.id }.blockingGet()
 
-        Observable domainRecords = context.async.virtualImage.list(new DataQuery().withFilters([
-                new DataFilter<String>("category", "proxmox.image"),
-                new DataOrFilter(
-                        new DataFilter<Boolean>("systemImage", false),
-                        new DataOrFilter(
-                                new DataFilter("owner", null),
-                                new DataFilter<Long>("owner.id", cloud.owner.id)
-                        )
-                )
-        ]))
-
-        Collection<VirtualImageIdentityProjection> imagesToDelete = []
-        domainRecords.blockingIterable().each {virtualImage ->
-            if (virtualImage.imageLocations.size() == 1 && !virtualImage.systemImage) {
-                log.info("Virtual Image To Remove: $virtualImage.name($virtualImage.externalId)")
-                imagesToDelete << virtualImage
+        Collection<VirtualImage> imagesToDelete = []
+        locations.each { location ->
+            VirtualImage image = imagesById[location.virtualImage.id]
+            if (image && syncOwnsImage(image)) {
+                log.info("Cloud ${cloud.name}: removing synced image ${image.name}(${image.externalId}) with its location")
+                imagesToDelete << image
+            } else if (image) {
+                log.info("Cloud ${cloud.name}: removing the location of image '${image.name}', image kept")
             }
         }
 
-        context.async.virtualImage.bulkRemove(imagesToDelete).blockingGet()
+        context.async.virtualImage.location.bulkRemove(locations).blockingGet()
+        if (imagesToDelete) {
+            context.async.virtualImage.bulkRemove(imagesToDelete.unique { it.id }).blockingGet()
+        }
     }
 }

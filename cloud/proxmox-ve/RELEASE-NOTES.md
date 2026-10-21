@@ -13,6 +13,25 @@ new number, and why the digests are recorded.
 
 ---
 
+## 0.1.32
+
+**Deleting a Proxmox cloud no longer deletes the images of every other Proxmox cloud.** The
+cloud-delete cleanup selected every `proxmox.image` image in the appliance, across clouds and
+tenants, and removed each one that had a single location. Deleting one Proxmox cloud therefore
+deleted the synced templates of all the others, and the layouts and node types that referenced
+them broke. The cleanup now starts from this cloud's image locations (`refType` ComputeZone,
+`refId` the cloud): every such location is removed; the image behind it is deleted only when it
+is the sync's own record of a Proxmox template with this cloud's location as its only one (the
+same rule 0.1.31 introduced for a vanished template). Images located in other clouds, system
+images and uploaded images keep existing and lose only this cloud's location; each case is
+logged at INFO.
+
+No other change. Not yet verified on the lab: a cloud delete has not been run there.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.31-lab...proxmox-ve-v0.1.32-lab
+
+---
+
 ## 0.1.31
 
 Four fixes from a code review of the plugin. All four are in the paths that delete or rewrite
