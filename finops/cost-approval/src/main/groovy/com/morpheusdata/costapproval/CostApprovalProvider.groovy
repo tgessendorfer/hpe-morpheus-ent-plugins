@@ -217,7 +217,9 @@ class CostApprovalProvider implements ApprovalProvider {
 		def conn = null
 		try {
 			conn = morpheus?.report?.getReadOnlyDatabaseConnection()?.blockingGet()
-			return conn ? StoredDecisions.load(new Sql(conn), integration.id) : []
+			List<Request> stored = conn ? StoredDecisions.load(new Sql(conn), integration.id) : []
+			log.debug("Cost threshold approval: ${stored.size()} stored open decision(s) for integration ${integration.id}")
+			return stored
 		} catch (Exception e) {
 			String line = "Cost threshold approval: stored decisions of integration ${integration.id} not readable, reporting in-memory decisions only: ${e.message}"
 			if (storedReadWarned.compareAndSet(false, true)) {

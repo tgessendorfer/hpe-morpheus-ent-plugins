@@ -43,9 +43,10 @@ class StoredDecisionsSpec extends Specification {
 		1 * sql.rows(StoredDecisions.OPEN_DECISIONS_SQL, [7L]) >> []
 		0 * sql._
 		reports == []
-		StoredDecisions.OPEN_DECISIONS_SQL.contains('r.account_integration_id = ?')
-		StoredDecisions.OPEN_DECISIONS_SQL.contains("rr.status IN ('requesting', 'requested')")
-		StoredDecisions.OPEN_DECISIONS_SQL.endsWith('LIMIT 1000')
+		StoredDecisions.OPEN_DECISIONS_SQL.count('?') == 1
+		StoredDecisions.OPEN_DECISIONS_SQL.contains('o.account_integration_id = ?')
+		StoredDecisions.OPEN_DECISIONS_SQL.contains("orr.status IN ('requesting', 'requested')")
+		StoredDecisions.OPEN_DECISIONS_SQL.contains('ORDER BY o.id DESC LIMIT 500')
 	}
 
 	def "no connection or no integration id reads nothing"() {

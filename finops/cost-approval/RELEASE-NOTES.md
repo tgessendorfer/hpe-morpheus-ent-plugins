@@ -24,8 +24,8 @@ minimum appliance 9.0.2 are unchanged; no new options.
   `ca-<uuid>-r` for rejected. Each monitor run reads the integration's open requests (references
   still `requesting` or `requested`, external id starting with `ca-`) from the internal tables
   `request` and `request_reference` with one parameterised query over the read-only report
-  connection, at most 1,000 rows, and reports their decisions again with the same external ids and
-  names as the original answer. The in-memory reports stay as the fast path for decisions Morpheus
+  connection, the newest 500 such requests, and reports their decisions again with the same
+  external ids, names and references as the original answer. The in-memory reports stay as the fast path for decisions Morpheus
   has not stored yet; a request found in both is reported once.
 - **The external id uses the full random UUID** instead of its first 8 hex digits (32 bits), which
   made a collision likely at around 10,000 requests per integration.

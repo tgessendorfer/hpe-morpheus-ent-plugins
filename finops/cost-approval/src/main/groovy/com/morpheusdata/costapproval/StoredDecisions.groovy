@@ -32,16 +32,27 @@ class StoredDecisions {
 	static final String APPROVED_SUFFIX = '-a'
 	static final String REJECTED_SUFFIX = '-r'
 
-	/** Bounds one monitor run; open requests are taken over by Morpheus within a run or two. */
-	static final int MAX_ROWS = 1000
+	/**
+	 * Bounds one monitor run to the newest open requests; Morpheus takes a decision over within
+	 * a run or two, so only requests it never settles could pile up, and they never crowd out
+	 * newer ones.
+	 */
+	static final int MAX_REQUESTS = 500
 
-	/** Parameterised; only references Morpheus has not decided yet ('requesting', 'requested'). */
+	/**
+	 * Parameterised. The newest requests of the integration that still have a reference Morpheus
+	 * has not decided ('requesting', 'requested'), then every reference of each, in the order of
+	 * the original answer, so each one gets back the external id the answer gave it.
+	 */
 	static final String OPEN_DECISIONS_SQL = '''SELECT r.external_id AS request_external_id, r.external_name AS request_external_name,
 		rr.ref_id, rr.ref_type, rr.name, rr.external_id, rr.external_name
-		FROM request r JOIN request_reference rr ON rr.request_id = r.id
-		WHERE r.account_integration_id = ? AND r.external_id LIKE 'ca-%'
-		AND rr.status IN ('requesting', 'requested')
-		ORDER BY r.id, rr.id LIMIT ''' + MAX_ROWS
+		FROM (SELECT DISTINCT o.id FROM request o JOIN request_reference orr ON orr.request_id = o.id
+			WHERE o.account_integration_id = ? AND o.external_id LIKE 'ca-%'
+			AND orr.status IN ('requesting', 'requested')
+			ORDER BY o.id DESC LIMIT ''' + MAX_REQUESTS + ''') recent
+		JOIN request r ON r.id = recent.id
+		JOIN request_reference rr ON rr.request_id = r.id
+		ORDER BY r.id, rr.id'''
 
 	/** The external request id for a new decision: prefix, a full random UUID, decision suffix. */
 	static String newRequestId(String prefix, boolean approved) {
@@ -61,8 +72,9 @@ class StoredDecisions {
 
 	/**
 	 * The open requests of one integration that carry a decision, in the shape monitorApproval
-	 * reports: the same external ids and names as the createApprovalRequest response. A reference
-	 * stored without an external id gets the one the response gave it (request id and position).
+	 * reports: the same external ids, names and references as the createApprovalRequest response.
+	 * A reference stored without an external id gets the one the response gave it (request id and
+	 * position among all references of the request).
 	 */
 	static List<Request> load(Sql sql, Long integrationId) {
 		if (sql == null || integrationId == null) {
