@@ -457,11 +457,14 @@ class CostApprovalProviderSpec extends Specification {
 		rsp.references*.status == [RequestReference.ApprovalStatus.approved]
 		rsp.externalRequestId.endsWith('-a')
 		rsp.msg == 'Approved automatically: no cost check for this request type'
-		rsp.externalRequestName == "Approved automatically: the cost threshold applies to provisioning, app and reconfigure requests only (${type})"
+		rsp.externalRequestName == "Approved automatically: the cost threshold applies to provisioning, app and reconfigure requests only (${label})"
 
 		where:
-		type << [Request.ApprovalRequestType.INSTANCE_DELETE_APPROVAL_TYPE, Request.ApprovalRequestType.APP_DELETE_APPROVAL_TYPE,
-			Request.ApprovalRequestType.EXTENSION_APPROVAL_TYPE, Request.ApprovalRequestType.SHUTDOWN_EXTENSION_APPROVAL_TYPE]
+		type                                                         || label
+		Request.ApprovalRequestType.INSTANCE_DELETE_APPROVAL_TYPE    || 'Instance Delete Approval'
+		Request.ApprovalRequestType.APP_DELETE_APPROVAL_TYPE         || 'App Delete Approval'
+		Request.ApprovalRequestType.EXTENSION_APPROVAL_TYPE          || 'Extension Approval'
+		Request.ApprovalRequestType.SHUTDOWN_EXTENSION_APPROVAL_TYPE || 'Shutdown Extension Approval'
 	}
 
 	def "provisioning, app and reconfigure requests are still checked against the threshold"() {
@@ -500,6 +503,9 @@ class CostApprovalProviderSpec extends Specification {
 
 	def "a request whose type cannot be read is checked"() {
 		expect:
+		CostApprovalLogic.typeLabel('INSTANCE_DELETE_APPROVAL_TYPE') == 'Instance Delete Approval'
+		CostApprovalLogic.typeLabel('Workflow Approval') == 'Workflow Approval'
+		CostApprovalLogic.typeLabel(null) == null
 		CostApprovalLogic.isCostChecked(null)
 		CostApprovalLogic.requestType(new Request(refs: [])) == null
 		!CostApprovalLogic.isCostChecked('INSTANCE_DELETE_APPROVAL_TYPE')

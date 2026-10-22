@@ -316,7 +316,19 @@ class CostApprovalLogic {
 
 	/** The decision for a request whose type is not cost-checked: approved, nothing compared. */
 	static Decision notChecked(String requestType) {
-		return new Decision(outcome: Outcome.NOT_CHECKED, requestType: requestType)
+		return new Decision(outcome: Outcome.NOT_CHECKED, requestType: typeLabel(requestType))
+	}
+
+	/**
+	 * The request type as Morpheus shows it: the plugin API enum INSTANCE_DELETE_APPROVAL_TYPE
+	 * becomes Instance Delete Approval; a domain name such as Workflow Approval stays as it is.
+	 */
+	static String typeLabel(String requestType) {
+		if (requestType == null || !(requestType ==~ /[A-Z0-9_]+/)) {
+			return requestType
+		}
+		return requestType.replaceAll(/_TYPE$/, '').split('_').findAll { it }
+			.collect { String word -> word.substring(0, 1) + word.substring(1).toLowerCase(Locale.ROOT) }.join(' ')
 	}
 
 	static Decision decide(BigDecimal price, String priceCurrency, List<String> refCurrencies,

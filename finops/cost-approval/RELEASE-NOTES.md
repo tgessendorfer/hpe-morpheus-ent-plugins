@@ -23,7 +23,7 @@ extensions and workflow runs are approved.** Plugin code, provider code, option 
   provisioning of an instance, app or cluster, a server added to a cluster, and reconfigure of an
   instance, server or app. Every other type is approved at once, with *Approved automatically: the
   cost threshold applies to provisioning, app and reconfigure requests only (<type>)* as the
-  request name (German: *Automatisch freigegeben: Die Kostenschwelle gilt nur für Bereitstellungs-,
+  request name, with the type as Morpheus shows it (*Instance Delete Approval*) (German: *Automatisch freigegeben: Die Kostenschwelle gilt nur für Bereitstellungs-,
   App- und Rekonfigurationsanfragen*), and one log line naming the type.
 - **A request whose type cannot be read is checked**, as before, so nothing is waved through only
   because its type is unknown.
@@ -45,11 +45,19 @@ extensions and workflow runs are approved.** Plugin code, provider code, option 
   the same way; both bundles carry the new keys.
 - Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --warning-mode all`, 131 tests,
   0 failures.
+- **On Morpheus 9.1.0 (build 9.1.0-1)** with release candidates built from this source and a test
+  integration with a 10 EUR threshold, both policies scoped to one cloud:
+  - *Approve Delete*: deleting a running instance priced at 12.50 EUR per month was approved at
+    once (`1.2.2-rc.1`); Morpheus hands the type over as the plugin API enum
+    `INSTANCE_DELETE_APPROVAL_TYPE`. At the next monitor run (about 3 minutes) the instance was
+    deleted. The enum name in the request text led to the readable label in `1.2.2-rc.2`.
+  - *Approve Provision* (`1.2.2-rc.2`): a new instance at 12.50 EUR per month was rejected with
+    the usual reason and became `denied` at the next monitor run (about 4 minutes).
+  - Test policies, instances and integration were deleted afterwards.
 
 ### Not yet verified
 
-- On an appliance: which of the two places carries the type at runtime, a delete request through
-  an *Approve Delete* policy, and that an *Approve Provision* request is still checked.
+- App, cluster, reconfigure, extension and workflow requests on an appliance (unit tests only).
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.2.1...cost-approval-v1.2.2
 
