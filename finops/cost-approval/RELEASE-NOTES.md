@@ -52,13 +52,20 @@ minimum appliance 9.0.2 are unchanged; no new options.
   memory and stored is reported once; without a Morpheus context the monitor run still works.
 - Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --warning-mode all`, 115 tests,
   0 failures.
+- **On Morpheus 9.1.0 (build 9.1.0-1), the reload case end to end**, with release candidates built
+  from this source: an *Approve Provision* policy on one cloud with a 10 EUR integration threshold;
+  a request for 12.50 EUR per month was rejected by `1.2.1-rc.1`, and `1.2.1-rc.2` was uploaded
+  within a second, before any monitor run, so the decision was no longer in memory. Morpheus stored
+  the external ids as answered (`ca-<uuid>-r`, item `ca-<uuid>-r-0`) with the item still
+  `requested`; the next monitor run, about four minutes later, read it back through the new query
+  (no warning in the log), the item became `rejected` and the instance `denied`. Test policy,
+  instance and integration were deleted afterwards.
 
 ### Not yet verified
 
-- **The table and column names are read from Morpheus' domain classes (GORM default naming), not
-  from a live database.** Not run on an appliance yet: the query, the stored external ids, and that
-  Morpheus takes over a decision reported by a new plugin instance after a jar upload.
-- On Morpheus 9.1.0.
+- The approved path after a reload (same code path, other suffix) and requests with several
+  references.
+- On Morpheus 9.0.2.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.2.0...cost-approval-v1.2.1
 
