@@ -76,7 +76,11 @@ class OpenAiProvider implements LlmProvider {
 	static final int REASONING_MIN_OUTPUT_TOKENS = 8192
 	// Catalog entries that are no chat model: api.openai.com lists embeddings, speech,
 	// images, moderation and legacy completion models under the same /models.
-	static final Pattern NON_CHAT_MODEL_ID = ~/(?i)(?:^|[\/:.-])(?:embedding|embed|batch|whisper|tts|transcribe|dall-e|image|moderation|realtime|audio|sora|babbage|davinci|instruct|computer-use|search|rerank|guard)(?:$|[\/:.-])/
+	static final Pattern NON_CHAT_MODEL_ID = ~/(?i)(?:^|[\/:.-])(?:embedding|embed|batch|whisper|tts|transcribe|dall-e|image|moderation|realtime|audio|sora|babbage|davinci|computer-use|search|rerank|guard)(?:$|[\/:.-])/
+	// OpenAI's legacy completion model, with or without a vendor prefix. Not a bare
+	// "instruct": open-weight chat models are named *-Instruct (Llama-3.3-70B-Instruct
+	// on vLLM, llama3.1:8b-instruct-q4_K_M on Ollama) and must stay listed.
+	static final Pattern LEGACY_COMPLETION_MODEL_ID = ~/(?i)^(?:[\w.-]+\/)?gpt-3\.5-turbo-instruct(?:$|[:.-])/
 	// The one endpoint whose model list answers any key, so the key is checked on its own there.
 	static final Pattern OPENROUTER_HOST = ~/(?i)^https?:\/\/([\w-]+\.)*openrouter\.ai(\/|$)/
 	static final String REASONING_EFFORT_DEFAULT = 'default'
@@ -1112,7 +1116,7 @@ class OpenAiProvider implements LlmProvider {
 		if (!id) {
 			return false
 		}
-		if (NON_CHAT_MODEL_ID.matcher(id).find()) {
+		if (NON_CHAT_MODEL_ID.matcher(id).find() || LEGACY_COMPLETION_MODEL_ID.matcher(id).find()) {
 			return false
 		}
 		List<String> parameters = supportedParameters(entry)

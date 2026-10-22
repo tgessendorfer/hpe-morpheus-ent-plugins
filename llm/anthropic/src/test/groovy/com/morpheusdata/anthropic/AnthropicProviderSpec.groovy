@@ -1647,4 +1647,126 @@ class AnthropicProviderSpec extends Specification {
 		cleanup:
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
 	}
+
+	private static LlmChatRequest toolLoop(String toolCallId) {
+		new LlmChatRequest(messages: [
+			message('user', 'List the AWS servers'),
+			message('assistant', 'Checking.', [tool_calls: [[id: toolCallId, type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '{"total":3}', [tool_call_id: toolCallId])
+		])
+	}
+
+	def "with thinking on, a tool loop gets the thinking blocks of its tool-call turn back, signature included"() {
+		given: 'a response that thought, then called a tool'
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+		provider.parseMessageResponse([id: 'msg_1', role: 'assistant', stop_reason: 'tool_use', content: [
+			[type: 'thinking', thinking: 'I should list the servers.', signature: 'sig-abc'],
+			[type: 'redacted_thinking', data: 'opaque'],
+			[type: 'text', text: 'Checking.'],
+			[type: 'tool_use', id: 'toolu_01AbCdEfGhIjKlMn', name: 'list_servers', input: [:]]
+		]])
+
+		when: 'Morpheus sends the loop back, rebuilt from its stored tool_calls'
+		Map body = provider.buildMessagesRequestBody(toolLoop('toolu_01AbCdEfGhIjKlMn'), configured([thinkingEnabled: 'on']), false)
+
+		then:
+		body.thinking.type == 'enabled'
+		body.messages[1].role == 'assistant'
+		body.messages[1].content*.type == ['thinking', 'redacted_thinking', 'text', 'tool_use']
+		body.messages[1].content[0] == [type: 'thinking', thinking: 'I should list the servers.', signature: 'sig-abc']
+		body.messages[1].content[1] == [type: 'redacted_thinking', data: 'opaque']
+
+		cleanup:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+	}
+
+	def "with thinking on but the loop's thinking blocks unknown, the request goes out without thinking instead of failing"() {
+		given:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+
+		when:
+		Map body = provider.buildMessagesRequestBody(toolLoop('toolu_01UnknownToolCallId'), configured([thinkingEnabled: 'on']), false)
+
+		then:
+		!body.containsKey('thinking')
+		body.messages[1].content*.type == ['text', 'tool_use']
+	}
+
+	def "with thinking off, remembered thinking blocks are never sent"() {
+		given:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+		AnthropicProvider.rememberThinking(['toolu_01AbCdEfGhIjKlMn'], [[type: 'thinking', thinking: 't', signature: 's']])
+
+		when:
+		Map body = provider.buildMessagesRequestBody(toolLoop('toolu_01AbCdEfGhIjKlMn'), integration, false)
+
+		then:
+		!body.containsKey('thinking')
+		body.messages[1].content*.type == ['text', 'tool_use']
+
+		cleanup:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+	}
+
+	def "a new question after a finished tool loop keeps thinking although the old loop's blocks are unknown"() {
+		given:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+		LlmChatRequest request = new LlmChatRequest(messages: toolLoop('toolu_01UnknownToolCallId').messages + [
+			message('assistant', 'There are 3 servers.'),
+			message('user', 'And in Azure?')
+		])
+
+		when:
+		Map body = provider.buildMessagesRequestBody(request, configured([thinkingEnabled: 'on']), false)
+
+		then:
+		body.thinking.type == 'enabled'
+	}
+
+	def "numbered tool call ids are not trusted for thinking blocks either"() {
+		given:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+
+		when:
+		AnthropicProvider.rememberThinking(['call_0', 'functions.list_servers:0'], [[type: 'thinking', thinking: 't', signature: 's']])
+
+		then:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.isEmpty()
+	}
+
+	def "a loop with several tool rounds keeps thinking: only its first tool-call message carries thinking"() {
+		given: 'round 1 thought and called a tool; round 2 called the next tool without thinking'
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+		provider.parseMessageResponse([role: 'assistant', stop_reason: 'tool_use', content: [
+			[type: 'thinking', thinking: 'List first.', signature: 'sig-1'],
+			[type: 'tool_use', id: 'toolu_01AbCdEfGhIjKlMn', name: 'list_servers', input: [:]]]])
+		provider.parseMessageResponse([role: 'assistant', stop_reason: 'tool_use', content: [
+			[type: 'tool_use', id: 'toolu_02OpQrStUvWxYzAb', name: 'get_server', input: [id: 1]]]])
+		LlmChatRequest round3 = new LlmChatRequest(messages: toolLoop('toolu_01AbCdEfGhIjKlMn').messages + [
+			message('assistant', null, [tool_calls: [[id: 'toolu_02OpQrStUvWxYzAb', type: 'function', function: [name: 'get_server', arguments: '{"id":1}']]]]),
+			message('tool', '{"name":"web-1"}', [tool_call_id: 'toolu_02OpQrStUvWxYzAb'])
+		])
+
+		when:
+		Map body = provider.buildMessagesRequestBody(round3, configured([thinkingEnabled: 'on']), false)
+
+		then:
+		body.thinking.type == 'enabled'
+		body.messages[1].content*.type == ['thinking', 'text', 'tool_use']
+		body.messages[3].content*.type == ['tool_use']
+
+		cleanup:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+	}
+
+	def "a thinking block without its signature is not remembered"() {
+		given:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+
+		when:
+		AnthropicProvider.rememberThinking(['toolu_01AbCdEfGhIjKlMn'], [[type: 'thinking', thinking: 't', signature: null]])
+
+		then:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.isEmpty()
+	}
 }

@@ -66,7 +66,7 @@ Plugins > Add*. The plugin registers two providers: `LLM OpenRouter` and `OPTION
 | **Credentials** | *Local Credentials* with the key below, or an *API Key* credential from *Infrastructure > Trust > Credentials* (a 73-character OpenRouter key fits there) |
 | **Route Outbound Calls Through a Proxy** | off means a direct connection; see [Network proxy](#network-proxy) |
 | **Network Proxy** | the proxy to use when the box above is ticked |
-| **Default Max Output Tokens** | leave empty to let each model use its own maximum. Reasoning tokens count against a limit set here |
+| **Default Max Output Tokens** | a floor over what the caller asks for: Morpheus asks for 1000 on every chat request, so a value here raises that, and a larger request is kept. Leave empty to send what the caller asks for. Reasoning tokens count against the limit |
 | **Reasoning Effort** | *Model default* sends nothing; see [Reasoning](#reasoning) |
 | **List Anthropic Models** | off; Claude belongs in the Anthropic plugin |
 | **List Free Variants** | off; see [Which models are listed](#which-models-are-listed) |

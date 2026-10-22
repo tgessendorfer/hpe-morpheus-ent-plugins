@@ -281,7 +281,7 @@ class OpenRouterProvider implements LlmProvider {
 			inputType: OptionType.InputType.NUMBER,
 			displayOrder: 5,
 			required: false,
-			helpText: 'Sent as max_tokens when the caller does not supply a limit. Leave empty to let each model use its own maximum. Reasoning tokens count against this limit, so a low value can cut off the answers of reasoning models.'
+			helpText: 'Sent as max_tokens when the caller asks for less or for no limit; Morpheus asks for 1000 on every chat request. A larger request from the caller is kept. Leave empty to send what the caller asks for, or nothing so each model uses its own maximum. Reasoning tokens count against this limit, so a low value can cut off the answers of reasoning models.'
 		)
 
 		optionTypes << new OptionType(
@@ -748,7 +748,7 @@ class OpenRouterProvider implements LlmProvider {
 		}
 		requestBody.messages = messages
 
-		Integer maxTokens = request.maxOutputTokens ?: resolveDefaultMaxOutputTokens(accountIntegration)
+		Integer maxTokens = resolveMaxTokens(request.maxOutputTokens, accountIntegration)
 		if (maxTokens) {
 			requestBody.max_tokens = maxTokens
 		}
@@ -1550,6 +1550,20 @@ class OpenRouterProvider implements LlmProvider {
 			return url + '/api/v1'
 		}
 		return url
+	}
+
+	/**
+	 * The configured default is a floor: Morpheus asks for 1000 output tokens on every chat
+	 * request, which would otherwise always win. A larger request is kept; without a configured
+	 * default the request goes out as asked, or without max_tokens.
+	 */
+	protected Integer resolveMaxTokens(Integer requested, AccountIntegration accountIntegration) {
+		Integer floor = resolveDefaultMaxOutputTokens(accountIntegration)
+		Integer asked = (requested != null && requested > 0) ? requested : null
+		if (floor == null) {
+			return asked
+		}
+		return (asked != null && asked > floor) ? asked : floor
 	}
 
 	/** Null when nothing usable is configured, so each model keeps its own maximum. */

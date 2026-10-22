@@ -606,7 +606,7 @@ class OpenRouterProviderSpec extends Specification {
 		!body.containsKey('tool_choice')
 	}
 
-	def "max_tokens comes from the request, then from the integration, else it is left out"() {
+	def "the integration's max_tokens is a floor over the request; without it the request is sent as asked"() {
 		given:
 		LlmChatRequest request = new LlmChatRequest(model: 'm', maxOutputTokens: requested, messages: [message('user', 'hi')])
 
@@ -615,8 +615,13 @@ class OpenRouterProviderSpec extends Specification {
 
 		where:
 		requested | configuredValue || expected
-		1000      | '4096'          || 1000
+		1000      | '4096'          || 4096
+		8192      | '4096'          || 8192
+		4096      | '4096'          || 4096
 		null      | '4096'          || 4096
+		0         | '4096'          || 4096
+		1000      | null            || 1000
+		1000      | '0'             || 1000
 		null      | null            || null
 		null      | '0'             || null
 	}

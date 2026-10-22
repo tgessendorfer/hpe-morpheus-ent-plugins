@@ -969,6 +969,20 @@ class OpenAiProviderSpec extends Specification {
 		models.every { it.contextWindow == null && it.maxOutputTokens == null && it.modelType == 'chat' && it.enabled }
 	}
 
+	def "open-weight *-Instruct chat models stay listed; only OpenAI's legacy instruct model is dropped"() {
+		given: 'what vLLM, Ollama and LiteLLM list (ids only) and an OpenRouter entry with metadata'
+		Map catalog = [data: ['meta-llama/Llama-3.3-70B-Instruct', 'llama3.1:8b-instruct-q4_K_M', 'Qwen/Qwen2.5-72B-Instruct',
+							  'gpt-3.5-turbo-instruct', 'gpt-3.5-turbo-instruct-0914', 'openai/gpt-3.5-turbo-instruct']
+			.collect { [id: it, object: 'model'] } + [catalogEntry('mistralai/mistral-small-3.2-24b-instruct')]]
+
+		when:
+		List<LlmModel> models = provider.buildModelsFromApiResponse(new LlmIntegration(accountIntegration: integration), catalog)
+
+		then:
+		models*.code as Set == ['meta-llama/Llama-3.3-70B-Instruct', 'llama3.1:8b-instruct-q4_K_M', 'Qwen/Qwen2.5-72B-Instruct',
+								'mistralai/mistral-small-3.2-24b-instruct'] as Set
+	}
+
 	def "a model is described by its catalog entry"() {
 		given:
 		LlmIntegration llmIntegration = new LlmIntegration(accountIntegration: integration)

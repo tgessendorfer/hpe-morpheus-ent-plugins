@@ -114,6 +114,13 @@ class AnthropicProvider implements LlmProvider {
 	protected static final ConcurrentHashMap<String, Map> QUESTION_BY_TOOL_CALL = new ConcurrentHashMap<>()
 	static final long QUESTION_BY_TOOL_CALL_TTL_MS = 60L * 60L * 1000L
 	static final int QUESTION_BY_TOOL_CALL_MAX = 10000
+	// With extended thinking on, the assistant turn that issued the tool calls of a running
+	// loop has to come back starting with its thinking blocks, signature included, or the
+	// API answers 400. Morpheus rebuilds that turn from its own stored tool_calls only, so
+	// the blocks are kept here per tool call id and put back in front of the turn.
+	protected static final ConcurrentHashMap<String, Map> THINKING_BY_TOOL_CALL = new ConcurrentHashMap<>()
+	static final long THINKING_BY_TOOL_CALL_TTL_MS = 60L * 60L * 1000L
+	static final int THINKING_BY_TOOL_CALL_MAX = 10000
 	static final String RESTORED_QUESTION_NOTE = '(The chat application dropped this question from the conversation ' +
 		'memory while the tool calls below were working on it. It is restored here; answer it.)\n\n'
 	static final String REPLACEMENT_CHARACTER_NOTE = 'Some earlier turns of this conversation came back from the chat ' +
@@ -832,6 +839,8 @@ class AnthropicProvider implements LlmProvider {
 		List<String> systemParts = []
 		List<Map> messages = []
 
+		boolean thinkingEnabled = isThinkingEnabled(accountIntegration)
+
 		request.messages?.each { LlmChatMessage msg ->
 			String role = msg.role?.toLowerCase() ?: 'user'
 			Map metadata = msg.metadata ?: [:]
@@ -863,6 +872,9 @@ class AnthropicProvider implements LlmProvider {
 
 			if (role == 'assistant' && metadata.tool_calls) {
 				List<Map> blocks = []
+				if (thinkingEnabled) {
+					blocks.addAll(rememberedThinking(metadata.tool_calls as List))
+				}
 				if (msg.content) {
 					blocks << [type: 'text', text: msg.content.toString()]
 				}
@@ -890,7 +902,14 @@ class AnthropicProvider implements LlmProvider {
 		}
 
 		boolean cachingEnabled = isPromptCachingEnabled(accountIntegration)
-		boolean thinkingEnabled = isThinkingEnabled(accountIntegration)
+		if (thinkingEnabled && !lastToolTurnStartsWithThinking(messages)) {
+			// The thinking blocks that opened the running tool loop are unknown (another
+			// appliance node, a plugin reload, or a turn older than an hour): this request goes
+			// out without thinking rather than failing with 400. The next question thinks again.
+			log.info('Anthropic: thinking blocks of the running tool loop not known, sending this request without extended thinking')
+			thinkingEnabled = false
+			stripThinkingBlocks(messages)
+		}
 
 		Integer maxTokens = resolveMaxTokens(request.maxOutputTokens, accountIntegration)
 		Map requestBody = [
@@ -1180,6 +1199,7 @@ class AnthropicProvider implements LlmProvider {
 
 		StringBuilder text = new StringBuilder()
 		StringBuilder thinking = new StringBuilder()
+		List<Map> thinkingBlocks = []
 		List<Map> toolCalls = []
 		List<Map> sources = []
 		Map<String, String> sourceTitles = [:]
@@ -1216,6 +1236,7 @@ class AnthropicProvider implements LlmProvider {
 						}
 					}
 				} else if (blockMap.type == 'thinking' || blockMap.type == 'redacted_thinking') {
+					thinkingBlocks << blockMap
 					String thinkingText = blockMap.thinking?.toString()
 					if (thinkingText) {
 						thinking.append(thinking.length() > 0 ? '\n' : '').append(thinkingText)
@@ -1242,6 +1263,10 @@ class AnthropicProvider implements LlmProvider {
 
 		if (thinking.length() > 0) {
 			response.metadata.put('thinking', thinking.toString())
+		}
+
+		if (toolCalls && thinkingBlocks) {
+			rememberThinking(toolCalls*.id as List<String>, thinkingBlocks)
 		}
 
 		if (toolCalls) {
@@ -1786,6 +1811,83 @@ class AnthropicProvider implements LlmProvider {
 			// Drop the oldest entries only: a loop still running keeps its question.
 			QUESTION_BY_TOOL_CALL.entrySet().sort { Map.Entry<String, Map> entry -> entry.value.updated as long }
 				.take(excess).each { Map.Entry<String, Map> entry -> QUESTION_BY_TOOL_CALL.remove(entry.key) }
+		}
+	}
+
+	/**
+	 * Keeps the thinking blocks of a turn that issued tool calls, unchanged (thinking and
+	 * signature, or the data of a redacted block), under each of its tool call ids.
+	 */
+	protected static void rememberThinking(List<String> toolCallIds, List<Map> blocks) {
+		List<String> ids = toolCallIds?.findAll { String id -> isDistinctToolCallId(id) }
+		// A thinking block without its signature is rejected when sent back; better none.
+		if (!ids || !blocks || blocks.any { Map block -> block.type == 'thinking' && !block.signature }) {
+			return
+		}
+		long now = System.currentTimeMillis()
+		List<Map> kept = blocks.collect { Map block ->
+			block.type == 'redacted_thinking' ? [type: 'redacted_thinking', data: block.data] :
+				[type: 'thinking', thinking: block.thinking, signature: block.signature]
+		}
+		ids.each { String id -> THINKING_BY_TOOL_CALL.put(id, [blocks: kept, updated: now]) }
+		THINKING_BY_TOOL_CALL.values().removeIf { Map entry -> now - (entry.updated as long) > THINKING_BY_TOOL_CALL_TTL_MS }
+		int excess = THINKING_BY_TOOL_CALL.size() - THINKING_BY_TOOL_CALL_MAX
+		if (excess > 0) {
+			THINKING_BY_TOOL_CALL.entrySet().sort { Map.Entry<String, Map> entry -> entry.value.updated as long }
+				.take(excess).each { Map.Entry<String, Map> entry -> THINKING_BY_TOOL_CALL.remove(entry.key) }
+		}
+	}
+
+	/** The thinking blocks remembered for the first known of these OpenAI-shaped tool calls, or none. */
+	protected static List<Map> rememberedThinking(List toolCalls) {
+		long now = System.currentTimeMillis()
+		for (def call : (toolCalls ?: [])) {
+			String id = call instanceof Map ? (call as Map).id?.toString() : null
+			Map entry = isDistinctToolCallId(id) ? THINKING_BY_TOOL_CALL.get(id) : null
+			if (entry && now - (entry.updated as long) <= THINKING_BY_TOOL_CALL_TTL_MS) {
+				return (entry.blocks as List<Map>).collect { new LinkedHashMap(it) }
+			}
+		}
+		return []
+	}
+
+	/**
+	 * False only while a tool loop is running and its first assistant message (the one right
+	 * after the question) does not start with a thinking block: the case the API rejects while
+	 * thinking is enabled. Without the interleaved-thinking beta the model thinks once, at the
+	 * start of its turn, so the later tool-call messages of the loop carry no thinking.
+	 */
+	protected static boolean lastToolTurnStartsWithThinking(List<Map> messages) {
+		if (!messages) {
+			return true
+		}
+		int question = -1
+		for (int i = messages.size() - 1; i >= 0; i--) {
+			Map message = messages[i]
+			boolean onlyToolResults = message.content instanceof List && (message.content as List) &&
+				(message.content as List).every { it instanceof Map && it.type == 'tool_result' }
+			if (message.role == 'user' && !onlyToolResults) {
+				question = i
+				break
+			}
+		}
+		Map opening = (question + 1 < messages.size()) ? messages[question + 1] : null
+		if (opening?.role != 'assistant' || !(opening.content instanceof List)) {
+			return true
+		}
+		List content = opening.content as List
+		if (!content.any { it instanceof Map && it.type == 'tool_use' }) {
+			return true
+		}
+		def first = content ? content[0] : null
+		return first instanceof Map && (first.type == 'thinking' || first.type == 'redacted_thinking')
+	}
+
+	protected static void stripThinkingBlocks(List<Map> messages) {
+		messages?.each { Map message ->
+			if (message.role == 'assistant' && message.content instanceof List) {
+				(message.content as List).removeIf { it instanceof Map && (it.type == 'thinking' || it.type == 'redacted_thinking') }
+			}
 		}
 	}
 

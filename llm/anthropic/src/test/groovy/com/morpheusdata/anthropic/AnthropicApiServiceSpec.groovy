@@ -76,6 +76,32 @@ class AnthropicApiServiceSpec extends Specification {
 		accumulated.content.every { !it.containsKey('__jsonBuffer') }
 	}
 
+	def "the sse accumulator keeps the signature of a thinking block"() {
+		given:
+		String stream = [
+			'data: {"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-6","usage":{"input_tokens":5}}}',
+			'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"List first."}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EqQBCgIYAh"}}',
+			'data: {"type":"content_block_stop","index":0}',
+			'data: {"type":"message_stop"}'
+		].join('\n')
+		HttpEntity entity = Stub(HttpEntity) {
+			getContent() >> new ByteArrayInputStream(stream.getBytes('UTF-8'))
+		}
+		CloseableHttpResponse response = Stub(CloseableHttpResponse) {
+			getEntity() >> entity
+		}
+
+		when:
+		Map accumulated = service.consumeEventStream(response, null)
+
+		then:
+		accumulated.content[0].type == 'thinking'
+		accumulated.content[0].thinking == 'List first.'
+		accumulated.content[0].signature == 'EqQBCgIYAh'
+	}
+
 	def "an error event aborts the stream"() {
 		given:
 		HttpEntity entity = Stub(HttpEntity) {

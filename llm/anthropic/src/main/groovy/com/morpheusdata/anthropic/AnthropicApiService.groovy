@@ -212,6 +212,9 @@ class AnthropicApiService {
 							jsonBuffers.get(index)?.append(delta.partial_json.toString())
 						} else if (delta.type == 'thinking_delta' && delta.thinking != null) {
 							block.thinking = (block.thinking ?: '') + delta.thinking.toString()
+						} else if (delta.type == 'signature_delta' && delta.signature != null) {
+							// A thinking block goes back to the API in tool loops, and only with its signature.
+							block.signature = (block.signature ?: '') + delta.signature.toString()
 						}
 						break
 					case 'content_block_stop':

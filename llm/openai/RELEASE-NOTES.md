@@ -6,6 +6,41 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 0.1.4
+
+**Fix release: open-weight chat models named `*-Instruct` are listed again.** Built against plugin
+API 1.4.2. No new setting; plugin code unchanged.
+
+- **What went wrong.** The catalog filter dropped every model whose id contained `instruct`, meant
+  for OpenAI's legacy completion model `gpt-3.5-turbo-instruct`. Most open-weight chat models are
+  named that way: `meta-llama/Llama-3.3-70B-Instruct` on vLLM, `llama3.1:8b-instruct-q4_K_M` on
+  Ollama, `mistralai/mistral-small-3.2-24b-instruct` on OpenRouter. A vLLM endpoint that serves only
+  such a model passed validation, then synced 0 models; on an existing integration the next sync
+  removed them.
+- **What the plugin does now.** Only `gpt-3.5-turbo-instruct` and its dated variants, with or
+  without a vendor prefix such as `openai/`, are dropped by id. Every other filter is unchanged.
+
+### Behaviour changes from 0.1.3
+
+- Models named `*-Instruct` appear in the model list after the next sync. Where the catalog says
+  what a model supports (OpenRouter), they still need tool calling and text-only output.
+
+### Verified
+
+- Unit tests (Spock): ids-only catalogs as vLLM, Ollama and LiteLLM list them keep
+  `meta-llama/Llama-3.3-70B-Instruct`, `llama3.1:8b-instruct-q4_K_M` and
+  `Qwen/Qwen2.5-72B-Instruct`; an OpenRouter entry `mistralai/mistral-small-3.2-24b-instruct` with
+  metadata is kept; `gpt-3.5-turbo-instruct`, `gpt-3.5-turbo-instruct-0914` and
+  `openai/gpt-3.5-turbo-instruct` are dropped; the api.openai.com catalog test is unchanged.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --warning-mode all`, 163 tests,
+  0 failures.
+
+### Not yet verified
+
+- A sync against a vLLM or Ollama endpoint; the lab has none.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.3...openai-v0.1.4
+
 ## 0.1.3
 
 **The model no longer loses the user's question in a long tool loop on Morpheus 9.1.** Built

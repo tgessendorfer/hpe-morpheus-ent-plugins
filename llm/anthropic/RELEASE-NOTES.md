@@ -6,6 +6,53 @@ shaded `-all.jar` is attached. Notes for 1.4.1 and earlier exist only there.
 
 ---
 
+## 1.6.5
+
+**Fix release: extended thinking works with MCP tool loops.** Built against plugin API 1.4.2. No new
+setting; plugin code unchanged.
+
+- **What went wrong.** With *Enable Extended Thinking* on, the Messages API requires the assistant
+  turn that issued the tool calls of a running loop to come back starting with its thinking blocks,
+  signature included. Morpheus rebuilds that turn from its own stored `tool_calls` only, so from the
+  second round of every tool loop the request lacked them and the API would answer 400 (*a final
+  `assistant` message must start with a thinking block*), shown in chat as *The AI model is no
+  longer available*.
+- **What the plugin does now.** It keeps the thinking and redacted thinking blocks of each turn that
+  calls tools, unchanged, under each tool call id (one hour; above 10,000 entries the oldest are
+  dropped; only ids that look random are used), and puts them back in front of the rebuilt turn.
+  Without the interleaved-thinking beta the model thinks once, at the start of its turn, so only
+  the first tool-call message of a loop carries thinking; later rounds keep thinking on as long as
+  that first message's blocks are known. When they are not (another appliance node, a plugin
+  reload, or a turn older than an hour), the request goes out without extended thinking instead of
+  failing, and logs *thinking blocks of the running tool loop not known, sending this request
+  without extended thinking*.
+- **Streaming keeps the signature.** The stream accumulator now collects `signature_delta`, so a
+  thinking block from a streamed answer can go back to the API. A thinking block without a
+  signature is never remembered.
+- With thinking off nothing changes: no blocks are kept in requests, none are sent.
+
+### Behaviour changes from 1.6.4
+
+- With thinking on, tool loops now continue after the first tool call.
+- A tool-loop request whose thinking blocks are lost runs without thinking, once.
+
+### Verified
+
+- Unit tests (Spock): a response that thought and called a tool gets its thinking block (with
+  signature) and redacted block (with data) back in front of the rebuilt turn, in API order; a
+  loop with a second tool round whose reply has no thinking keeps thinking on; unknown blocks send
+  the request without `thinking`; thinking off never sends blocks; a new question after a finished
+  loop keeps thinking; numbered tool call ids and blocks without a signature are not remembered;
+  the stream accumulator keeps `signature_delta`.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --warning-mode all`, 132 tests,
+  0 failures.
+
+### Not yet verified
+
+- A tool loop with thinking on against api.anthropic.com. The lab integrations run with thinking off.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.6.4...anthropic-v1.6.5
+
 ## 1.6.4
 
 **The model no longer loses the user's question in a long tool loop on Morpheus 9.1.** Built

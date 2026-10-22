@@ -6,6 +6,42 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 0.2.4
+
+**Fix release: *Default Max Output Tokens* now applies in the Morpheus chat.** Built against plugin
+API 1.4.2. No new setting; plugin code unchanged.
+
+- **What went wrong.** Morpheus asks for 1000 output tokens on every chat request. Up to 0.2.3 the
+  plugin sent the caller's value whenever there was one, so the integration's *Default Max Output
+  Tokens* was never used in chat. Reasoning models could spend all 1000 tokens thinking and answer
+  only *Answer cut off at the output token limit.*
+- **What the plugin does now.** The configured value is a floor: `max_tokens` is the larger of the
+  caller's value and the configured one. A caller asking for more keeps its value. Without a
+  configured value the request goes out as the caller asked, or without `max_tokens`, as before.
+  This is how the Anthropic plugin has handled it since 1.6.1.
+- **Help text and README** say so, in English, German and Polish.
+
+### Behaviour changes from 0.2.3
+
+- An integration with *Default Max Output Tokens* set (for example 4096) now sends that value on
+  every chat request instead of Morpheus' 1000. Answers can be longer and cost more output tokens.
+- An integration without the setting behaves as before.
+
+### Verified
+
+- Unit tests (Spock): configured 4096 with a request of 1000 sends 4096; a request of 8192 keeps
+  8192; no or zero request sends 4096; without a configured value the request's 1000 is sent, and no
+  value at all leaves `max_tokens` out. The old test that expected 1000 over a configured 4096 was
+  the bug and is replaced.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --warning-mode all`, 151 tests,
+  0 failures.
+
+### Not yet verified
+
+- A chat on the appliance with this jar.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.2.3...openrouter-v0.2.4
+
 ## 0.2.3
 
 **The model no longer loses the user's question in a long tool loop on Morpheus 9.1.** Built

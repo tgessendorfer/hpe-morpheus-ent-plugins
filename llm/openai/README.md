@@ -129,7 +129,8 @@ The plugin lists a model when
 
 - its id does not say it is something else than a chat model: no `embedding`, `whisper`, `tts`,
   `transcribe`, `dall-e`, `image`, `moderation`, `realtime`, `audio`, `sora`, `search`,
-  `babbage`, `davinci`, `instruct`, `computer-use`, `rerank`, `guard` or `batch`;
+  `babbage`, `davinci`, `computer-use`, `rerank`, `guard` or `batch`, and not OpenAI's legacy
+  `gpt-3.5-turbo-instruct` (open-weight chat models named `*-Instruct` stay listed);
 - the catalog, when it says so, lists tool calling (`tools` in `supported_parameters`) and text-only
   output;
 - it has not passed its expiration date, when the catalog has one.

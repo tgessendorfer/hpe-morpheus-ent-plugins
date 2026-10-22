@@ -228,6 +228,10 @@ Turn it on only against models that still accept them; Anthropic's own defaults 
 
 Two further option interactions worth knowing:
 
+- **Extended thinking in tool loops.** The API wants the thinking blocks of the turn that called a
+  tool back on the next round; Morpheus does not store them, so the plugin keeps them for an hour per
+  tool call id and puts them back. When they are lost (another appliance node, a plugin reload), that
+  one request runs without thinking instead of failing.
 - **Extended thinking drops `temperature` and `top_p`.** The API rejects them alongside thinking, so
   the provider strips them and raises `max_tokens` above the thinking budget automatically. Thinking
   output lands in the response *metadata*, not the message body.
