@@ -163,6 +163,74 @@ class CostApprovalProviderSpec extends Specification {
 		provider.monitorApproval(a) == []
 	}
 
+	/** Provider whose stored decisions come from a list instead of Morpheus' tables. */
+	static class StoredProvider extends CostApprovalProvider {
+		List<Request> stored = []
+		List<Long> asked = []
+
+		StoredProvider() { super(null, null) }
+
+		@Override
+		protected List<Request> storedDecisions(AccountIntegration integration) {
+			asked << integration?.id
+			return stored
+		}
+	}
+
+	def "the request id carries the decision"() {
+		given:
+		def ai = integration(7, [costThreshold: '50'])
+
+		expect:
+		provider.createApprovalRequest([], request(10G, 'EUR'), ai, null, [:]).externalRequestId.endsWith('-a')
+		provider.createApprovalRequest([], request(60G, 'EUR'), ai, null, [:]).externalRequestId.endsWith('-r')
+	}
+
+	def "a decision survives a new provider instance (jar upload, restart) through the stored request"() {
+		given: 'a decision taken by one provider instance'
+		def ai = integration(5, [costThreshold: '50'])
+		def rsp = provider.createApprovalRequest([], request(60G, 'EUR'), ai, null, [:])
+		Request storedByMorpheus = new Request(externalId: rsp.externalRequestId, externalName: rsp.externalRequestName,
+			refs: rsp.references.collect { new RequestReference(refId: it.refId, refType: it.refType, name: it.name,
+				externalId: it.externalId, externalName: it.externalName, status: StoredDecisions.statusOf(rsp.externalRequestId)) })
+
+		when: 'the next monitor run happens in a new instance, with nothing in memory'
+		StoredProvider fresh = new StoredProvider(stored: [storedByMorpheus])
+		def reports = fresh.monitorApproval(ai)
+
+		then: 'it reports the same decision'
+		fresh.asked == [5L]
+		reports*.externalId == [rsp.externalRequestId]
+		reports[0].refs*.status == [RequestReference.ApprovalStatus.rejected]
+		reports[0].refs*.externalId == rsp.references*.externalId
+		reports[0].externalName == rsp.externalRequestName
+	}
+
+	def "a decision in memory and stored is reported once, the in-memory report first"() {
+		given:
+		def ai = integration(6, [costThreshold: '50'])
+		StoredProvider p = new StoredProvider()
+		def rsp = p.createApprovalRequest([], request(10G, 'EUR'), ai, null, [:])
+		Request inMemory = p.pendingFor(ai)[rsp.externalRequestId]
+		Request copy = new Request(externalId: rsp.externalRequestId, refs: [])
+		Request other = new Request(externalId: 'ca-other-r', refs: [])
+		p.stored = [copy, other]
+
+		when:
+		def reports = p.monitorApproval(ai)
+
+		then:
+		reports*.externalId == [rsp.externalRequestId, 'ca-other-r']
+		reports[0].is(inMemory)
+	}
+
+	def "without a Morpheus context the stored decisions are empty and the monitor run still works"() {
+		expect:
+		provider.storedDecisions(integration(7, [:])) == []
+		provider.storedDecisions(null) == []
+		provider.monitorApproval(integration(7, [:])) == []
+	}
+
 	def "a policy threshold with a decimal comma is honoured"() {
 		given:
 		Policy policy = new Policy()

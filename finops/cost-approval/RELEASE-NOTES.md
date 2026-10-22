@@ -6,6 +6,62 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 1.2.1
+
+**Fix release: a decision is no longer lost when the plugin is reloaded or Morpheus restarts
+before the next monitor run.** Plugin code, provider code, option codes, plugin API 1.4.2 and
+minimum appliance 9.0.2 are unchanged; no new options.
+
+### Fixed
+
+- **Decisions survive a jar upload, a restart and a node switch.** Morpheus 9.0.2 applies an
+  approval decision only in its next `monitorApproval` call (about every 5 minutes), and that call
+  receives the integration, never the request. Up to 1.2.0 the plugin kept every decision for that
+  call in memory only. Uploading a new jar (every release), restarting `morpheus-ui`, or a monitor
+  run on another appliance node in that window left the request `requested` for good, and on
+  9.0.2 nobody can approve or deny an item owned by an approval integration by hand.
+- **How:** the external request id now carries the decision: `ca-<uuid>-a` for approved,
+  `ca-<uuid>-r` for rejected. Each monitor run reads the integration's open requests (references
+  still `requesting` or `requested`, external id starting with `ca-`) from the internal tables
+  `request` and `request_reference` with one parameterised query over the read-only report
+  connection, at most 1,000 rows, and reports their decisions again with the same external ids and
+  names as the original answer. The in-memory reports stay as the fast path for decisions Morpheus
+  has not stored yet; a request found in both is reported once.
+- **The external id uses the full random UUID** instead of its first 8 hex digits (32 bits), which
+  made a collision likely at around 10,000 requests per integration.
+- **Quiet failure.** When the open requests cannot be read, the monitor run reports the in-memory
+  decisions as before and writes one warning per plugin load, then debug lines.
+
+### Behaviour changes from 1.2.0
+
+- External request ids change shape: `ca-1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed-r` instead of
+  `ca-1b9d6bcd`; reference ids append `-0`, `-1`, ... as before.
+- A decision can be reported in more than one monitor run, until Morpheus has taken it over.
+  It is always the same decision.
+- Each monitor run now queries the internal tables `request` and `request_reference` once per
+  integration.
+- Requests answered by 1.2.0 or earlier carry no decision in their id; the new monitor run leaves
+  them alone, so one stuck before this upgrade stays stuck.
+
+### Verified
+
+- New unit tests (Spock): ids carry the decision and a full UUID; ids without a decision are
+  ignored; the query is parameterised, limited to the integration and to open references; stored
+  rows are rebuilt per request in order, with the response's ids and names as fallback; a decision
+  taken by one provider instance is reported by a new instance with nothing in memory; a request in
+  memory and stored is reported once; without a Morpheus context the monitor run still works.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --warning-mode all`, 115 tests,
+  0 failures.
+
+### Not yet verified
+
+- **The table and column names are read from Morpheus' domain classes (GORM default naming), not
+  from a live database.** Not run on an appliance yet: the query, the stored external ids, and that
+  Morpheus takes over a decision reported by a new plugin instance after a jar upload.
+- On Morpheus 9.1.0.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.2.0...cost-approval-v1.2.1
+
 ## 1.2.0
 
 **The reason written into a request now follows the requesting user's Morpheus language setting

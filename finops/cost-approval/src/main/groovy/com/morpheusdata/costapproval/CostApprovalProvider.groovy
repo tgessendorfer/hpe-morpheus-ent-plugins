@@ -29,6 +29,7 @@ import groovy.sql.Sql
 import groovy.util.logging.Slf4j
 
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Cost threshold approval. Morpheus calls createApprovalRequest when an approval policy
@@ -46,9 +47,11 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * monitorApproval reports every decision (approved and rejected) once more, unchanged, since
  * Morpheus 9.0.2 takes the status over only in the monitor run. Its signature in plugin API 1.4.2 receives the
- * integration only, never the request, so the decision cannot be recomputed there. The
- * pending reports are therefore kept in memory per integration id and are lost on a
- * restart; the approval in the createApprovalRequest response is not affected.
+ * integration only, never the request, so the decision cannot be recomputed there. The external
+ * request id therefore carries the decision ({@link StoredDecisions}): the monitor run reads the
+ * open requests of the integration from Morpheus' own tables and reports their decisions again,
+ * also after a jar upload, a restart or on another appliance node. The reports kept in memory per
+ * integration id are only the fast path for decisions Morpheus has not stored yet.
  *
  * Language of the request name and message: the Morpheus language setting of the user who
  * asked (see {@link UserLocale}), else the browser language of the web request, else English.
@@ -65,6 +68,9 @@ class CostApprovalProvider implements ApprovalProvider {
 
 	/** integration id -> (external request id -> decided request), reported by the next monitorApproval of that integration. */
 	private final Map<Long, Map<String, Request>> pending = new ConcurrentHashMap<>()
+
+	/** One warning per provider instance when the stored decisions cannot be read; debug after that. */
+	private final AtomicBoolean storedReadWarned = new AtomicBoolean(false)
 
 	CostApprovalProvider(Plugin plugin, MorpheusContext morpheus) {
 		this.plugin = plugin
@@ -147,7 +153,7 @@ class CostApprovalProvider implements ApprovalProvider {
 			CostApprovalLogic.refCurrencies(refs), limit, limitCur)
 
 		Locale locale = requesterLocale(request)
-		String reqId = "${REQUEST_ID_PREFIX}${UUID.randomUUID().toString().take(8)}".toString()
+		String reqId = StoredDecisions.newRequestId(REQUEST_ID_PREFIX, decision.approved)
 		String name = CostApprovalLogic.requestName(decision, locale)
 		RequestReference.ApprovalStatus status = decision.approved ?
 			RequestReference.ApprovalStatus.approved : RequestReference.ApprovalStatus.rejected
@@ -183,11 +189,52 @@ class CostApprovalProvider implements ApprovalProvider {
 	/**
 	 * Takes the pending reports of the integration in one atomic remove. Every later decision
 	 * goes into a new map through compute, so the removed map is complete and no longer changes.
+	 * Then adds the open requests Morpheus has stored with a decision in their id, which survive
+	 * a restart. A decision reported twice is the same decision, so reporting it again is harmless.
 	 */
 	@Override
 	List<Request> monitorApproval(AccountIntegration integration) {
+		Map<String, Request> reports = new LinkedHashMap<>()
 		Map<String, Request> mine = pending.remove(integrationKey(integration))
-		return mine ? new ArrayList<Request>(mine.values()) : []
+		if (mine) {
+			reports.putAll(mine)
+		}
+		for (Request stored : storedDecisions(integration)) {
+			reports.putIfAbsent(stored.externalId, stored)
+		}
+		return new ArrayList<Request>(reports.values())
+	}
+
+	/**
+	 * Open requests of the integration with a decision in their id, read from Morpheus' tables
+	 * through the read-only report connection. A failure never stops the monitor run: it logs one
+	 * warning per provider instance and reports the in-memory decisions only.
+	 */
+	protected List<Request> storedDecisions(AccountIntegration integration) {
+		if (integration?.id == null) {
+			return []
+		}
+		def conn = null
+		try {
+			conn = morpheus?.report?.getReadOnlyDatabaseConnection()?.blockingGet()
+			return conn ? StoredDecisions.load(new Sql(conn), integration.id) : []
+		} catch (Exception e) {
+			String line = "Cost threshold approval: stored decisions of integration ${integration.id} not readable, reporting in-memory decisions only: ${e.message}"
+			if (storedReadWarned.compareAndSet(false, true)) {
+				log.warn(line)
+			} else {
+				log.debug(line)
+			}
+			return []
+		} finally {
+			if (conn) {
+				try {
+					morpheus.report.releaseDatabaseConnection(conn).blockingAwait()
+				} catch (Exception ignored) {
+					// nothing more to do
+				}
+			}
+		}
 	}
 
 	/** The map that collects the pending reports of one integration; a seam for tests. */

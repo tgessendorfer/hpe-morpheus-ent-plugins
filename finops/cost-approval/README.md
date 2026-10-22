@@ -88,8 +88,12 @@ them itself. Texts written into a request follow the requesting user's language 
 - **Decision arrives with the monitor run.** Morpheus 9.0.2 applies the decision (approval and
   rejection) only when it next calls `monitorApproval` (about every 5 minutes), not from the
   `createApprovalRequest` response. `monitorApproval` receives only the integration, never the
-  request (plugin API 1.4.2), so the plugin reports each decision from memory, keyed by integration
-  id, exactly as it answered it. A restart in between leaves the request `requested`.
+  request (plugin API 1.4.2). Since 1.2.1 the external request id carries the decision
+  (`ca-<uuid>-a` approved, `ca-<uuid>-r` rejected), and each monitor run reads the integration's
+  open requests from the internal tables `request` and `request_reference` and reports their
+  decisions again, so a jar upload or restart in between no longer leaves the request
+  `requested`. Requests answered by 1.2.0 or earlier carry no decision in their id and are not
+  picked up.
 - **No human override.** On 9.0.2, approve and deny are "not available" for an approval item owned
   by an approval integration, over the API and in *Operations > Approvals*. That is why the plugin
   rejects instead of waiting: the requester sees the reason and asks the provider, who can raise the
