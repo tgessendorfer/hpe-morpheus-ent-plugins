@@ -250,15 +250,15 @@ class CostApprovalLogic {
 	/**
 	 * The monthly price of a request: its own price, else the sum of the reference prices.
 	 * Prices in different currencies are never added: a reference in another currency
-	 * than {@code currency} makes the sum unknown (null). References without a price
-	 * count as 0, but if none has a price the result is null.
+	 * than {@code currency} makes the sum unknown (null), and so does a reference without a
+	 * price: an app with one unpriced tier is never approved on the price of the others.
 	 */
 	static BigDecimal requestPrice(BigDecimal ownPrice, List refs, String currency) {
 		if (ownPrice != null) {
 			return ownPrice
 		}
 		List list = refs ?: []
-		if (currency == null || list.every { refPrice(it) == null }) {
+		if (currency == null || !list || list.any { refPrice(it) == null }) {
 			return null
 		}
 		if (list.any { String c = isoCurrency(refValue(it, 'currency')); c && c != currency }) {
@@ -271,10 +271,6 @@ class CostApprovalLogic {
 		return amount?.setScale(SCALE, RoundingMode.HALF_UP)
 	}
 
-	/**
-	 * The decision. Both sides are rounded to cents first, so 50.004 passes a threshold
-	 * of 50 and 50.005 does not.
-	 */
 	/**
 	 * The request type of an approval request, read by property name: the request's own (an enum
 	 * in plugin API 1.4.2, a string on Morpheus' domain object), else the one on the internal
@@ -331,6 +327,10 @@ class CostApprovalLogic {
 			.collect { String word -> word.substring(0, 1) + word.substring(1).toLowerCase(Locale.ROOT) }.join(' ')
 	}
 
+	/**
+	 * The decision. Both sides are rounded to cents first, so 50.004 passes a threshold
+	 * of 50 and 50.005 does not.
+	 */
 	static Decision decide(BigDecimal price, String priceCurrency, List<String> refCurrencies,
 	                       BigDecimal threshold, String thresholdCurrency) {
 		Decision d = new Decision(price: round(price), priceCurrency: priceCurrency,

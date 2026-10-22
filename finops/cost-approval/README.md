@@ -15,7 +15,7 @@ reason in the request (Morpheus 9.0.2 offers no manual decision for such request
 | Monthly price at or below the threshold, same currency | references `approved` in the response |
 | Monthly price above the threshold | `rejected`, reason in the request name |
 | Request currency differs from the threshold currency, or references in mixed currencies | `rejected`; prices in different currencies are never added |
-| Request carries no price at all | `rejected` |
+| Request carries no price at all, or one of its references has none (since 1.2.3) | `rejected` |
 
 No request is ever left `requested`: on 9.0.2 nobody could approve or deny it by hand, and it would
 stay pending until the instance is deleted.

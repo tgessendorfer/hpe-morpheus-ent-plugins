@@ -164,7 +164,13 @@ class CostApprovalLogicSpec extends Specification {
 
 	def "request price sums references of the request currency"() {
 		expect:
-		CostApprovalLogic.requestPrice(null, [ref(10.10, 'EUR'), ref(5.05, null), ref(null, 'EUR')], 'EUR') == 15.15G
+		CostApprovalLogic.requestPrice(null, [ref(10.10, 'EUR'), ref(5.05, null), ref(0, 'EUR')], 'EUR') == 15.15G
+	}
+
+	def "one reference without a price makes the request price unknown (no partial sums)"() {
+		expect:
+		CostApprovalLogic.requestPrice(null, [ref(10.10, 'EUR'), ref(null, 'EUR')], 'EUR') == null
+		CostApprovalLogic.requestPrice(null, [ref(null, 'EUR'), ref(5, 'EUR')], 'EUR') == null
 	}
 
 	def "prices in different currencies are never added"() {

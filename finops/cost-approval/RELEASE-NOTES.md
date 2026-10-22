@@ -6,6 +6,40 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 1.2.3
+
+**Fix release: a request with an unpriced reference is rejected instead of approved on the price
+of the others.** Plugin code, provider code, option codes, plugin API 1.4.2 and minimum appliance
+9.0.2 are unchanged; no new options.
+
+### Fixed
+
+- **What went wrong.** When a request had no price of its own, the plugin summed the prices of
+  its references and counted a reference without a price as 0. An app whose web tier has a price
+  and whose database tier has none was approved on the web tier's price alone.
+- **What the plugin does now.** One reference without a price makes the request price unknown, so
+  the request is rejected with *No monthly price for this request*, as a request without any price
+  already was. A reference priced at 0 still counts as 0.
+
+### Behaviour changes from 1.2.2
+
+- Requests whose references are only partly priced are rejected. In 1.2.2 they were approved when
+  the priced part stayed under the threshold.
+
+### Verified
+
+- Unit tests (Spock): a priced and an unpriced reference, in either order, give no price; a
+  reference priced at 0 still adds 0. The test that expected the partial sum was the bug and is
+  changed.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --warning-mode all`, 132 tests,
+  0 failures.
+
+### Not yet verified
+
+- On an appliance (no app with an unpriced tier in the lab).
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.2.2...cost-approval-v1.2.3
+
 ## 1.2.2
 
 **Only provisioning, app and reconfigure requests are checked against the threshold; deletes,
