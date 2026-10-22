@@ -38,6 +38,12 @@ of the others.** Plugin code, provider code, option codes, plugin API 1.4.2 and 
 
 - On an appliance (no app with an unpriced tier in the lab).
 
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced 1.2.2 in place (same plugin id), status `loaded`.
+
+Built by the release workflow from the source at tag `cost-approval-v1.2.3`.
+
+sha256 `e7a1647e51207a2c3340d2b94d4b558f56c9a73ded0ad84954ee9f8762311ab6`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.2.2...cost-approval-v1.2.3
 
 ## 1.2.2
