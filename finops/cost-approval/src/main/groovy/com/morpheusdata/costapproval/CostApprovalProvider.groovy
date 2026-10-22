@@ -145,12 +145,18 @@ class CostApprovalProvider implements ApprovalProvider {
 		Map integrationCfg = integrationConfig(integration)
 		List refs = request?.refs ?: []
 
-		String reqCur = CostApprovalLogic.requestCurrency(request?.currency, refs, { fallbackCurrency(integration) })
-		BigDecimal price = CostApprovalLogic.requestPrice(request?.pricePerMonth, refs, reqCur)
-		BigDecimal limit = CostApprovalLogic.threshold(policyCfg, opts, integrationCfg)
-		String limitCur = CostApprovalLogic.configuredThresholdCurrency(policyCfg, opts, integrationCfg) ?: reqCur
-		CostApprovalLogic.Decision decision = CostApprovalLogic.decide(price, reqCur,
-			CostApprovalLogic.refCurrencies(refs), limit, limitCur)
+		String requestType = CostApprovalLogic.requestType(request)
+		CostApprovalLogic.Decision decision
+		if (CostApprovalLogic.isCostChecked(requestType)) {
+			String reqCur = CostApprovalLogic.requestCurrency(request?.currency, refs, { fallbackCurrency(integration) })
+			BigDecimal price = CostApprovalLogic.requestPrice(request?.pricePerMonth, refs, reqCur)
+			BigDecimal limit = CostApprovalLogic.threshold(policyCfg, opts, integrationCfg)
+			String limitCur = CostApprovalLogic.configuredThresholdCurrency(policyCfg, opts, integrationCfg) ?: reqCur
+			decision = CostApprovalLogic.decide(price, reqCur, CostApprovalLogic.refCurrencies(refs), limit, limitCur)
+		} else {
+			// A delete, an extension or a workflow run adds no monthly cost: approved without a check.
+			decision = CostApprovalLogic.notChecked(requestType)
+		}
 
 		Locale locale = requesterLocale(request)
 		String reqId = StoredDecisions.newRequestId(REQUEST_ID_PREFIX, decision.approved)
@@ -180,8 +186,12 @@ class CostApprovalProvider implements ApprovalProvider {
 			target.put(reqId, report)
 			target
 		}
-		log.info("Cost threshold approval ${reqId}: ${CostApprovalLogic.money(decision.price, decision.shownPriceCurrency, Locale.ENGLISH)} per month, " +
-			"threshold ${CostApprovalLogic.money(decision.threshold, decision.thresholdCurrency, Locale.ENGLISH)} -> ${decision.outcome} (${status})")
+		if (decision.outcome == CostApprovalLogic.Outcome.NOT_CHECKED) {
+			log.info("Cost threshold approval ${reqId}: request type '${requestType}' is not cost-checked -> ${decision.outcome} (${status})")
+		} else {
+			log.info("Cost threshold approval ${reqId}: ${CostApprovalLogic.money(decision.price, decision.shownPriceCurrency, Locale.ENGLISH)} per month, " +
+				"threshold ${CostApprovalLogic.money(decision.threshold, decision.thresholdCurrency, Locale.ENGLISH)} -> ${decision.outcome} (${status})")
+		}
 		return new RequestResponse(success: true, externalRequestId: reqId, externalRequestName: name,
 			references: outRefs, msg: CostApprovalLogic.responseMessage(decision, locale))
 	}

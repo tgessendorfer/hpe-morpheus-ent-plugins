@@ -44,7 +44,7 @@ class CostApprovalProviderSpec extends Specification {
 	def "every option label and help key exists in both bundles"() {
 		given:
 		List<String> keys = (provider.integrationOptionTypes() + provider.policyOptionTypes()).collectMany { [it.fieldCode, it.helpTextI18nCode] }
-		List<String> runtime = ['approved', 'overThreshold', 'currencyMismatch', 'noPrice'].collectMany {
+		List<String> runtime = ['approved', 'overThreshold', 'currencyMismatch', 'noPrice', 'notChecked'].collectMany {
 			["cost-threshold-approval.request.${it}".toString(), "cost-threshold-approval.msg.${it}".toString()]
 		}
 
@@ -434,5 +434,75 @@ class CostApprovalProviderSpec extends Specification {
 		provider.userLocaleSetting(5L) == null
 		rsp.references*.status == [RequestReference.ApprovalStatus.approved]
 		rsp.externalRequestName == 'Approved automatically (10.00 EUR <= 50.00 EUR per month)'
+	}
+
+	static class TypedDomainRequest {
+		String requestType
+	}
+
+	static class TypedRef extends DomainRef {
+		TypedDomainRequest request
+	}
+
+	def "a delete, extension or workflow request is approved without a price check"() {
+		given:
+		def ai = integration(7, [costThreshold: '10'])
+		Request req = request(500G, 'EUR')
+		req.requestType = type
+
+		when:
+		def rsp = provider.createApprovalRequest([], req, ai, null, [:])
+
+		then:
+		rsp.references*.status == [RequestReference.ApprovalStatus.approved]
+		rsp.externalRequestId.endsWith('-a')
+		rsp.msg == 'Approved automatically: no cost check for this request type'
+		rsp.externalRequestName == "Approved automatically: the cost threshold applies to provisioning, app and reconfigure requests only (${type})"
+
+		where:
+		type << [Request.ApprovalRequestType.INSTANCE_DELETE_APPROVAL_TYPE, Request.ApprovalRequestType.APP_DELETE_APPROVAL_TYPE,
+			Request.ApprovalRequestType.EXTENSION_APPROVAL_TYPE, Request.ApprovalRequestType.SHUTDOWN_EXTENSION_APPROVAL_TYPE]
+	}
+
+	def "provisioning, app and reconfigure requests are still checked against the threshold"() {
+		given:
+		def ai = integration(7, [costThreshold: '10'])
+		Request req = request(500G, 'EUR')
+		req.requestType = type
+
+		expect:
+		provider.createApprovalRequest([], req, ai, null, [:]).references*.status == [RequestReference.ApprovalStatus.rejected]
+
+		where:
+		type << [Request.ApprovalRequestType.INSTANCE_APPROVAL_TYPE, Request.ApprovalRequestType.APP_APPROVAL_TYPE,
+			Request.ApprovalRequestType.INSTANCE_RECONFIGURE_APPROVAL_TYPE, Request.ApprovalRequestType.SERVER_RECONFIGURE_APPROVAL_TYPE]
+	}
+
+	def "the type on Morpheus' internal request behind the references counts too"() {
+		given:
+		def ai = integration(7, [costThreshold: '10'])
+		def refs = [new TypedRef(id: 1, refId: 47L, refType: 'instance', name: 'web-1', pricePerMonth: 500d, currency: 'EUR',
+			request: new TypedDomainRequest(requestType: domainType))]
+
+		expect:
+		provider.createApprovalRequest([], new Request(refs: refs), ai, null, [:]).references*.status == [expected]
+
+		where:
+		domainType                     || expected
+		'Instance Delete Approval'     || RequestReference.ApprovalStatus.approved
+		'Workflow Approval'            || RequestReference.ApprovalStatus.approved
+		'Cluster Delete Approval'      || RequestReference.ApprovalStatus.approved
+		'Instance Approval'            || RequestReference.ApprovalStatus.rejected
+		'App Reconfigure Approval'     || RequestReference.ApprovalStatus.rejected
+		'Cluster Approval'             || RequestReference.ApprovalStatus.rejected
+		null                           || RequestReference.ApprovalStatus.rejected
+	}
+
+	def "a request whose type cannot be read is checked"() {
+		expect:
+		CostApprovalLogic.isCostChecked(null)
+		CostApprovalLogic.requestType(new Request(refs: [])) == null
+		!CostApprovalLogic.isCostChecked('INSTANCE_DELETE_APPROVAL_TYPE')
+		CostApprovalLogic.isCostChecked('INSTANCE_APPROVAL_TYPE')
 	}
 }

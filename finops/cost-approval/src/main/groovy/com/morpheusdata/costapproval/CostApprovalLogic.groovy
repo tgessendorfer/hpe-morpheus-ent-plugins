@@ -46,8 +46,19 @@ class CostApprovalLogic {
 		/** The request currency is unknown, mixed, or differs from the threshold currency. */
 		CURRENCY_MISMATCH,
 		/** The request carries no price at all. */
-		NO_PRICE
+		NO_PRICE,
+		/** Not a provisioning, app or reconfigure request (delete, extension, workflow): approved without a price check. */
+		NOT_CHECKED
 	}
+
+	/**
+	 * Request types whose price is checked, normalised to letters only: provisioning of an
+	 * instance, app or cluster (or a server added to one) and reconfigure of an instance, server
+	 * or app. Morpheus names them in the domain ("Instance Approval") and in the plugin API enum
+	 * (INSTANCE_APPROVAL_TYPE); both normalise to the same key here.
+	 */
+	static final Set<String> COST_CHECKED_TYPES = ['INSTANCE', 'APP', 'CLUSTER', 'CLUSTERADDSERVER',
+		'INSTANCERECONFIGURE', 'SERVERRECONFIGURE', 'APPRECONFIGURE'] as Set
 
 	/** The result of one decision, with everything needed to explain it. */
 	static class Decision {
@@ -58,7 +69,10 @@ class CostApprovalLogic {
 		String thresholdCurrency
 		List<String> refCurrencies = []
 
-		boolean isApproved() { outcome == Outcome.APPROVED }
+		/** The request type as Morpheus named it; set for NOT_CHECKED only. */
+		String requestType
+
+		boolean isApproved() { outcome == Outcome.APPROVED || outcome == Outcome.NOT_CHECKED }
 
 		/**
 		 * Every outcome other than APPROVED is rejected at once. Morpheus 9.0.2 offers no manual
@@ -261,6 +275,50 @@ class CostApprovalLogic {
 	 * The decision. Both sides are rounded to cents first, so 50.004 passes a threshold
 	 * of 50 and 50.005 does not.
 	 */
+	/**
+	 * The request type of an approval request, read by property name: the request's own (an enum
+	 * in plugin API 1.4.2, a string on Morpheus' domain object), else the one on the internal
+	 * request behind the references. Null when none can be read.
+	 */
+	static String requestType(Object request) {
+		Object type = null
+		try {
+			type = refValue(request, 'requestType')
+			if (type == null) {
+				for (Object ref : ((refValue(request, 'refs') ?: []) as List)) {
+					type = refValue(refValue(ref, 'request'), 'requestType')
+					if (type != null) {
+						break
+					}
+				}
+			}
+		} catch (Exception ignored) {
+			type = null
+		}
+		String text = type?.toString()?.trim()
+		return text ?: null
+	}
+
+	/**
+	 * True when the price of a request of this type is checked. A type that cannot be read is
+	 * checked as well, so a request is never waved through only because its type is unknown;
+	 * every other known type (delete, extension, shutdown extension, workflow, cluster delete and
+	 * remove) is approved without a check.
+	 */
+	static boolean isCostChecked(String requestType) {
+		if (requestType == null) {
+			return true
+		}
+		String key = requestType.toUpperCase(Locale.ROOT).replaceAll(/[^A-Z]/, '')
+			.replaceAll(/APPROVAL(TYPE)?$/, '')
+		return key in COST_CHECKED_TYPES
+	}
+
+	/** The decision for a request whose type is not cost-checked: approved, nothing compared. */
+	static Decision notChecked(String requestType) {
+		return new Decision(outcome: Outcome.NOT_CHECKED, requestType: requestType)
+	}
+
 	static Decision decide(BigDecimal price, String priceCurrency, List<String> refCurrencies,
 	                       BigDecimal threshold, String thresholdCurrency) {
 		Decision d = new Decision(price: round(price), priceCurrency: priceCurrency,
@@ -297,7 +355,7 @@ class CostApprovalLogic {
 	static String requestName(Decision d, Locale locale) {
 		String price = money(d.price, d.shownPriceCurrency, locale)
 		String limit = money(d.threshold, d.thresholdCurrency, locale)
-		return Messages.text("cost-threshold-approval.request.${outcomeKey(d.outcome)}", locale, price, limit)
+		return Messages.text("cost-threshold-approval.request.${outcomeKey(d.outcome)}", locale, price, limit, d.requestType ?: '?')
 	}
 
 	/** The short status message of the response, in the given locale. */
@@ -310,6 +368,7 @@ class CostApprovalLogic {
 			case Outcome.APPROVED: return 'approved'
 			case Outcome.OVER_THRESHOLD: return 'overThreshold'
 			case Outcome.CURRENCY_MISMATCH: return 'currencyMismatch'
+			case Outcome.NOT_CHECKED: return 'notChecked'
 			default: return 'noPrice'
 		}
 	}

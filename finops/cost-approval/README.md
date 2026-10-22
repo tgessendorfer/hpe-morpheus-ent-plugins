@@ -65,6 +65,13 @@ Policy (per *Approve Provision* policy that uses the integration):
 
 Order of precedence: policy, then options passed with the call, then integration, then the default.
 
+**Which requests are checked** (since 1.2.2): provisioning of an instance, app or cluster (or a
+server added to a cluster) and reconfigure of an instance, server or app. Every other request type
+(delete, expiration or shutdown extension, workflow run, cluster delete or remove) adds no monthly
+cost and is approved without a check, with *Approved automatically: the cost threshold applies to
+provisioning, app and reconfigure requests only* and the type in the request name. A request whose
+type cannot be read is checked.
+
 **Threshold format:** a plain non-negative number such as `50` or `50.00`. A single decimal comma
 with one or two digits after it is accepted too (`50,00` is 50.00). Forms that mix comma and dot
 or look like a thousands separator (`1.000,50`, `1,000`) are not guessed: such a value, like any

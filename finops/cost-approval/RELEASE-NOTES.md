@@ -6,6 +6,53 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 1.2.2
+
+**Only provisioning, app and reconfigure requests are checked against the threshold; deletes,
+extensions and workflow runs are approved.** Plugin code, provider code, option codes, plugin API
+1.4.2 and minimum appliance 9.0.2 are unchanged; no new options.
+
+### Changed
+
+- **What went wrong.** The plugin never read the request type. Attached to an *Approve Delete*,
+  *Approve Workflow Execute* or expiration/shutdown policy, it compared the monthly price of the
+  instance with the threshold, so deleting or extending an instance above the threshold was
+  rejected, and on Morpheus 9.0.2 nobody can override that decision by hand.
+- **What the plugin does now.** It reads the request type (the plugin API enum on the request,
+  else the type on Morpheus' internal request behind the references) and checks the price only for
+  provisioning of an instance, app or cluster, a server added to a cluster, and reconfigure of an
+  instance, server or app. Every other type is approved at once, with *Approved automatically: the
+  cost threshold applies to provisioning, app and reconfigure requests only (<type>)* as the
+  request name (German: *Automatisch freigegeben: Die Kostenschwelle gilt nur für Bereitstellungs-,
+  App- und Rekonfigurationsanfragen*), and one log line naming the type.
+- **A request whose type cannot be read is checked**, as before, so nothing is waved through only
+  because its type is unknown.
+
+### Behaviour changes from 1.2.1
+
+- Delete, extension, shutdown extension, workflow, cluster delete and cluster remove requests that
+  use this integration are approved regardless of price. In 1.2.1 those above the threshold were
+  rejected.
+- Provisioning, app and reconfigure requests are decided as in 1.2.1.
+
+### Verified
+
+- New unit tests (Spock): instance and app delete, extension and shutdown extension (plugin API
+  enum) are approved at 500 EUR against a 10 EUR threshold, with the new texts; instance, app,
+  instance reconfigure and server reconfigure are still rejected; the domain strings behind the
+  references (*Instance Delete Approval*, *Workflow Approval*, *Cluster Delete Approval* approved;
+  *Instance Approval*, *App Reconfigure Approval*, *Cluster Approval* and no type checked) decide
+  the same way; both bundles carry the new keys.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --warning-mode all`, 131 tests,
+  0 failures.
+
+### Not yet verified
+
+- On an appliance: which of the two places carries the type at runtime, a delete request through
+  an *Approve Delete* policy, and that an *Approve Provision* request is still checked.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.2.1...cost-approval-v1.2.2
+
 ## 1.2.1
 
 **Fix release: a decision is no longer lost when the plugin is reloaded or Morpheus restarts
