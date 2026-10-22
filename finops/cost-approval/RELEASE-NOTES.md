@@ -59,6 +59,12 @@ extensions and workflow runs are approved.** Plugin code, provider code, option 
 
 - App, cluster, reconfigure, extension and workflow requests on an appliance (unit tests only).
 
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same plugin id), status `loaded`.
+
+Built by the release workflow from the source at tag `cost-approval-v1.2.2`.
+
+sha256 `80df797dc43c0ac4bbf8ac88b99a3fe5df393d2df4425444cd59e56f2c49a3b4`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.2.1...cost-approval-v1.2.2
 
 ## 1.2.1
