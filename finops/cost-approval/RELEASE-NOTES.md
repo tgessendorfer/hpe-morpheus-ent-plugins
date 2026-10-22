@@ -67,6 +67,12 @@ minimum appliance 9.0.2 are unchanged; no new options.
   references.
 - On Morpheus 9.0.2.
 
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the previous version in place (same plugin id), status `loaded`; afterwards no plugin warning in the log.
+
+Built by the release workflow from the source at tag `cost-approval-v1.2.1`.
+
+sha256 `5b4c504145a653f71cc7cfc7c6f9aa812d6bbce92d8abd51fb183bf85554e9eb`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.2.0...cost-approval-v1.2.1
 
 ## 1.2.0

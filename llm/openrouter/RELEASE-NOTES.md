@@ -40,6 +40,12 @@ API 1.4.2. No new setting; plugin code unchanged.
 
 - A chat on the appliance with this jar.
 
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the previous version in place (same plugin id), status `loaded`; afterwards integrations 2 to 8 refreshed `ok`; no plugin warning in the log.
+
+Built by the release workflow from the source at tag `openrouter-v0.2.4`.
+
+sha256 `2caaacd746ceb8e1e4653392a8d6e4e19f4839d3a29b995c2979e44fc3beb08a`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.2.3...openrouter-v0.2.4
 
 ## 0.2.3

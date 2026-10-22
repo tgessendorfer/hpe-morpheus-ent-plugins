@@ -28,6 +28,12 @@ logged at INFO.
 
 No other change. Not yet verified on the lab: a cloud delete has not been run there.
 
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the previous version in place (same plugin id), status `loaded`; afterwards cloud 1 refreshed `ok`.
+
+Built by the release workflow from the source at tag `proxmox-ve-v0.1.32-lab`.
+
+sha256 `db97332a13ef06b86bc6b3e1c6135233d52394287debe12f1e4f42d9d5f8a4d9`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.31-lab...proxmox-ve-v0.1.32-lab
 
 ---

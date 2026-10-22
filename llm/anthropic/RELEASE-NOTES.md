@@ -51,6 +51,12 @@ setting; plugin code unchanged.
 
 - A tool loop with thinking on against api.anthropic.com. The lab integrations run with thinking off.
 
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the previous version in place (same plugin id), status `loaded`; afterwards integrations 2 to 8 refreshed `ok`; no plugin warning in the log.
+
+Built by the release workflow from the source at tag `anthropic-v1.6.5`.
+
+sha256 `8a455680a8ebdbb7ce0a2e3f55347a6131b4ad0f668adbb900fa933c2841f680`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.6.4...anthropic-v1.6.5
 
 ## 1.6.4

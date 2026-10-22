@@ -39,6 +39,12 @@ API 1.4.2. No new setting; plugin code unchanged.
 
 - A sync against a vLLM or Ollama endpoint; the lab has none.
 
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the previous version in place (same plugin id), status `loaded`; afterwards integrations 2 to 8 refreshed `ok`; no plugin warning in the log.
+
+Built by the release workflow from the source at tag `openai-v0.1.4`.
+
+sha256 `08e0bb1368e46f21db18e8fb5bb55ca68be632bdad4edbef389bd43ea2e7fbde`
+
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.3...openai-v0.1.4
 
 ## 0.1.3
