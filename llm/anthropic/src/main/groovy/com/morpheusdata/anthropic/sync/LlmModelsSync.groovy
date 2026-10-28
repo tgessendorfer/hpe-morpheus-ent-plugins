@@ -30,8 +30,11 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Syncs the model catalog returned by GET /v1/models into Morpheus.
- * Models that disappear from the catalog are disabled rather than deleted so
- * existing Agents keep a resolvable reference.
+ *
+ * Models that are no longer listed are removed. Morpheus shows disabled models exactly
+ * like enabled ones, in the integration's model tab and in the agent form, where picking
+ * one fails. The foreign key from ai_agent.model_id to llm_model has no cascade, so a
+ * model an agent still uses cannot be removed; that one is disabled instead and logged.
  */
 @Slf4j
 class LlmModelsSync {
@@ -52,19 +55,31 @@ class LlmModelsSync {
 
 	Map execute(String baseUrl, String apiKey, String apiVersion, Map opts = [:], Closure<Collection<LlmModel>> modelBuilder) {
 		Map result = apiService.listModels(baseUrl, apiKey, apiVersion, opts) ?: [success: false, msg: 'No response from the Anthropic models API']
-		if (result.success) {
-			Collection<LlmModel> freshModels = []
-			if (modelBuilder) {
-				Map apiResponse = result.data instanceof Map ? result.data as Map : [:]
-				def builtModels = modelBuilder.call(apiResponse)
-				if (builtModels instanceof Collection) {
-					freshModels = builtModels as Collection<LlmModel>
-				}
-			}
-			execute(freshModels)
-		} else {
+		if (!result.success) {
 			log.warn("Failed to refresh models from Anthropic: ${result.msg}")
+			return result
 		}
+		Map apiResponse = result.data instanceof Map ? result.data as Map : [:]
+		// A wrong base URL can answer 200 with a web page instead of the catalog. Synced as
+		// an empty catalog, that would remove every model the integration has.
+		if (!(apiResponse.data instanceof List)) {
+			log.warn("Skipping Anthropic model sync: ${baseUrl}${AnthropicApiService.MODELS_PATH} returned no model list")
+			return [success: false, msg: "${baseUrl}${AnthropicApiService.MODELS_PATH} returned no model list".toString()]
+		}
+		Collection<LlmModel> freshModels = []
+		if (modelBuilder) {
+			def builtModels = modelBuilder.call(apiResponse)
+			if (builtModels instanceof Collection) {
+				freshModels = builtModels as Collection<LlmModel>
+			}
+		}
+		if (!freshModels) {
+			// A gateway that lists no Claude model at all, for a moment or for good, is no
+			// reason to take every model away from the agents that use them.
+			log.warn("Skipping Anthropic model sync: ${baseUrl}${AnthropicApiService.MODELS_PATH} listed no Claude model; the stored models are kept")
+			return result
+		}
+		execute(freshModels)
 		return result
 	}
 
@@ -94,7 +109,7 @@ class LlmModelsSync {
 			// agent pointing at it is never left holding a disabled copy.
 			baseCode(existingModel.code) == baseCode(freshModel.code)
 		}.onDelete { List<LlmModel> removeList ->
-			disableMissingModels(removeList)
+			retireMissingModels(removeList)
 		}.onAdd { List<LlmModel> addList ->
 			addMissingModels(addList)
 		}.withLoadObjectDetails { List<SyncTask.UpdateItemDto<LlmModel, LlmModel>> updateItems ->
@@ -169,18 +184,54 @@ class LlmModelsSync {
 		return keep
 	}
 
-	protected void disableMissingModels(List<LlmModel> removeList) {
-		List<LlmModel> saveList = []
-		removeList?.each { LlmModel model ->
-			if (model?.enabled) {
-				log.debug("Disabling removed Anthropic model: ${model.code}")
-				model.enabled = false
-				saveList << model
+	/**
+	 * Removes models the catalog no longer lists. One an agent still points at cannot be
+	 * removed; it is disabled and logged, so that agent can be given another model.
+	 */
+	protected void retireMissingModels(List<LlmModel> missing) {
+		if (!missing) {
+			return
+		}
+		List<LlmModel> failed = removeModels(missing)
+		List<LlmModel> removed = missing - failed
+		if (removed) {
+			log.info("Removed Anthropic models that are no longer listed: ${removed*.code}")
+		}
+		if (failed) {
+			log.info("Anthropic models no longer listed but still used by an agent, left disabled: ${failed*.code}")
+			List<LlmModel> disable = failed.findAll { it.enabled != false }
+			disable.each { it.enabled = false }
+			if (disable) {
+				morpheusContext.llm.model.bulkSave(disable).blockingGet()
 			}
 		}
-		if (saveList) {
-			morpheusContext.llm.model.bulkSave(saveList).blockingGet()
+	}
+
+	/**
+	 * Removes the given models and returns the ones that could not be removed. A single
+	 * model an agent still points at fails a whole bulk removal, so a batch that fails as
+	 * a whole is retried one model at a time.
+	 */
+	protected List<LlmModel> removeModels(List<LlmModel> models) {
+		if (!models) {
+			return []
 		}
+		try {
+			def result = morpheusContext.llm.model.bulkRemove(models).blockingGet()
+			List<LlmModel> failedItems = (result?.failedItems ?: []) as List<LlmModel>
+			if (failedItems) {
+				return failedItems
+			}
+			if (result?.success != false) {
+				return []
+			}
+		} catch (Exception e) {
+			log.debug("Could not remove Anthropic models ${models*.code}: ${e.message}")
+		}
+		if (models.size() == 1) {
+			return models
+		}
+		return models.findAll { LlmModel model -> removeModels([model]) }
 	}
 
 	protected void addMissingModels(List<LlmModel> addList) {

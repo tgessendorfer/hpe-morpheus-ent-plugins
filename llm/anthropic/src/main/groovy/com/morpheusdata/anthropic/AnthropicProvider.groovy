@@ -22,6 +22,7 @@ import com.morpheusdata.anthropic.sync.LlmUsageSync
 import com.morpheusdata.core.MorpheusContext
 import com.morpheusdata.core.Plugin
 import com.morpheusdata.core.providers.LlmProvider
+import com.morpheusdata.model.AccountCredential
 import com.morpheusdata.model.AccountIntegration
 import com.morpheusdata.model.Icon
 import com.morpheusdata.model.NetworkProxy
@@ -111,6 +112,8 @@ class AnthropicProvider implements LlmProvider {
 	// that window within one question, the question itself drops out, and the model then
 	// answers as if the message had been empty. Each tool call id the model issues is
 	// mapped to the question it worked on, so a request that lost its question gets it back.
+	// Entries carry the scope of the request (integration and system prompt, see
+	// questionScope) and are only used within it.
 	protected static final ConcurrentHashMap<String, Map> QUESTION_BY_TOOL_CALL = new ConcurrentHashMap<>()
 	static final long QUESTION_BY_TOOL_CALL_TTL_MS = 60L * 60L * 1000L
 	static final int QUESTION_BY_TOOL_CALL_MAX = 10000
@@ -123,6 +126,9 @@ class AnthropicProvider implements LlmProvider {
 	static final int THINKING_BY_TOOL_CALL_MAX = 10000
 	static final String RESTORED_QUESTION_NOTE = '(The chat application dropped this question from the conversation ' +
 		'memory while the tool calls below were working on it. It is restored here; answer it.)\n\n'
+	static final String MISSING_API_KEY_MESSAGE = 'An Anthropic API key is required'
+	// A chat request that failed before any answer came back is sent this often in all.
+	static final int MAX_CHAT_ATTEMPTS = 3
 	static final String REPLACEMENT_CHARACTER_NOTE = 'Some earlier turns of this conversation came back from the chat ' +
 		'application with characters replaced by U+FFFD. Treat each such character as unknown and never copy it; ' +
 		'write every character of your answer correctly, including umlauts and other accented letters.'
@@ -445,7 +451,7 @@ class AnthropicProvider implements LlmProvider {
 			}
 			String apiKey = resolveApiKey(accountIntegration)
 			if (!apiKey) {
-				return ServiceResponse.error('An Anthropic API key is required')
+				return ServiceResponse.error(MISSING_API_KEY_MESSAGE)
 			}
 			def result = apiService.listModels(resolveBaseUrl(accountIntegration), apiKey,
 				resolveApiVersion(accountIntegration), buildClientOpts(accountIntegration))
@@ -496,44 +502,58 @@ class AnthropicProvider implements LlmProvider {
 			return ServiceResponse.error('Account integration is required for the Anthropic integration')
 		}
 		String apiKey = resolveApiKey(accountIntegration)
+		if (!apiKey) {
+			// Sent without a key the request would only come back 401, which the chat shows
+			// as "The AI model is no longer available".
+			log.warn("Anthropic integration ${accountIntegration.id} has no API key; the chat request is not sent")
+			return ServiceResponse.error(MISSING_API_KEY_MESSAGE)
+		}
 		String baseUrl = resolveBaseUrl(accountIntegration)
 		String apiVersion = resolveApiVersion(accountIntegration)
 		Map requestBody = buildMessagesRequestBody(request, accountIntegration, false)
+		String scope = questionScope(accountIntegration, request)
 
-		int maxAttempts = 3
-		Exception lastException = null
+		String lastFailure = null
 		Map requestOpts = buildClientOpts(accountIntegration, opts)
-		for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+		for (int attempt = 1; attempt <= MAX_CHAT_ATTEMPTS; attempt++) {
 			if (attempt > 1) {
-				log.warn("Anthropic API retry ${attempt - 1}/${maxAttempts - 1} after connection failure")
-				Thread.sleep(1500L * (attempt - 1))
+				log.warn("Anthropic API retry ${attempt - 1}/${MAX_CHAT_ATTEMPTS - 1} after ${lastFailure}")
+				sleeper.call(1500L * (attempt - 1))
 			}
 			try {
 				Map result = runToCompletion(requestBody) { Map body ->
 					apiService.createMessage(baseUrl, apiKey, body, apiVersion, resolveBetas(accountIntegration), requestOpts) as Map
 				}
-				if (result.success && result.data) {
-					rememberQuestion(requestBody, result.data as Map)
-					LlmChatResponse response = trackQuestionCost(requestBody, parseMessageResponse(result.data as Map))
+				if (result?.success && result.data) {
+					rememberQuestion(requestBody, result.data as Map, scope)
+					LlmChatResponse response = trackQuestionCost(requestBody, parseMessageResponse(result.data as Map, scope), scope)
 					response = ensureAnswerText(response, result.data as Map)
 					return ServiceResponse.success(appendUsageFooter(appendSourceList(response), accountIntegration))
 				}
 				if (isPromptTooLong(result)) {
 					return ServiceResponse.success(buildPromptTooLongResponse(result, requestBody))
 				}
-				return ServiceResponse.error(result.msg ?: 'Chat completion failed')
+				// The API service reports a failed call instead of throwing, so the retry is
+				// decided on the result: a broken connection or an overloaded API.
+				if (attempt < MAX_CHAT_ATTEMPTS && isRetryableResult(result)) {
+					lastFailure = "HTTP ${result?.statusCode ?: 'none'}: ${result?.msg}".toString()
+					continue
+				}
+				return ServiceResponse.error(result?.msg ?: 'Chat completion failed')
 			} catch (Exception e) {
-				lastException = e
-				if (isRetryableError(e) && attempt < maxAttempts) {
-					log.warn("Anthropic connection error (attempt ${attempt}): ${e.message}")
+				if (isRetryableError(e) && attempt < MAX_CHAT_ATTEMPTS) {
+					lastFailure = "connection error: ${e.message}".toString()
 					continue
 				}
 				log.error("Error during Anthropic chat completion: ${e.message}", e)
 				return ServiceResponse.error("Chat completion failed: ${e.message}")
 			}
 		}
-		return ServiceResponse.error("Chat completion failed after ${maxAttempts} attempts: ${lastException?.message}")
+		return ServiceResponse.error("Chat completion failed after ${MAX_CHAT_ATTEMPTS} attempts: ${lastFailure}")
 	}
+
+	/** Waits between chat retries; tests replace it. */
+	protected Closure sleeper = { long millis -> Thread.sleep(millis) }
 
 	@Override
 	void streamResponse(LlmIntegration llmIntegration, LlmChatRequest request, LlmStreamingResponseHandler handler, Map opts) {
@@ -544,9 +564,15 @@ class AnthropicProvider implements LlmProvider {
 				return
 			}
 			String apiKey = resolveApiKey(accountIntegration)
+			if (!apiKey) {
+				log.warn("Anthropic integration ${accountIntegration.id} has no API key; the chat request is not sent")
+				handler?.onError(new IllegalStateException(MISSING_API_KEY_MESSAGE))
+				return
+			}
 			String baseUrl = resolveBaseUrl(accountIntegration)
 			String apiVersion = resolveApiVersion(accountIntegration)
 			Map requestBody = buildMessagesRequestBody(request, accountIntegration, true)
+			String scope = questionScope(accountIntegration, request)
 
 			Map streamOpts = buildClientOpts(accountIntegration, opts)
 			Map result = runToCompletion(requestBody) { Map body ->
@@ -556,8 +582,8 @@ class AnthropicProvider implements LlmProvider {
 			}
 
 			if (result?.success && result.data) {
-				rememberQuestion(requestBody, result.data as Map)
-				LlmChatResponse response = trackQuestionCost(requestBody, parseMessageResponse(result.data as Map))
+				rememberQuestion(requestBody, result.data as Map, scope)
+				LlmChatResponse response = trackQuestionCost(requestBody, parseMessageResponse(result.data as Map, scope), scope)
 				response = ensureAnswerText(response, result.data as Map)
 				handler?.onCompleteResponse(appendUsageFooter(appendSourceList(response), accountIntegration))
 			} else if (isPromptTooLong(result)) {
@@ -608,9 +634,9 @@ class AnthropicProvider implements LlmProvider {
 			// and picks up where it left off. The blocks must go back verbatim:
 			// search results carry an encrypted_content field the API decrypts to
 			// restore them, and a modified one is a 400.
-			messages = messages + [[role: 'assistant', content: data.content]]
+			List resumed = messages + [[role: 'assistant', content: data.content]]
 			Map continued = new LinkedHashMap(requestBody)
-			continued.messages = messages
+			continued.messages = resumed
 			Map next
 			try {
 				next = call(continued)
@@ -622,14 +648,20 @@ class AnthropicProvider implements LlmProvider {
 			}
 			if (next?.success != true || !(next.data instanceof Map)) {
 				log.warn("Anthropic pause_turn continuation ${continuations} failed (${next?.msg}); returning the partial answer")
+				// messages stays without the paused turn: a request for the final answer
+				// hands that turn back itself, and twice would repeat its server_tool_use ids.
 				break
 			}
+			messages = resumed
 			data = next.data as Map
 			segments << data
 			result = next
 		}
 		if (data.stop_reason == 'pause_turn') {
 			log.warn("Anthropic turn still paused after ${continuations} continuations; returning what has been generated so far")
+		}
+		if (data.stop_reason == 'max_tokens') {
+			dropCutOffToolCall(data)
 		}
 
 		// A turn can end with nothing for the chat to show: the server-side loop spent
@@ -650,6 +682,20 @@ class AnthropicProvider implements LlmProvider {
 		merged.data = mergeMessageSegments(segments)
 		logFinishedTurn(requestBody, merged.data as Map, continuations, finalAnswerRequested)
 		return merged
+	}
+
+	/**
+	 * At max_tokens a tool_use block at the end of the turn was cut off inside its input.
+	 * Handed to Morpheus it would run an MCP tool with part of its arguments, so it is
+	 * dropped; tool calls before it are complete and stay.
+	 */
+	protected static void dropCutOffToolCall(Map data) {
+		List content = data?.content instanceof List ? data.content as List : []
+		def last = content ? content[-1] : null
+		if (last instanceof Map && (last as Map).type == 'tool_use') {
+			log.warn("Anthropic turn reached max_tokens inside a call to ${(last as Map).name}; the cut-off tool call is dropped")
+			data.content = content.take(content.size() - 1)
+		}
 	}
 
 	/**
@@ -801,18 +847,7 @@ class AnthropicProvider implements LlmProvider {
 				content.addAll(segment.content as List)
 			}
 			if (segment.usage instanceof Map) {
-				(segment.usage as Map).each { key, value ->
-					// Every segment is a billed request of its own, so the counts add up.
-					if (value instanceof Integer || value instanceof Long) {
-						usage[key] = (toInteger(usage[key]) ?: 0) + ((Number) value).intValue()
-					} else if (value instanceof Number) {
-						// A decimal such as OpenRouter's cost; truncated to an int it reads as free.
-						BigDecimal sofar = usage[key] instanceof Number ? new BigDecimal(usage[key].toString()) : BigDecimal.ZERO
-						usage[key] = sofar + new BigDecimal(value.toString())
-					} else if (!usage.containsKey(key)) {
-						usage[key] = value
-					}
-				}
+				addUsage(usage, segment.usage as Map)
 			}
 		}
 		Map merged = new LinkedHashMap(segments[-1])
@@ -821,6 +856,30 @@ class AnthropicProvider implements LlmProvider {
 			merged.usage = usage
 		}
 		return merged
+	}
+
+	/**
+	 * Adds one segment's usage to the running total. Every segment is a billed request of
+	 * its own, so the counts add up - nested ones too, such as server_tool_use's
+	 * web_search_requests and cache_creation's per-TTL tokens.
+	 */
+	protected static void addUsage(Map total, Map usage) {
+		usage.each { key, value ->
+			if (value instanceof Integer || value instanceof Long) {
+				total[key] = (toInteger(total[key]) ?: 0) + ((Number) value).intValue()
+			} else if (value instanceof Number) {
+				// A decimal such as OpenRouter's cost; truncated to an int it reads as free.
+				BigDecimal sofar = total[key] instanceof Number ? new BigDecimal(total[key].toString()) : BigDecimal.ZERO
+				total[key] = sofar + new BigDecimal(value.toString())
+			} else if (value instanceof Map) {
+				// A copy, so the first segment's own usage is never changed.
+				Map nested = total[key] instanceof Map ? total[key] as Map : new LinkedHashMap()
+				addUsage(nested, value as Map)
+				total[key] = nested
+			} else if (!total.containsKey(key)) {
+				total[key] = value
+			}
+		}
 	}
 
 	// ------------------------------------------------------------------
@@ -840,6 +899,7 @@ class AnthropicProvider implements LlmProvider {
 		List<Map> messages = []
 
 		boolean thinkingEnabled = isThinkingEnabled(accountIntegration)
+		String scope = questionScope(accountIntegration, request)
 
 		request.messages?.each { LlmChatMessage msg ->
 			String role = msg.role?.toLowerCase() ?: 'user'
@@ -873,7 +933,7 @@ class AnthropicProvider implements LlmProvider {
 			if (role == 'assistant' && metadata.tool_calls) {
 				List<Map> blocks = []
 				if (thinkingEnabled) {
-					blocks.addAll(rememberedThinking(metadata.tool_calls as List))
+					blocks.addAll(rememberedThinking(metadata.tool_calls as List, scope))
 				}
 				if (msg.content) {
 					blocks << [type: 'text', text: msg.content.toString()]
@@ -982,6 +1042,11 @@ class AnthropicProvider implements LlmProvider {
 				tools = tools[0..<tools.size() - 1] + [lastTool]
 			}
 			Map toolChoice = convertToolChoice(request.options?.tool_choice)
+			if (thinkingEnabled && (toolChoice?.type == 'any' || toolChoice?.type == 'tool')) {
+				// With extended thinking the API accepts only auto and none; forcing a tool is a 400.
+				log.info("Anthropic: tool_choice ${toolChoice.type} is not allowed with extended thinking, sending auto")
+				toolChoice = [type: 'auto']
+			}
 			if (toolChoice) {
 				requestBody.tool_choice = toolChoice
 			}
@@ -998,7 +1063,7 @@ class AnthropicProvider implements LlmProvider {
 		if (stream != null) {
 			requestBody.stream = stream
 		}
-		if (restoreLostQuestion(messages)) {
+		if (restoreLostQuestion(messages, scope)) {
 			log.info("Restored the user's question, which the Morpheus chat memory had dropped during a tool loop (${messages.size()} messages)")
 		}
 		int replaced = countReplacementChars(requestBody.messages)
@@ -1189,9 +1254,10 @@ class AnthropicProvider implements LlmProvider {
 	/**
 	 * Turn a /v1/messages response (or an accumulated stream) into an
 	 * LlmChatResponse, mapping tool_use blocks back onto the OpenAI-shaped
-	 * tool_calls metadata Morpheus expects.
+	 * tool_calls metadata Morpheus expects. The scope is the one of the request
+	 * (questionScope); thinking blocks of a tool-call turn are kept under it.
 	 */
-	protected LlmChatResponse parseMessageResponse(Map data) {
+	protected LlmChatResponse parseMessageResponse(Map data, String scope = null) {
 		LlmChatResponse response = new LlmChatResponse()
 		response.id = data.id?.toString()
 		response.model = data.model?.toString()
@@ -1266,7 +1332,7 @@ class AnthropicProvider implements LlmProvider {
 		}
 
 		if (toolCalls && thinkingBlocks) {
-			rememberThinking(toolCalls*.id as List<String>, thinkingBlocks)
+			rememberThinking(toolCalls*.id as List<String>, thinkingBlocks, scope)
 		}
 
 		if (toolCalls) {
@@ -1459,8 +1525,32 @@ class AnthropicProvider implements LlmProvider {
 	// Helpers
 	// ------------------------------------------------------------------
 
+	/**
+	 * The API key: from the credential Morpheus handed over, else from the stored
+	 * credential, else from the integration's own fields. An update through
+	 * PUT /api/integrations and a refresh hand the provider no stored credential (only the
+	 * request's own keys, or none), so a key kept in a stored credential is loaded here;
+	 * without it saving or refreshing such an integration failed with "An Anthropic API key
+	 * is required".
+	 */
 	protected String resolveApiKey(AccountIntegration accountIntegration) {
+		if (!accountIntegration.credentialData?.password) {
+			try {
+				AccountCredential credential = loadAccountCredential(accountIntegration)
+				if (credential?.data?.password) {
+					accountIntegration.credentialData = credential.data
+					accountIntegration.credentialLoaded = true
+				}
+			} catch (Exception e) {
+				log.warn("Could not load the stored credential of Anthropic integration ${accountIntegration.id}: ${e.message}")
+			}
+		}
 		return accountIntegration.credentialData?.password ?: accountIntegration.serviceToken ?: accountIntegration.servicePassword
+	}
+
+	/** The appliance lookup, on its own so tests can answer it. Null for Local Credentials. */
+	protected AccountCredential loadAccountCredential(AccountIntegration accountIntegration) {
+		return morpheusContext?.services?.accountCredential?.loadCredentials(accountIntegration)
 	}
 
 	protected String resolveBaseUrl(AccountIntegration accountIntegration) {
@@ -1708,14 +1798,14 @@ class AnthropicProvider implements LlmProvider {
 	 * Adds this request's cost to the running total of its question, and hands the
 	 * total to the response. A final answer closes the question.
 	 */
-	protected LlmChatResponse trackQuestionCost(Map requestBody, LlmChatResponse response) {
+	protected LlmChatResponse trackQuestionCost(Map requestBody, LlmChatResponse response, String scope = null) {
 		def cost = response?.metadata?.get('cost')
 		if (!(cost instanceof BigDecimal)) {
 			return response
 		}
 		long now = System.currentTimeMillis()
 		QUESTION_COSTS.values().removeIf { Map tally -> now - (tally.updated as long) > QUESTION_COST_TTL_MS }
-		String key = questionKey(requestBody)
+		String key = questionKey(requestBody, scope)
 		Map tally = QUESTION_COSTS.compute(key) { String ignored, Map existing ->
 			[total   : ((existing?.total ?: BigDecimal.ZERO) as BigDecimal) + (cost as BigDecimal),
 			 requests: ((existing?.requests ?: 0) as int) + 1,
@@ -1730,11 +1820,12 @@ class AnthropicProvider implements LlmProvider {
 	}
 
 	/**
-	 * Identifies the question a request belongs to: the model and the conversation up
-	 * to the user's latest message. Every tool round of one question repeats exactly
-	 * that prefix and only appends to it. Morpheus passes no conversation id.
+	 * Identifies the question a request belongs to: the scope (integration and system
+	 * prompt), the model and the conversation up to the user's latest message. Every tool
+	 * round of one question repeats exactly that prefix and only appends to it. Morpheus
+	 * passes no conversation id.
 	 */
-	protected static String questionKey(Map requestBody) {
+	protected static String questionKey(Map requestBody, String scope = null) {
 		List messages = (requestBody?.messages ?: []) as List
 		boolean restored = messages.any { def message ->
 			message instanceof Map && message.role == 'user' && message.content instanceof CharSequence &&
@@ -1743,7 +1834,7 @@ class AnthropicProvider implements LlmProvider {
 		if (restored) {
 			// The question was put back after the chat memory dropped it: keep counting on
 			// the key its first requests used, so the footer covers the whole question.
-			String original = knownQuestionEntry(messages)?.costKey as String
+			String original = knownQuestionEntry(messages, scope)?.costKey as String
 			if (original) {
 				return original
 			}
@@ -1754,8 +1845,26 @@ class AnthropicProvider implements LlmProvider {
 				last = index
 			}
 		}
-		String prefix = JsonOutput.toJson([model: requestBody?.model, messages: last >= 0 ? messages[0..last] : []])
-		return MessageDigest.getInstance('SHA-256').digest(prefix.getBytes('UTF-8')).encodeHex().toString()
+		String prefix = JsonOutput.toJson([scope: scope, model: requestBody?.model, messages: last >= 0 ? messages[0..last] : []])
+		return sha256(prefix)
+	}
+
+	protected static String sha256(String text) {
+		return MessageDigest.getInstance('SHA-256').digest((text ?: '').getBytes('UTF-8')).encodeHex().toString()
+	}
+
+	/**
+	 * What the per-question maps (question, thinking blocks, cost) are scoped to: the
+	 * integration and the system prompt Morpheus sent, which belongs to the agent. The
+	 * maps are shared by every integration, tenant and user on the appliance, and a tool
+	 * call id is only as unique as the backend behind the integration makes it.
+	 */
+	protected static String questionScope(AccountIntegration accountIntegration, LlmChatRequest request) {
+		String system = (request?.messages ?: []).findAll { LlmChatMessage msg ->
+			String role = msg?.role?.toLowerCase()
+			(role == 'system' || role == 'developer') && msg.content
+		}.collect { LlmChatMessage msg -> msg.content.toString() }.join('\n\n')
+		return "${accountIntegration?.id ?: 'none'}:${sha256(system).substring(0, 16)}".toString()
 	}
 
 	/** The text of the latest user message that is a question, not a tool result; null when there is none. */
@@ -1794,23 +1903,37 @@ class AnthropicProvider implements LlmProvider {
 	 * Maps every tool call the model issued in this turn to the question of the request,
 	 * so the question can be put back once the chat memory has dropped it.
 	 */
-	protected static void rememberQuestion(Map requestBody, Map data) {
+	protected static void rememberQuestion(Map requestBody, Map data, String scope = null) {
 		String question = latestQuestion(requestBody?.messages as List)
 		List<String> ids = toolCallIds([content: data?.content])
 		if (!question || !ids) {
 			return
 		}
 		long now = System.currentTimeMillis()
-		String costKey = questionKey(requestBody)
+		String costKey = questionKey(requestBody, scope)
 		ids.findAll { String id -> isDistinctToolCallId(id) }.each { String id ->
-			QUESTION_BY_TOOL_CALL.put(id, [question: question, costKey: costKey, updated: now])
+			QUESTION_BY_TOOL_CALL.put(id, [question: question, costKey: costKey, scope: scope, updated: now])
 		}
-		QUESTION_BY_TOOL_CALL.values().removeIf { Map entry -> now - (entry.updated as long) > QUESTION_BY_TOOL_CALL_TTL_MS }
-		int excess = QUESTION_BY_TOOL_CALL.size() - QUESTION_BY_TOOL_CALL_MAX
-		if (excess > 0) {
-			// Drop the oldest entries only: a loop still running keeps its question.
-			QUESTION_BY_TOOL_CALL.entrySet().sort { Map.Entry<String, Map> entry -> entry.value.updated as long }
-				.take(excess).each { Map.Entry<String, Map> entry -> QUESTION_BY_TOOL_CALL.remove(entry.key) }
+		evictEntries(QUESTION_BY_TOOL_CALL, QUESTION_BY_TOOL_CALL_TTL_MS, QUESTION_BY_TOOL_CALL_MAX)
+	}
+
+	/**
+	 * Drops expired entries and, above the cap, the oldest ones: a loop still running keeps
+	 * its entry. One caller at a time evicts, and it counts the excess under the lock, so
+	 * concurrent requests at the cap never drop more than that.
+	 */
+	protected static void evictEntries(ConcurrentHashMap<String, Map> entries, long ttlMs, int max) {
+		long now = System.currentTimeMillis()
+		entries.values().removeIf { Map entry -> now - (entry.updated as long) > ttlMs }
+		if (entries.size() <= max) {
+			return
+		}
+		synchronized (entries) {
+			int excess = entries.size() - max
+			if (excess > 0) {
+				entries.entrySet().sort { Map.Entry<String, Map> entry -> entry.value.updated as long }
+					.take(excess).each { Map.Entry<String, Map> entry -> entries.remove(entry.key) }
+			}
 		}
 	}
 
@@ -1818,7 +1941,7 @@ class AnthropicProvider implements LlmProvider {
 	 * Keeps the thinking blocks of a turn that issued tool calls, unchanged (thinking and
 	 * signature, or the data of a redacted block), under each of its tool call ids.
 	 */
-	protected static void rememberThinking(List<String> toolCallIds, List<Map> blocks) {
+	protected static void rememberThinking(List<String> toolCallIds, List<Map> blocks, String scope = null) {
 		List<String> ids = toolCallIds?.findAll { String id -> isDistinctToolCallId(id) }
 		// A thinking block without its signature is rejected when sent back; better none.
 		if (!ids || !blocks || blocks.any { Map block -> block.type == 'thinking' && !block.signature }) {
@@ -1829,22 +1952,17 @@ class AnthropicProvider implements LlmProvider {
 			block.type == 'redacted_thinking' ? [type: 'redacted_thinking', data: block.data] :
 				[type: 'thinking', thinking: block.thinking, signature: block.signature]
 		}
-		ids.each { String id -> THINKING_BY_TOOL_CALL.put(id, [blocks: kept, updated: now]) }
-		THINKING_BY_TOOL_CALL.values().removeIf { Map entry -> now - (entry.updated as long) > THINKING_BY_TOOL_CALL_TTL_MS }
-		int excess = THINKING_BY_TOOL_CALL.size() - THINKING_BY_TOOL_CALL_MAX
-		if (excess > 0) {
-			THINKING_BY_TOOL_CALL.entrySet().sort { Map.Entry<String, Map> entry -> entry.value.updated as long }
-				.take(excess).each { Map.Entry<String, Map> entry -> THINKING_BY_TOOL_CALL.remove(entry.key) }
-		}
+		ids.each { String id -> THINKING_BY_TOOL_CALL.put(id, [blocks: kept, scope: scope, updated: now]) }
+		evictEntries(THINKING_BY_TOOL_CALL, THINKING_BY_TOOL_CALL_TTL_MS, THINKING_BY_TOOL_CALL_MAX)
 	}
 
-	/** The thinking blocks remembered for the first known of these OpenAI-shaped tool calls, or none. */
-	protected static List<Map> rememberedThinking(List toolCalls) {
+	/** The thinking blocks remembered in this scope for the first known of these OpenAI-shaped tool calls, or none. */
+	protected static List<Map> rememberedThinking(List toolCalls, String scope = null) {
 		long now = System.currentTimeMillis()
 		for (def call : (toolCalls ?: [])) {
 			String id = call instanceof Map ? (call as Map).id?.toString() : null
 			Map entry = isDistinctToolCallId(id) ? THINKING_BY_TOOL_CALL.get(id) : null
-			if (entry && now - (entry.updated as long) <= THINKING_BY_TOOL_CALL_TTL_MS) {
+			if (entry && entry.scope == scope && now - (entry.updated as long) <= THINKING_BY_TOOL_CALL_TTL_MS) {
 				return (entry.blocks as List<Map>).collect { new LinkedHashMap(it) }
 			}
 		}
@@ -1892,16 +2010,19 @@ class AnthropicProvider implements LlmProvider {
 	}
 
 	/**
-	 * Only ids that look random are trusted. The map is shared by every integration and user,
-	 * and a backend that numbers its tool calls (call_0, functions.list_servers:0) would
-	 * otherwise hand one conversation another conversation's question.
+	 * Only ids that look random are trusted. A backend that numbers its tool calls (call_0,
+	 * functions.list_servers:0) would otherwise hand one conversation another conversation's
+	 * question within the same integration and agent.
 	 */
 	protected static boolean isDistinctToolCallId(String id) {
 		return id != null && id.length() >= 16 && !(id ==~ /.*[:_.\-]\d{1,4}/)
 	}
 
-	/** The remembered entry of the first known tool call in these messages, or null. */
-	protected static Map knownQuestionEntry(List messages) {
+	/**
+	 * The remembered entry of the first known tool call in these messages, or null. With
+	 * anyScope false only an entry of this scope counts.
+	 */
+	protected static Map knownQuestionEntry(List messages, String scope = null, boolean anyScope = false) {
 		long now = System.currentTimeMillis()
 		for (def message : (messages ?: [])) {
 			if (!(message instanceof Map)) {
@@ -1909,7 +2030,7 @@ class AnthropicProvider implements LlmProvider {
 			}
 			for (String id : toolCallIds(message as Map)) {
 				Map entry = isDistinctToolCallId(id) ? QUESTION_BY_TOOL_CALL.get(id) : null
-				if (entry && now - (entry.updated as long) <= QUESTION_BY_TOOL_CALL_TTL_MS) {
+				if (entry && (anyScope || entry.scope == scope) && now - (entry.updated as long) <= QUESTION_BY_TOOL_CALL_TTL_MS) {
 					return entry
 				}
 			}
@@ -1920,14 +2041,18 @@ class AnthropicProvider implements LlmProvider {
 	/**
 	 * Puts the question back at the start of a request that has none left: Morpheus
 	 * evicted it from its chat memory, but the tool calls that worked on it are still
-	 * there. Returns true when a question was restored.
+	 * there. Only a question asked in the same scope comes back. Returns true when a
+	 * question was restored.
 	 */
-	protected static boolean restoreLostQuestion(List<Map> messages) {
+	protected static boolean restoreLostQuestion(List<Map> messages, String scope = null) {
 		if (!messages || latestQuestion(messages)) {
 			return false
 		}
-		String question = knownQuestionEntry(messages)?.question as String
+		String question = knownQuestionEntry(messages, scope)?.question as String
 		if (!question) {
+			if (knownQuestionEntry(messages, scope, true)) {
+				log.info('A request without its question has tool calls known from another integration or system prompt; the question is not restored')
+			}
 			return false
 		}
 		messages.add(0, [role: 'user', content: RESTORED_QUESTION_NOTE + question])
@@ -2287,9 +2412,32 @@ class AnthropicProvider implements LlmProvider {
 	}
 
 	protected boolean isRetryableError(Exception e) {
-		String msg = e?.message?.toLowerCase() ?: ''
+		return isRetryableMessage(e?.message)
+	}
+
+	/**
+	 * A failed call worth sending again: the connection broke before any HTTP answer came
+	 * back, or Anthropic answered 529 (overloaded). A read timeout is not repeated: the
+	 * request may still be running, and the chat would wait for it once more.
+	 */
+	protected static boolean isRetryableResult(Map result) {
+		if (result == null || result.success == true) {
+			return false
+		}
+		String status = result.statusCode?.toString()
+		if (status == '529') {
+			return true
+		}
+		return !(status ==~ /\d{3}/) && isRetryableMessage(result.msg?.toString())
+	}
+
+	protected static boolean isRetryableMessage(String message) {
+		String msg = message?.toLowerCase() ?: ''
+		if (msg.contains('read timed out')) {
+			return false
+		}
 		return msg.contains('failed to respond') || msg.contains('connection') || msg.contains('reset') ||
 			msg.contains('broken pipe') || msg.contains('socket') || msg.contains('nohttpresponse') ||
-			msg.contains('stream closed') || msg.contains('timeout')
+			msg.contains('stream closed') || msg.contains('timeout') || msg.contains('connect timed out')
 	}
 }

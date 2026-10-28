@@ -1,6 +1,7 @@
 package com.morpheusdata.anthropic
 
 import com.morpheusdata.core.util.HttpApiClient
+import com.morpheusdata.model.AccountCredential
 import com.morpheusdata.model.AccountIntegration
 import com.morpheusdata.model.NetworkProxy
 import com.morpheusdata.model.OptionType
@@ -9,6 +10,7 @@ import com.morpheusdata.model.llm.LlmChatRequest
 import com.morpheusdata.model.llm.LlmChatResponse
 import com.morpheusdata.model.llm.LlmIntegration
 import com.morpheusdata.model.llm.LlmModel
+import com.morpheusdata.response.LlmStreamingResponseHandler
 import com.morpheusdata.response.ServiceResponse
 import com.morpheusdata.anthropic.sync.LlmUsageSync
 import spock.lang.Specification
@@ -1465,10 +1467,12 @@ class AnthropicProviderSpec extends Specification {
 	def "a request whose question the chat memory dropped gets it back from the tool calls that worked on it"() {
 		given: 'the model answered the question with a tool call'
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
-		Map firstBody = provider.buildMessagesRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
-		AnthropicProvider.rememberQuestion(firstBody, [content: [[type: 'tool_use', id: 'toolu_01AbCdEfGhIjKlMn', name: 'list_servers', input: [:]]]])
+		LlmChatRequest first = new LlmChatRequest(messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')])
+		Map firstBody = provider.buildMessagesRequestBody(first, integration, false)
+		AnthropicProvider.rememberQuestion(firstBody, [content: [[type: 'tool_use', id: 'toolu_01AbCdEfGhIjKlMn', name: 'list_servers', input: [:]]]],
+			AnthropicProvider.questionScope(integration, first))
 
-		and: 'a later request where Morpheus evicted the question, only the tool loop is left'
+		and: 'a later request where Morpheus evicted the question, only the system prompt and the tool loop are left'
 		LlmChatRequest evicted = new LlmChatRequest(messages: [
 			message('system', 'You are Murph.'),
 			message('assistant', null, [tool_calls: [[id: 'toolu_01AbCdEfGhIjKlMn', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
@@ -1659,15 +1663,17 @@ class AnthropicProviderSpec extends Specification {
 	def "with thinking on, a tool loop gets the thinking blocks of its tool-call turn back, signature included"() {
 		given: 'a response that thought, then called a tool'
 		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+		AccountIntegration ai = configured([thinkingEnabled: 'on'])
+		LlmChatRequest loop = toolLoop('toolu_01AbCdEfGhIjKlMn')
 		provider.parseMessageResponse([id: 'msg_1', role: 'assistant', stop_reason: 'tool_use', content: [
 			[type: 'thinking', thinking: 'I should list the servers.', signature: 'sig-abc'],
 			[type: 'redacted_thinking', data: 'opaque'],
 			[type: 'text', text: 'Checking.'],
 			[type: 'tool_use', id: 'toolu_01AbCdEfGhIjKlMn', name: 'list_servers', input: [:]]
-		]])
+		]], AnthropicProvider.questionScope(ai, loop))
 
 		when: 'Morpheus sends the loop back, rebuilt from its stored tool_calls'
-		Map body = provider.buildMessagesRequestBody(toolLoop('toolu_01AbCdEfGhIjKlMn'), configured([thinkingEnabled: 'on']), false)
+		Map body = provider.buildMessagesRequestBody(loop, ai, false)
 
 		then:
 		body.thinking.type == 'enabled'
@@ -1737,18 +1743,20 @@ class AnthropicProviderSpec extends Specification {
 	def "a loop with several tool rounds keeps thinking: only its first tool-call message carries thinking"() {
 		given: 'round 1 thought and called a tool; round 2 called the next tool without thinking'
 		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
-		provider.parseMessageResponse([role: 'assistant', stop_reason: 'tool_use', content: [
-			[type: 'thinking', thinking: 'List first.', signature: 'sig-1'],
-			[type: 'tool_use', id: 'toolu_01AbCdEfGhIjKlMn', name: 'list_servers', input: [:]]]])
-		provider.parseMessageResponse([role: 'assistant', stop_reason: 'tool_use', content: [
-			[type: 'tool_use', id: 'toolu_02OpQrStUvWxYzAb', name: 'get_server', input: [id: 1]]]])
+		AccountIntegration ai = configured([thinkingEnabled: 'on'])
 		LlmChatRequest round3 = new LlmChatRequest(messages: toolLoop('toolu_01AbCdEfGhIjKlMn').messages + [
 			message('assistant', null, [tool_calls: [[id: 'toolu_02OpQrStUvWxYzAb', type: 'function', function: [name: 'get_server', arguments: '{"id":1}']]]]),
 			message('tool', '{"name":"web-1"}', [tool_call_id: 'toolu_02OpQrStUvWxYzAb'])
 		])
+		String scope = AnthropicProvider.questionScope(ai, round3)
+		provider.parseMessageResponse([role: 'assistant', stop_reason: 'tool_use', content: [
+			[type: 'thinking', thinking: 'List first.', signature: 'sig-1'],
+			[type: 'tool_use', id: 'toolu_01AbCdEfGhIjKlMn', name: 'list_servers', input: [:]]]], scope)
+		provider.parseMessageResponse([role: 'assistant', stop_reason: 'tool_use', content: [
+			[type: 'tool_use', id: 'toolu_02OpQrStUvWxYzAb', name: 'get_server', input: [id: 1]]]], scope)
 
 		when:
-		Map body = provider.buildMessagesRequestBody(round3, configured([thinkingEnabled: 'on']), false)
+		Map body = provider.buildMessagesRequestBody(round3, ai, false)
 
 		then:
 		body.thinking.type == 'enabled'
@@ -1768,5 +1776,323 @@ class AnthropicProviderSpec extends Specification {
 
 		then:
 		AnthropicProvider.THINKING_BY_TOOL_CALL.isEmpty()
+	}
+
+	// ------------------------------------------------------------------
+	// Retries, stored credentials, scoped maps, cut-off turns (1.6.6)
+	// ------------------------------------------------------------------
+
+	private static AnthropicProvider providerAnsweringInTurn(List<Map> results, List<Map> sent) {
+		AnthropicProvider withApi = new AnthropicProvider(null, null)
+		withApi.sleeper = { long millis -> }
+		withApi.apiService = new AnthropicApiService() {
+			@Override
+			Map createMessage(String baseUrl, String apiKey, Map requestBody, String apiVersion, List<String> betas, Map opts) {
+				sent << requestBody
+				return results[Math.min(sent.size(), results.size()) - 1]
+			}
+		}
+		return withApi
+	}
+
+	def "a chat request that lost its connection, or met an overloaded API, is sent again"() {
+		given:
+		List<Map> sent = []
+		Map answered = [success: true, data: [stop_reason: 'end_turn', content: [[type: 'text', text: 'Done.']], usage: [input_tokens: 1, output_tokens: 1]]]
+		AnthropicProvider withApi = providerAnsweringInTurn([failure, answered], sent)
+		AccountIntegration ai = configured([:])
+		ai.servicePassword = 'sk-ant-test'
+
+		when:
+		ServiceResponse<LlmChatResponse> response = withApi.generateResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(messages: [message('user', 'hi')]), [:])
+
+		then: 'the API service reports these as a failed result, it never throws'
+		response.success
+		response.data.message.content == 'Done.'
+		sent.size() == 2
+
+		where:
+		failure << [
+			[success: false, msg: 'Connection reset'],
+			[success: false, msg: 'api.example.com:443 failed to respond'],
+			[success: false, statusCode: '529', errorType: 'overloaded_error', msg: 'API returned 529: Overloaded']
+		]
+	}
+
+	def "an HTTP error or a read timeout is not sent again, and a broken connection at most three times"() {
+		given:
+		List<Map> sent = []
+		AnthropicProvider withApi = providerAnsweringInTurn([failure], sent)
+		AccountIntegration ai = configured([:])
+		ai.servicePassword = 'sk-ant-test'
+
+		when:
+		ServiceResponse<LlmChatResponse> response = withApi.generateResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(messages: [message('user', 'hi')]), [:])
+
+		then:
+		!response.success
+		sent.size() == attempts
+
+		where:
+		failure                                                                               || attempts
+		[success: false, statusCode: '400', msg: 'API returned 400: the connection tool failed'] || 1
+		[success: false, statusCode: '401', msg: 'API returned 401: invalid x-api-key']        || 1
+		[success: false, msg: 'Read timed out']                                                || 1
+		[success: false, msg: 'Connection reset']                                              || AnthropicProvider.MAX_CHAT_ATTEMPTS
+	}
+
+	def "a chat request without any API key is not sent"() {
+		given:
+		List<Map> sent = []
+		AnthropicProvider withApi = providerAnsweringInTurn([[success: true, data: [content: []]]], sent)
+		LlmStreamingResponseHandler handler = Mock()
+		LlmIntegration llm = new LlmIntegration(accountIntegration: configured([:]))
+		LlmChatRequest request = new LlmChatRequest(messages: [message('user', 'hi')])
+
+		when:
+		ServiceResponse<LlmChatResponse> response = withApi.generateResponse(llm, request, [:])
+		withApi.streamResponse(llm, request, handler, [:])
+
+		then:
+		!response.success
+		response.errors.error.contains('API key is required')
+		1 * handler.onError({ it.message == AnthropicProvider.MISSING_API_KEY_MESSAGE })
+		sent.isEmpty()
+	}
+
+	def "a key kept in a stored credential is loaded when Morpheus did not hand it over"() {
+		given: 'an update through the REST API or a refresh: no credentialData, an old value in the local field'
+		int lookups = 0
+		AnthropicProvider withLookup = new AnthropicProvider(null, null) {
+			@Override
+			protected AccountCredential loadAccountCredential(AccountIntegration accountIntegration) {
+				lookups++
+				return new AccountCredential(data: [password: 'sk-ant-stored'])
+			}
+		}
+		AccountIntegration ai = new AccountIntegration(id: 3L, servicePassword: 'sk-ant-stale')
+
+		expect:
+		withLookup.resolveApiKey(ai) == 'sk-ant-stored'
+		withLookup.resolveApiKey(ai) == 'sk-ant-stored'
+
+		and: 'looked up once, then kept on the integration'
+		lookups == 1
+		ai.credentialLoaded
+	}
+
+	def "a handed-over key is used as it is, and Local Credentials or a failing lookup fall back to the local field"() {
+		given:
+		List<Long> looked = []
+		AnthropicProvider withLookup = new AnthropicProvider(null, null) {
+			@Override
+			protected AccountCredential loadAccountCredential(AccountIntegration accountIntegration) {
+				looked << accountIntegration.id
+				if (accountIntegration.id == 6L) {
+					throw new RuntimeException('database unavailable')
+				}
+				return null
+			}
+		}
+
+		expect:
+		withLookup.resolveApiKey(new AccountIntegration(id: 99L, credentialData: [password: 'sk-ant-handed'], servicePassword: 'stale')) == 'sk-ant-handed'
+		withLookup.resolveApiKey(new AccountIntegration(id: 5L, servicePassword: 'sk-ant-local')) == 'sk-ant-local'
+		withLookup.resolveApiKey(new AccountIntegration(id: 6L, servicePassword: 'sk-ant-local')) == 'sk-ant-local'
+		looked == [5L, 6L]
+	}
+
+	def "saving an integration whose key sits in a stored credential succeeds"() {
+		given:
+		AnthropicProvider withLookup = new AnthropicProvider(null, null) {
+			@Override
+			protected AccountCredential loadAccountCredential(AccountIntegration accountIntegration) {
+				return new AccountCredential(data: [password: 'sk-ant-stored'])
+			}
+		}
+		List<String> keys = []
+		withLookup.apiService = new AnthropicApiService() {
+			@Override
+			Map listModels(String baseUrl, String apiKey, String apiVersion, Map opts) {
+				keys << apiKey
+				return [success: true, data: [data: []]]
+			}
+		}
+
+		when:
+		ServiceResponse response = withLookup.validate(new LlmIntegration(accountIntegration: new AccountIntegration(id: 3L)), [:])
+
+		then:
+		response.success
+		keys == ['sk-ant-stored']
+	}
+
+	def "a failed continuation of a turn without text asks for the answer with the paused turn sent back once"() {
+		given:
+		List<Map> sent = []
+		Closure<Map> call = { Map body ->
+			sent << body
+			if (sent.size() == 1) {
+				return [success: true, data: serverToolsOnlyTurn('pause_turn')]
+			}
+			if (sent.size() == 2) {
+				return [success: false, statusCode: '529', msg: 'API returned 529: Overloaded']
+			}
+			return [success: true, data: [stop_reason: 'end_turn', content: [[type: 'text', text: '9.0.2 is current.']]]]
+		}
+
+		when:
+		Map result = provider.runToCompletion([model: 'claude-sonnet-5', messages: [[role: 'user', content: 'GA?']]], call)
+
+		then: 'twice would repeat its server_tool_use ids, which the API rejects'
+		sent.size() == 3
+		sent[1].messages*.role == ['user', 'assistant']
+		sent[2].messages*.role == ['user', 'assistant', 'user']
+		sent[2].messages.collectMany { it.content instanceof List ? it.content as List : [] }
+			.count { it.type == 'server_tool_use' && it.id == 'srvtoolu_1' } == 1
+		provider.parseMessageResponse(result.data as Map).message.content == '9.0.2 is current.'
+	}
+
+	def "a tool call cut off at max_tokens is dropped instead of being run with part of its arguments"() {
+		given:
+		Closure<Map> call = { Map body ->
+			[success: true, data: [stop_reason: 'max_tokens', content: [
+				[type: 'text', text: 'Creating both tasks.'],
+				[type: 'tool_use', id: 'toolu_01AbCdEfGhIjKlMn', name: 'create_task', input: [name: 'backup']],
+				[type: 'tool_use', id: 'toolu_02AbCdEfGhIjKlMn', name: 'create_task', input: [:]]
+			]]]
+		}
+
+		when:
+		Map result = provider.runToCompletion([messages: [[role: 'user', content: 'Create two tasks']]], call)
+		LlmChatResponse response = provider.parseMessageResponse(result.data as Map)
+
+		then: 'the complete call before it stays'
+		response.finishReason == 'length'
+		(response.metadata.tool_calls as List)*.id == ['toolu_01AbCdEfGhIjKlMn']
+		response.message.content == 'Creating both tasks.'
+	}
+
+	def "with extended thinking a forced tool choice becomes auto, the only one the API accepts besides none"() {
+		given:
+		LlmChatRequest request = new LlmChatRequest(messages: [message('user', 'hi')],
+			options: [tools: [[type: 'function', function: [name: 'list_servers', parameters: [type: 'object']]]], tool_choice: choice])
+
+		expect:
+		provider.buildMessagesRequestBody(request, configured([thinkingEnabled: 'on']), false).tool_choice == [type: 'auto']
+		provider.buildMessagesRequestBody(request, integration, false).tool_choice == withoutThinking
+
+		where:
+		choice                                               || withoutThinking
+		'required'                                           || [type: 'any']
+		[type: 'function', function: [name: 'list_servers']] || [type: 'tool', name: 'list_servers']
+	}
+
+	def "nested usage counts such as web search requests add up across paused segments"() {
+		given:
+		Map first = [content: [], usage: [input_tokens: 1, server_tool_use: [web_search_requests: 1],
+										  cache_creation: [ephemeral_5m_input_tokens: 10], service_tier: 'standard']]
+		Map second = [content: [], usage: [input_tokens: 2, server_tool_use: [web_search_requests: 2, web_fetch_requests: 1],
+										   cache_creation: [ephemeral_5m_input_tokens: 5]]]
+
+		when:
+		Map merged = provider.mergeMessageSegments([first, second])
+
+		then:
+		merged.usage.input_tokens == 3
+		merged.usage.server_tool_use == [web_search_requests: 3, web_fetch_requests: 1]
+		merged.usage.cache_creation == [ephemeral_5m_input_tokens: 15]
+		merged.usage.service_tier == 'standard'
+
+		and: 'the first segment keeps its own counts'
+		first.usage.server_tool_use == [web_search_requests: 1]
+	}
+
+	def "a lost question only comes back in the integration and system prompt it was asked in"() {
+		given:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		AccountIntegration asking = new AccountIntegration(id: 2L, serviceUrl: 'https://api.anthropic.com')
+		LlmChatRequest asked = new LlmChatRequest(messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')])
+		AnthropicProvider.rememberQuestion(provider.buildMessagesRequestBody(asked, asking, false),
+			[content: [[type: 'tool_use', id: 'toolu_01AbCdEfGhIjKlMn', name: 'list_servers', input: [:]]]],
+			AnthropicProvider.questionScope(asking, asked))
+		LlmChatRequest evicted = new LlmChatRequest(messages: [
+			message('system', system),
+			message('assistant', null, [tool_calls: [[id: 'toolu_01AbCdEfGhIjKlMn', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '[]', [tool_call_id: 'toolu_01AbCdEfGhIjKlMn'])
+		])
+
+		when:
+		Map body = provider.buildMessagesRequestBody(evicted, new AccountIntegration(id: integrationId, serviceUrl: 'https://api.anthropic.com'), false)
+
+		then:
+		(body.messages[0].role == 'user') == restored
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		where:
+		integrationId | system                       || restored
+		2L            | 'You are Murph.'             || true
+		7L            | 'You are Murph.'             || false
+		2L            | 'You are the billing agent.' || false
+	}
+
+	def "thinking blocks are only put back in the scope they were kept in"() {
+		given:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+		AccountIntegration ai = configured([thinkingEnabled: 'on'])
+		ai.id = 2L
+		AnthropicProvider.rememberThinking(['toolu_01AbCdEfGhIjKlMn'], [[type: 'thinking', thinking: 't', signature: 's']], '7:0000000000000000')
+
+		when:
+		Map body = provider.buildMessagesRequestBody(toolLoop('toolu_01AbCdEfGhIjKlMn'), ai, false)
+
+		then: 'the blocks of another integration are not used; the request goes out without thinking'
+		!body.containsKey('thinking')
+		body.messages[1].content*.type == ['text', 'tool_use']
+
+		cleanup:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+	}
+
+	def "the same question through two integrations keeps two cost totals"() {
+		given:
+		AnthropicProvider.QUESTION_COSTS.clear()
+		Map body = [model: 'anthropic/claude-sonnet-4.6', messages: [[role: 'user', content: 'Which servers run?']]]
+		Map toolTurn = [stop_reason: 'tool_use', content: [[type: 'tool_use', id: 't1', name: 'list_servers', input: [:]]],
+						usage: [input_tokens: 10, output_tokens: 5, cost: 0.01]]
+
+		when:
+		LlmChatResponse first = provider.trackQuestionCost(body, provider.parseMessageResponse(toolTurn), '2:abc')
+		LlmChatResponse other = provider.trackQuestionCost(body, provider.parseMessageResponse(toolTurn), '7:abc')
+		LlmChatResponse again = provider.trackQuestionCost(body, provider.parseMessageResponse(toolTurn), '2:abc')
+
+		then:
+		first.metadata.question_requests == 1
+		other.metadata.question_requests == 1
+		again.metadata.question_requests == 2
+
+		cleanup:
+		AnthropicProvider.QUESTION_COSTS.clear()
+	}
+
+	def "eviction drops the expired entries and, above the cap, exactly the oldest ones"() {
+		given:
+		java.util.concurrent.ConcurrentHashMap<String, Map> entries = new java.util.concurrent.ConcurrentHashMap<>()
+		long now = System.currentTimeMillis()
+		entries.put('expired', [updated: now - 10000L])
+		entries.put('oldest', [updated: now - 500L])
+		entries.put('older', [updated: now - 400L])
+		entries.put('newer', [updated: now - 300L])
+		entries.put('newest', [updated: now])
+
+		when:
+		AnthropicProvider.evictEntries(entries, 5000L, 3)
+
+		then:
+		entries.keySet() == ['older', 'newer', 'newest'] as Set
 	}
 }

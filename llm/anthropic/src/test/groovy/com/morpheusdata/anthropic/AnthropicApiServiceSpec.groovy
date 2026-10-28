@@ -102,6 +102,60 @@ class AnthropicApiServiceSpec extends Specification {
 		accumulated.content[0].signature == 'EqQBCgIYAh'
 	}
 
+	def "the sse accumulator keeps the input of a web search call and the citations of the answer"() {
+		given: 'a streamed turn that searched and then cited a result'
+		String stream = [
+			'data: {"type":"message_start","message":{"id":"msg_3","model":"claude-sonnet-5","usage":{"input_tokens":9}}}',
+			'data: {"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_01AbCdEf","name":"web_search","input":{}}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\": \\"morpheus "}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"release\\"}"}}',
+			'data: {"type":"content_block_stop","index":0}',
+			'data: {"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_01AbCdEf","content":[{"type":"web_search_result","url":"https://example.com/notes","title":"Notes","encrypted_content":"abc"}]}}',
+			'data: {"type":"content_block_stop","index":1}',
+			'data: {"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}',
+			'data: {"type":"content_block_delta","index":2,"delta":{"type":"citations_delta","citation":{"type":"web_search_result_location","url":"https://example.com/notes","title":"Notes","cited_text":"9.1.0"}}}',
+			'data: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"9.1.0 is current."}}',
+			'data: {"type":"content_block_stop","index":2}',
+			'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":12}}',
+			'data: {"type":"message_stop"}'
+		].join('\n')
+		HttpEntity entity = Stub(HttpEntity) {
+			getContent() >> new ByteArrayInputStream(stream.getBytes('UTF-8'))
+		}
+		CloseableHttpResponse response = Stub(CloseableHttpResponse) {
+			getEntity() >> entity
+		}
+
+		when:
+		Map accumulated = service.consumeEventStream(response, null)
+
+		then: 'a paused turn can go back with the search call intact'
+		accumulated.content*.type == ['server_tool_use', 'web_search_tool_result', 'text']
+		accumulated.content[0].input == [query: 'morpheus release']
+		accumulated.content[1].content[0].encrypted_content == 'abc'
+
+		and: 'the answer keeps what it cited, for the source list'
+		accumulated.content[2].text == '9.1.0 is current.'
+		accumulated.content[2].citations*.url == ['https://example.com/notes']
+	}
+
+	def "shutdown closes every pooled client"() {
+		given:
+		HttpApiClient first = Mock()
+		HttpApiClient second = Mock()
+		long now = System.currentTimeMillis()
+		service.sessionClients.put('a', new AnthropicApiService.SessionClientHolder(first, now))
+		service.sessionClients.put('b', new AnthropicApiService.SessionClientHolder(second, now))
+
+		when:
+		service.shutdown()
+
+		then:
+		1 * first.shutdownClient()
+		1 * second.shutdownClient()
+		service.sessionClients.isEmpty()
+	}
+
 	def "an error event aborts the stream"() {
 		given:
 		HttpEntity entity = Stub(HttpEntity) {
@@ -130,14 +184,32 @@ class AnthropicApiServiceSpec extends Specification {
 		1 * spy.executeGet('https://api.anthropic.com', '/v1/models', 'sk-ant-test', _, null, [:], [limit: '1000']) >> [success: true]
 	}
 
-	def "executeGet puts query parameters on the request options rather than the path"() {
-		when:
-		HttpApiClient.RequestOptions options = service.buildRequestOptions('sk-ant-test', null, ['Accept': 'application/json'], null, 30000)
-		options.queryParams = [limit: '100']
+	def "the model list goes out with limit as a query string, not inside the path"() {
+		given: 'a local endpoint that records the request line'
+		String path = null
+		String query = null
+		com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(new InetSocketAddress('127.0.0.1', 0), 0)
+		server.createContext('/', { com.sun.net.httpserver.HttpExchange exchange ->
+			path = exchange.requestURI.rawPath
+			query = exchange.requestURI.rawQuery
+			byte[] body = '{"data":[{"id":"claude-haiku-4-5"}],"has_more":false}'.getBytes('UTF-8')
+			exchange.responseHeaders.add('Content-Type', 'application/json')
+			exchange.sendResponseHeaders(200, body.length)
+			exchange.responseBody.withStream { it.write(body) }
+		} as com.sun.net.httpserver.HttpHandler)
+		server.start()
 
-		then:
-		options.queryParams == [limit: '100']
-		!AnthropicApiService.MODELS_PATH.contains('?')
+		when:
+		Map result = new AnthropicApiService().listModels("http://127.0.0.1:${server.address.port}", 'sk-ant-test')
+
+		then: 'HttpApiClient would percent-encode a ? inside the path into %3F and the call would 404'
+		result.success
+		path == '/v1/models'
+		query == 'limit=1000'
+		result.data.data*.id == ['claude-haiku-4-5']
+
+		cleanup:
+		server.stop(0)
 	}
 
 	def "ASCII-only JSON keeps emoji and umlauts decodable"() {

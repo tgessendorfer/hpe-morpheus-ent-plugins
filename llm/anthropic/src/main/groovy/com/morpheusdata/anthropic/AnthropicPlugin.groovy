@@ -52,6 +52,11 @@ class AnthropicPlugin extends Plugin {
 
 	@Override
 	void onDestroy() {
-		// nothing to clean up
+		// Pooled HTTP clients would otherwise stay open after an upgrade or removal.
+		pluginProviders?.values()?.each { provider ->
+			if (provider instanceof AnthropicProvider) {
+				((AnthropicProvider) provider).apiService?.shutdown()
+			}
+		}
 	}
 }

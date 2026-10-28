@@ -398,7 +398,7 @@ Morpheus passes tool definitions and tool call results around in the **OpenAI sh
 |---|---|
 | `role: system` message | top-level `system` field (all system turns concatenated) |
 | `tools: [{type:function, function:{name, description, parameters}}]` | `tools: [{name, description, input_schema}]` |
-| `tool_choice: "required"` / `"none"` / `{function:{name}}` | `{type:"any"}` / `{type:"none"}` / `{type:"tool", name}` |
+| `tool_choice: "required"` / `"none"` / `{function:{name}}` | `{type:"any"}` / `{type:"none"}` / `{type:"tool", name}`; with extended thinking `any` and `tool` go out as `auto` (the API accepts only `auto` and `none` there) |
 | assistant `tool_calls[]` with JSON-string `arguments` | assistant `tool_use` blocks with parsed object `input` |
 | `role: tool` + `tool_call_id` | `tool_result` block inside a **user** message (consecutive results merged) |
 | `finish_reason: tool_calls` | `stop_reason: tool_use` |

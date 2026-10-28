@@ -6,6 +6,104 @@ shaded `-all.jar` is attached. Notes for 1.4.1 and earlier exist only there.
 
 ---
 
+## 1.6.6
+
+**Fix release from a code review: the chat retry works, keys in stored credentials are found on
+update and refresh, models that leave the catalog are removed, and the per-question memory is kept
+per integration and agent.** Built against plugin API 1.4.2. No new setting.
+
+- **The chat retry never ran.** `generateResponse` was meant to send a request up to three times
+  after a broken connection, but it waited for an exception, and the API service reports every
+  failed call as a result instead of throwing. The retry is now decided on that result: a call that
+  got **no HTTP answer** (connection reset, refused, *failed to respond*, connect timeout) or an
+  **HTTP 529 (overloaded)** is sent again, up to three attempts with 1.5 s and 3 s between them, each
+  logged as *Anthropic API retry n/2 after ...*. A read timeout is not repeated (the request may still
+  be running), and neither is any other HTTP error. Streaming is not retried, as before.
+- **A key kept in a stored credential is loaded.** An update through `PUT /api/integrations` and the
+  scheduled refresh hand the provider no stored credential, only the request's own keys or none, so
+  an integration whose key sits under *Credentials* failed with *An Anthropic API key is required*
+  (seen on Morpheus 9.0.2 with `POST /api/integrations/<id>/refresh`). The plugin now loads the stored
+  credential whenever no key was handed over, as the OpenRouter and OpenAI-compatible plugins do. A
+  chat request with no key at all is no longer sent: it fails with *An Anthropic API key is required*
+  and a log line, instead of a 401 from the API.
+- **Models that leave the catalog are removed.** They used to be disabled, but Morpheus still offers
+  disabled models in the agent form, where picking one fails with *The AI model is no longer
+  available*. A model an agent still points at cannot be removed (the foreign key from the agent has
+  no cascade); that one is disabled as before and logged. A catalog answer without a model list, or
+  without a single Claude model, now leaves the stored models alone instead of emptying the
+  integration.
+- **A failed pause_turn continuation no longer sends the paused turn twice.** When a web search turn
+  paused, its continuation failed, and the turn had no answer text yet, the request for the final
+  answer carried the paused turn twice, with duplicate `server_tool_use` ids. The API rejected it, so
+  that recovery request was billed and failed. The paused turn now goes back once.
+- **A tool call cut off at `max_tokens` is dropped.** A `tool_use` block at the end of a turn that hit
+  `max_tokens` is incomplete; handed to Morpheus it would run an MCP tool with part of its arguments.
+  Complete tool calls before it stay. With nothing left to run and no text, the existing request for
+  a final answer without tools follows.
+- **The per-question memory is scoped to the integration and the agent.** The question restore
+  (1.6.4), the thinking blocks of a tool loop (1.6.5) and the per-question cost total were shared by
+  every integration, tenant and user on the appliance. Their entries are now kept under the
+  integration id and a hash of the system prompt Morpheus sends (the agent's prompt), and only used
+  within that scope. Before, a backend with predictable tool call ids could hand one conversation the
+  question or thinking of another, and the same first question asked through two integrations shared
+  one cost total. When a request has lost its question and its tool calls are known only under
+  another integration or system prompt, the plugin logs *... the question is not restored*. The
+  eviction above 10,000 entries now runs under a lock, so concurrent requests drop no more than the
+  excess.
+- **Extended thinking with a forced tool choice.** The API accepts only `tool_choice` `auto` and
+  `none` while thinking is on; `any` (Morpheus' `required`) and a named tool now go out as `auto`
+  instead of failing with 400.
+- **Streaming keeps citations and web search input.** The stream accumulator now collects
+  `citations_delta`, so a streamed answer gets its source list, and parses the streamed input of a
+  `server_tool_use` block, so a paused streamed turn goes back with its search query.
+- **Usage of resumed turns adds up nested counts.** `server_tool_use` (web search and fetch requests)
+  and `cache_creation` were taken from the first segment only; the *Anthropic turn finished* log line
+  under-reported them.
+- **Unloading the plugin closes its pooled HTTP clients**, so an upgrade leaves no connection pool
+  behind.
+
+### Behaviour changes from 1.6.5
+
+- A model no longer listed by the API is removed, not disabled; one an agent still uses stays
+  disabled as before.
+- A chat request that got no HTTP answer, or a 529, is sent up to twice more.
+- A dropped question and a tool loop's thinking blocks only come back within the same integration
+  and system prompt.
+- With thinking on, a forced tool choice becomes `auto`.
+- A tool call cut off at `max_tokens` no longer reaches Morpheus.
+- A chat request without any API key is not sent.
+
+### Verified
+
+- Unit tests (Spock), 30 more test cases than in 1.6.5: a connection failure and a 529 are
+  retried, an HTTP error, a read timeout and a fourth attempt are not; a request without a key is not sent, streaming
+  or not; the stored credential is loaded once and kept, a handed-over key needs no lookup, Local
+  Credentials and a failing lookup fall back to the local field, and saving finds the stored key; a
+  failed continuation sends the paused turn once; a cut-off tool call is dropped and the complete one
+  before it stays; a forced tool choice becomes `auto` with thinking on and stays without; nested
+  usage adds up without changing the first segment; a lost question comes back only in its own
+  integration and system prompt, thinking blocks only in their scope, and two integrations keep two
+  cost totals; eviction drops exactly the expired and the oldest entries; unlisted models are removed,
+  a model an agent uses is disabled, a catalog without a list or without a Claude model removes
+  nothing; the stream accumulator keeps a `server_tool_use` input and the citations of the answer;
+  `shutdown()` closes every pooled client; the model list request carries `limit=1000` as a query
+  string (a local HTTP server checks the request line instead of the former test that checked
+  nothing).
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 162 tests,
+  0 failures.
+
+### Not yet verified
+
+- On an appliance, all of it. In particular: a long tool loop on Morpheus 9.1 still gets its question
+  back with the scoped memory (this needs the system prompt to stay the same during the loop; the
+  log line above says when it does not); `POST /api/integrations/<id>/refresh` of an integration with
+  a stored credential answers `ok`; a model removed from the catalog disappears from the agent form,
+  and one an agent uses stays disabled; a retry after a real connection failure or 529; the streaming
+  path, which Morpheus has not called in any test so far; the pool shutdown, which only matters when
+  Morpheus passes a client scope key.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.6.5...anthropic-v1.6.6
+
 ## 1.6.5
 
 **Fix release: extended thinking works with MCP tool loops.** Built against plugin API 1.4.2. No new

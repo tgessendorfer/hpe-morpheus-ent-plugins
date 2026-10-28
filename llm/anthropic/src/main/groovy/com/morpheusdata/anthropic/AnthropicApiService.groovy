@@ -215,6 +215,11 @@ class AnthropicApiService {
 						} else if (delta.type == 'signature_delta' && delta.signature != null) {
 							// A thinking block goes back to the API in tool loops, and only with its signature.
 							block.signature = (block.signature ?: '') + delta.signature.toString()
+						} else if (delta.type == 'citations_delta' && delta.citation instanceof Map) {
+							// The cited pages make up the answer's source list.
+							List citations = new ArrayList(block.citations instanceof List ? block.citations as List : [])
+							citations << delta.citation
+							block.citations = citations
 						}
 						break
 					case 'content_block_stop':
@@ -222,14 +227,17 @@ class AnthropicApiService {
 						Map block = blocks.get(index)
 						if (block != null) {
 							StringBuilder buffer = jsonBuffers.remove(index)
-							if (block.type == 'tool_use' && buffer != null && buffer.length() > 0) {
+							// A server_tool_use (web search or fetch) streams its input the same way, and a
+							// paused turn has to go back with that input intact.
+							boolean toolBlock = block.type == 'tool_use' || block.type == 'server_tool_use'
+							if (toolBlock && buffer != null && buffer.length() > 0) {
 								try {
 									block.input = slurper.parseText(buffer.toString())
 								} catch (Exception ignored) {
-									log.warn("Could not parse streamed tool_use input for block ${index}")
+									log.warn("Could not parse streamed ${block.type} input for block ${index}")
 									block.input = [:]
 								}
-							} else if (block.type == 'tool_use' && block.input == null) {
+							} else if (toolBlock && block.input == null) {
 								block.input = [:]
 							}
 						}
@@ -379,6 +387,18 @@ class AnthropicApiService {
 		def proxy = opts?.get(NETWORK_PROXY_KEY)
 		apiClient.networkProxy = proxy instanceof NetworkProxy ? (NetworkProxy) proxy : null
 		return apiClient
+	}
+
+	/**
+	 * Closes every pooled client. Called when the plugin is unloaded, so an upgrade does
+	 * not leave a connection pool behind for each session that used one.
+	 */
+	void shutdown() {
+		sessionClients.each { String clientScopeKey, SessionClientHolder holder ->
+			if (sessionClients.remove(clientScopeKey, holder)) {
+				holder?.apiClient?.shutdownClient()
+			}
+		}
 	}
 
 	protected void evictExpiredSessionClients() {
