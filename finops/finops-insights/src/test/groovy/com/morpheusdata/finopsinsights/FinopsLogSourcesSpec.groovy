@@ -204,6 +204,23 @@ class FinopsLogSourcesSpec extends Specification {
 		out.reason == 'noViewer'
 	}
 
+	def "a failed connection release keeps the loaded sources"() {
+		given:
+		morpheus.report >> report
+		report.getReadOnlyDatabaseConnection() >> Single.just(connection)
+
+		when:
+		Map out = data.logSources([userId: 7])
+
+		then:
+		1 * sql.firstRow(_, _) >> viewer(0)
+		1 * sql.rows(_, _) >> [[id: 5L, name: 'app-01', instance_id: 9L, instance_account_id: 22L]]
+		1 * report.releaseDatabaseConnection(connection) >> Completable.error(new java.sql.SQLException('pool closed'))
+		notThrown(Exception)
+		out.ok
+		out.sources == [[id: 5L, name: 'app-01', instanceId: 9L]]
+	}
+
 	def "a database failure is a loadFailed state and the connection is released"() {
 		given:
 		morpheus.report >> report

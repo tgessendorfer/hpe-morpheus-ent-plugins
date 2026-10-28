@@ -123,6 +123,31 @@ class FinopsInsightsCalcSpec extends Specification {
 		chart.withCost
 	}
 
+	def "a negative month total draws no bar instead of a negative height"() {
+		given:
+		def months = FinopsInsightsCalc.trendMonths(YearMonth.of(2026, 10))
+		def series = FinopsInsightsCalc.perPeriod([row(period: '202609', rev: -40, cost: -10), row(period: '202610', rev: 1000, cost: 400)],
+			FinopsInsightsCalc.periods(months))
+
+		when:
+		def chart = FinopsInsightsCalc.trendChart(series, months, true, Locale.ENGLISH)
+		def credit = chart.groups[-2]
+
+		then:
+		credit.revH == 0.0G
+		credit.costH == 0.0G
+		credit.revY == chart.baseY
+		credit.costY == chart.baseY
+		// the tooltip still tells the real figure
+		credit.revText == '-40.00'
+		credit.costText == '-10.00'
+		chart.groups.every { it.revH >= 0 && it.costH >= 0 }
+		chart.groups[-1].revH == 150.0G
+		FinopsInsightsCalc.barHeight(-1, 150, 1000G) == 0.0G
+		FinopsInsightsCalc.barHeight(null, 150, 1000G) == 0.0G
+		FinopsInsightsCalc.barHeight(500, 150, 1000G) == 75.0G
+	}
+
 	def "a tenant chart has single bars without cost"() {
 		given:
 		def months = FinopsInsightsCalc.trendMonths(YearMonth.of(2026, 10))

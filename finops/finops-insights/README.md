@@ -45,7 +45,9 @@ entries of the tenant's servers with a log history page.
 3. Operations > Dashboard renders every enabled dashboard, one below the other.
 
 Users see the widgets when their role grants **Operations > Costing > Budgets** (`operations-budgets`,
-read or full); since 1.1.1 the invoice permission is not required.
+read or full); since 1.1.1 the invoice permission is not required. If the plugin cannot load that
+permission when it starts, the three FinOps widgets are left out of the dashboard instead of being
+shown to everyone (since 1.2.3); reload the plugin once the permission is there.
 
 ## Latest log entries and log history
 

@@ -6,6 +6,51 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.3
+
+**The FinOps widgets are never shown without their permission, and a failed connection release no
+longer breaks a widget.** Built against plugin API 1.4.2, minimum appliance 9.0.2. Fix release from a
+code review; nothing changes on an appliance where the permissions load and the database answers.
+
+### What changes
+
+- **FinOps widgets without the Budgets permission are left out.** A dashboard item type without a
+  permission is shown to every user. Up to 1.2.2 only the latest log entries widget was left out when
+  its *Logs* permission could not be loaded; if *Operations > Costing > Budgets*
+  (`operations-budgets`) could not be loaded when the plugin started, the KPI strip, the trend and
+  the split were shown to every user, and a master tenant user without that permission saw the
+  provider's revenue, cost and margin. Since 1.2.3 **every plugin widget whose permission is missing
+  is left out of the layout** and an error is logged. Rows that end up empty take no row number, so
+  the rows below move up without a gap. Reload the plugin once the permission is there.
+- **A failed release of the database connection is logged and goes no further.** The invoice load
+  and the log source load handed the read-only report connection back in a `finally` block without a
+  guard: when that release threw, the exception replaced the result, and the widget failed instead of
+  showing its figures or its *loadFailed* hint. The release is now wrapped and logs a warning (the
+  same guard Budget Burn has had since 1.1.1).
+- **A month with a negative total draws no bar.** A month whose credits are larger than its charges
+  gave the trend chart a negative bar height, which is not valid SVG. The bar height is clamped to
+  zero; the tooltip still shows the real figure.
+- **Behaviour change from 1.2.2:** only when the Budgets permission cannot be loaded at plugin start:
+  the three FinOps widgets are missing from the dashboard instead of being shown to everyone.
+
+### Verified
+
+- 140 unit tests and 36 browser script tests (JDK 17, Gradle 9.8.0). New tests: the layout without
+  the Budgets permission (no FinOps widget, no row gap, the log row unchanged), a failing connection
+  release after a successful load, an unknown user and a failed query (the result stays), no release
+  for a connection that was never opened, and the chart with a negative month.
+
+### Not yet verified
+
+- The release jar on an appliance: `loaded`, the dashboard unchanged for a role with *Budgets* read
+  or full, and the widgets missing for a role without it.
+- The layout without the Budgets permission was only built in a unit test; the appliance was not
+  made to fail that lookup.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/finops-insights-v1.2.2...finops-insights-v1.2.3
+
+---
+
 ## 1.2.2
 
 **The dashboard has a neutral name: *Operations Overview*.** Built against plugin API 1.4.2, minimum

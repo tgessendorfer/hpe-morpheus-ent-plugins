@@ -132,6 +132,31 @@ class FinopsInsightsPluginSpec extends Specification {
 		row*.itemColumn == [0]
 	}
 
+	def "the FinOps widgets are left out of the layout when the Budgets permission cannot be loaded"() {
+		given:
+		FinopsInsightsPlugin broken = new FinopsInsightsPlugin()
+		broken.morpheus = contextWithPermissions { String code ->
+			code == AbstractFinopsItemProvider.PERMISSION_CODE ? Single.error(new IllegalStateException('no such permission')) :
+				Single.just(new Permission('Permission', code, [Permission.AccessType.read]))
+		}
+		broken.initialize()
+		FinopsInsightsDashboardProvider dash = broken.getProviderByCode(FinopsInsightsDashboardProvider.CODE) as FinopsInsightsDashboardProvider
+
+		when:
+		def items = dash.buildItems()
+
+		then:
+		// without a permission the item type would be shown to every user: provider revenue, cost and margin
+		items.size() == 12
+		!items.any { it.type.code in [FinopsKpiItemProvider.CODE, FinopsTrendItemProvider.CODE, FinopsSplitItemProvider.CODE] }
+		!items.any { it.itemGroup in ['finops-top', 'finops-main'] }
+		// the two emptied rows take no row number: the rows below move up without a gap
+		(items*.groupRow as Set) == (0..5) as Set
+		items.findAll { it.itemGroup == 'logs' }*.type*.code == [FinopsLogsItemProvider.CODE, 'dashboard-item-log-count']
+		items.findAll { it.itemGroup == 'logs' }*.groupRow == [5, 5]
+		items.every { it.type.code.startsWith('dashboard-item-') || it.type.permission != null }
+	}
+
 	def "widgets declare the Costing permission with read and full and the no-op script"() {
 		given:
 		def kpi = plugin.getProviderByCode(FinopsKpiItemProvider.CODE) as FinopsKpiItemProvider

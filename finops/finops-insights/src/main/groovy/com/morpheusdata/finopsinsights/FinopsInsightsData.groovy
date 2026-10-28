@@ -194,9 +194,22 @@ class FinopsInsightsData {
 			log.error("FinOps insights: loading invoice data failed: ${e.message}", e)
 			out.reason = 'loadFailed'
 		} finally {
-			if(c) morpheus.report.releaseDatabaseConnection(c).blockingAwait()
+			release(c)
 		}
 		return out
+	}
+
+	/**
+	 * Hands the connection back. A failed release is logged and goes no further: thrown from a finally
+	 * block it would replace the result, and the widget would fail instead of showing its data or hint.
+	 */
+	protected void release(Connection c) {
+		if(!c) return
+		try {
+			morpheus.report.releaseDatabaseConnection(c).blockingAwait()
+		} catch(Exception e) {
+			log.warn("FinOps insights: releasing the database connection failed: ${e.message}", e)
+		}
 	}
 
 	/**
@@ -244,7 +257,7 @@ class FinopsInsightsData {
 			out.reason = 'loadFailed'
 			out.sources = []
 		} finally {
-			if(c) morpheus.report.releaseDatabaseConnection(c).blockingAwait()
+			release(c)
 		}
 		return out
 	}

@@ -88,7 +88,10 @@ class FinopsInsightsDashboardProvider extends AbstractDashboardProvider {
 		return rtn
 	}
 
-	/** One DashboardItem per layout entry; the type is looked up from the sibling providers. */
+	/**
+	 * One DashboardItem per layout entry; the type is looked up from the sibling providers. A row whose
+	 * items are all left out takes no row number, so the rows below move up instead of leaving a gap.
+	 */
 	List<DashboardItem> buildItems() {
 		List<DashboardItem> items = []
 		int groupRow = 0
@@ -99,11 +102,13 @@ class FinopsInsightsDashboardProvider extends AbstractDashboardProvider {
 				DashboardItem item = new DashboardItem()
 				if(provider instanceof com.morpheusdata.core.dashboard.DashboardItemTypeProvider) {
 					item.type = provider.dashboardItemType
-					// The log list is the one item that shows other people's data, and an item type without
-					// its permission is shown to everyone: when the Logs permission could not be loaded the
-					// item is left out and the standard Log History widget in the row stays.
-					if(provider instanceof FinopsLogsItemProvider && item.type?.permission == null) {
-						log.error("FinOps insights: the Logs permission could not be loaded, the latest log entries widget is left out of the dashboard")
+					// An item type without its permission is shown to everyone, and every plugin widget shows
+					// data a role must be allowed to see (provider revenue, cost and margin; other people's log
+					// lines). When the permission could not be loaded the item is left out; in the log row the
+					// standard Log History widget stays.
+					if(item.type?.permission == null) {
+						String permissionCode = provider instanceof AbstractFinopsItemProvider ? ((AbstractFinopsItemProvider) provider).permissionCode : null
+						log.error("FinOps insights: the permission ${permissionCode} could not be loaded, the ${code} widget is left out of the dashboard")
 						return
 					}
 				} else {
@@ -117,7 +122,7 @@ class FinopsInsightsDashboardProvider extends AbstractDashboardProvider {
 				items << item
 				column++
 			}
-			groupRow++
+			if(column > 0) groupRow++
 		}
 		return items
 	}

@@ -182,6 +182,15 @@ class FinopsInsightsCalc {
 	}
 
 	/**
+	 * Height of one bar, rounded to one decimal. A negative month total (credits larger than the
+	 * charges) draws no bar: a negative SVG height is invalid and the browser drops the rect.
+	 */
+	static BigDecimal barHeight(def value, int plotH, BigDecimal axisMax) {
+		BigDecimal h = (num(value) * plotH).divide(axisMax, 1, RoundingMode.HALF_UP)
+		h.signum() < 0 ? 0.0G : h
+	}
+
+	/**
 	 * Bar geometry of the trend chart: one group per period with a revenue bar and, when
 	 * withCost is set, a cost bar next to it. Coordinates are rounded to one decimal.
 	 */
@@ -197,8 +206,8 @@ class FinopsInsightsCalc {
 		List<Map> groups = []
 		series.eachWithIndex { Map s, int i ->
 			BigDecimal x0 = CHART_PAD_LEFT + slot * i + (slot - (withCost ? barW * 2 + gap : barW)) / 2
-			BigDecimal revH = (num(s.rev) * plotH).divide(axisMax, 1, RoundingMode.HALF_UP)
-			BigDecimal costH = (num(s.cost) * plotH).divide(axisMax, 1, RoundingMode.HALF_UP)
+			BigDecimal revH = barHeight(s.rev, plotH, axisMax)
+			BigDecimal costH = barHeight(s.cost, plotH, axisMax)
 			Map g = [label: months[i].format(MONTH_SHORT.withLocale(locale)),
 				labelX: (CHART_PAD_LEFT + slot * i + slot / 2).setScale(1, RoundingMode.HALF_UP),
 				revX: x0.setScale(1, RoundingMode.HALF_UP), revY: (CHART_PAD_TOP + plotH - revH).setScale(1, RoundingMode.HALF_UP),
