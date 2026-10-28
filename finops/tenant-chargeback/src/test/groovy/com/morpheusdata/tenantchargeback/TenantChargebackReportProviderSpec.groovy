@@ -1,12 +1,21 @@
 package com.morpheusdata.tenantchargeback
 
+import com.morpheusdata.core.MorpheusContext
+import com.morpheusdata.core.MorpheusReportService
+import com.morpheusdata.model.Account
 import com.morpheusdata.model.OptionType
 import com.morpheusdata.model.ReportResult
 import com.morpheusdata.model.ReportResultRow
 import com.morpheusdata.model.User
 import com.morpheusdata.response.ServiceResponse
+import groovy.sql.GroovyRowResult
+import groovy.sql.Sql
+import io.reactivex.rxjava3.core.Completable
+import io.reactivex.rxjava3.core.Single
 import spock.lang.Specification
 import spock.lang.Unroll
+
+import java.sql.Connection
 
 class TenantChargebackReportProviderSpec extends Specification {
 
@@ -313,6 +322,120 @@ class TenantChargebackReportProviderSpec extends Specification {
 		rows.main.size() == 3
 	}
 
+	def "the tenant count on the page leaves out a tenant whose only currency is hidden"() {
+		given: 'Tenant A priced in EUR, Tenant B with unpriced servers in USD only'
+		Map<String, List<ReportResultRow>> rows = [
+			main  : [row(tenant: 'Tenant A', group: 'DC1', currency: 'EUR', resources: '5', cost: '23.96', price: '29.48', margin: '5.52', invoice: '29.48'),
+				row(tenant: 'Tenant B', group: 'DC2', currency: 'USD', resources: '2', cost: '0.00', price: '0.00', margin: '0.00', invoice: '0.00')],
+			header: [row(tenant: 'Tenant A', currency: 'EUR', resources: '5', cost: '23.96', price: '29.48', margin: '5.52', marginPct: '18.7', invoice: '29.48'),
+				row(tenant: 'Tenant B', currency: 'USD', resources: '2', cost: '0.00', price: '0.00', margin: '0.00', marginPct: '0.0', invoice: '0.00')],
+			footer: [row(kind: 'meta', month: '2026-10', current: true, markupPercent: '0', tenants: '2', currencies: 'EUR, USD'),
+				row(kind: 'total', currency: 'EUR', resources: '5', cost: '23.96', price: '29.48', margin: '5.52', marginPct: '18.7', invoice: '29.48'),
+				row(kind: 'total', currency: 'USD', resources: '2', cost: '0.00', price: '0.00', margin: '0.00', marginPct: '0.0', invoice: '0.00')]
+		]
+
+		when:
+		Map m = TenantChargebackReportProvider.pageModel(rows, Locale.ENGLISH)
+
+		then: 'the card counts the tenants the tables list; the stored count stays for the CSV export'
+		m.tenants*.tenant == ['Tenant A']
+		m.footer.tenants == '1'
+		rows.footer[0].dataMap.tenants == '2'
+
+		and: 'with nothing hidden the stored count is shown'
+		TenantChargebackReportProvider.pageModel([header: rows.header, footer: [rows.footer[0], rows.footer[1]]], Locale.ENGLISH).footer.tenants == '2'
+	}
+
+	def "process() runs the invoice query for a user of the master tenant and stores the query's columns"() {
+		given: 'two subtenants and the master tenant; a line without a currency takes the master currency'
+		Map env = processEnv()
+		ReportResult rr = new ReportResult(createdBy: new User(id: 7L))
+		rr.configMap = [chargebackMonth: '2026-09', markupPercent: '10']
+		env.sql.firstRow(TenantChargebackReportProvider.USER_MASTER_SQL, [7L]) >> dbRow(is_master: 1G)
+		env.sql.firstRow(TenantChargebackReportProvider.MASTER_CURRENCY_SQL) >> dbRow(currency: 'EUR')
+
+		when:
+		env.p.process(rr)
+
+		then:
+		1 * env.sql.rows(TenantChargebackReportProvider.INVOICE_SQL, ['202609']) >> [
+			dbRow(tenant_id: 2L, tenant: 'Tenant A', is_master: 0G, grp_id: 5L, grp: 'Group 5', currency: 'EUR', resources: 3L, cost: 10.004G, price: 12.5G),
+			dbRow(tenant_id: 3L, tenant: 'Tenant B', is_master: 0G, grp_id: null, grp: null, currency: null, resources: 1L, cost: 1.0G, price: 2.0G),
+			dbRow(tenant_id: 1L, tenant: 'Provider', is_master: 1G, grp_id: 9L, grp: 'Own', currency: 'EUR', resources: 4L, cost: 50.0G, price: 60.0G)]
+		env.statuses == [ReportResult.Status.generating, ReportResult.Status.ready]
+
+		and: 'one row per tenant and group, the master tenant left out'
+		section(env.appended, ReportResultRow.SECTION_MAIN) == [
+			[tenant: 'Tenant A', group: 'Group 5', noGroup: false, resources: '3', currency: 'EUR', cost: '10.00', price: '12.50',
+			 margin: '2.50', markupPercent: '10', invoice: '13.75'],
+			[tenant: 'Tenant B', group: '', noGroup: true, resources: '1', currency: 'EUR', cost: '1.00', price: '2.00',
+			 margin: '1.00', markupPercent: '10', invoice: '2.20']]
+		section(env.appended, ReportResultRow.SECTION_HEADER)*.marginPct == ['20.0', '50.0']
+
+		and:
+		List<Map> footer = section(env.appended, ReportResultRow.SECTION_FOOTER)
+		footer[0].subMap(['kind', 'month', 'markupPercent', 'tenants', 'currencies']) ==
+			[kind: 'meta', month: '2026-09', markupPercent: '10', tenants: '2', currencies: 'EUR']
+		footer[1] == [kind: 'total', currency: 'EUR', resources: '4', cost: '11.00', price: '14.50', margin: '3.50', marginPct: '24.1', invoice: '15.95']
+	}
+
+	def "process() fails without reading any invoice when the creator does not belong to the master tenant"() {
+		given:
+		Map env = processEnv()
+		ReportResult rr = new ReportResult(createdBy: new User(id: 8L))
+		rr.configMap = [chargebackMonth: '2026-09']
+
+		when:
+		env.p.process(rr)
+
+		then:
+		1 * env.sql.firstRow(TenantChargebackReportProvider.USER_MASTER_SQL, [8L]) >> dbRow(is_master: 0G)
+		0 * env.sql.rows(*_)
+		env.statuses == [ReportResult.Status.generating, ReportResult.Status.failed]
+		env.appended.isEmpty()
+	}
+
+	@Unroll
+	def "a result without a creator runs only when its own account is the master tenant: account #accountId, is_master #isMaster"() {
+		given:
+		Map env = processEnv()
+		ReportResult rr = new ReportResult(account: accountId != null ? new Account(id: accountId) : null)
+		rr.configMap = [:]
+		env.sql.firstRow(TenantChargebackReportProvider.ACCOUNT_MASTER_SQL, [accountId]) >> dbRow(is_master: isMaster)
+		env.sql.rows(TenantChargebackReportProvider.INVOICE_SQL, _) >> []
+
+		when:
+		env.p.process(rr)
+
+		then:
+		0 * env.sql.firstRow(TenantChargebackReportProvider.USER_MASTER_SQL, _)
+		env.statuses.last() == expected
+
+		where:
+		accountId | isMaster || expected
+		1L        | 1G       || ReportResult.Status.ready
+		2L        | 0G       || ReportResult.Status.failed
+		null      | null     || ReportResult.Status.failed
+	}
+
+	@Unroll
+	def "process() fails for month '#month' before it takes a database connection"() {
+		given:
+		Map env = processEnv()
+		ReportResult rr = new ReportResult(createdBy: new User(id: 7L))
+		rr.configMap = [chargebackMonth: month]
+
+		when:
+		env.p.process(rr)
+
+		then:
+		0 * env.report.getReadOnlyDatabaseConnection()
+		env.statuses == [ReportResult.Status.generating, ReportResult.Status.failed]
+
+		where:
+		month << ['2026-1', '2026-13', 'September']
+	}
+
 	def "zeroCurrencies hides nothing when every currency is zero, and treats unreadable amounts as amounts"() {
 		expect:
 		TenantChargebackReportProvider.zeroCurrencies([[currency: 'USD', cost: '0', price: '0.00', invoice: '0.00']]) == [] as Set
@@ -387,6 +510,36 @@ class TenantChargebackReportProviderSpec extends Specification {
 			}
 			@Override Locale browserLocale() { m.browser as Locale }
 		}
+	}
+
+	/**
+	 * A provider whose report service records the statuses and appended rows, and whose report
+	 * connection yields the mocked Sql {@code sql}; the queries are stubbed per feature.
+	 */
+	private Map processEnv() {
+		List<ReportResult.Status> statuses = []
+		List<ReportResultRow> appended = []
+		Connection conn = Mock()
+		MorpheusReportService report = Mock() {
+			getReadOnlyDatabaseConnection() >> Single.just(conn)
+			releaseDatabaseConnection(_) >> Completable.complete()
+			updateReportResultStatus(_, _) >> { ReportResult r, ReportResult.Status s -> statuses << s; Completable.complete() }
+			appendResultRows(_, _) >> { ReportResult r, Collection<ReportResultRow> rows -> appended.addAll(rows); Single.just(true) }
+		}
+		MorpheusContext ctx = Mock() { getReport() >> report }
+		Sql sql = Mock()
+		TenantChargebackReportProvider p = Spy(TenantChargebackReportProvider, constructorArgs: [new TenantChargebackPlugin(), ctx]) {
+			newSql(_) >> sql
+		}
+		[p: p, sql: sql, report: report, statuses: statuses, appended: appended]
+	}
+
+	private static GroovyRowResult dbRow(Map m) {
+		new GroovyRowResult(new LinkedHashMap(m))
+	}
+
+	private static List<Map> section(List<ReportResultRow> rows, String section) {
+		rows.findAll { it.section == section }*.dataMap
 	}
 
 	private static ReportResult result(Long userId) {

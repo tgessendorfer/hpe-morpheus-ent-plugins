@@ -44,7 +44,9 @@ import static com.morpheusdata.tenantchargeback.ChargebackCalculator.*
  * renderTemplate() formats them and resolves the texts in the language of the user's Morpheus
  * setting (see {@link #viewerLocale}).
  *
- * masterOnly: the report SQL sees all tenants.
+ * masterOnly: the report SQL sees all tenants. process() also checks that the user who ran the
+ * report belongs to the master tenant, so a report started another way fails instead of showing
+ * every tenant's amounts.
  */
 @Slf4j
 class TenantChargebackReportProvider extends AbstractReportProvider {
@@ -87,6 +89,14 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 	 * User model, and the web request carries the browser's language, not this setting.
 	 */
 	static final String USER_LOCALE_SQL = 'SELECT locale FROM user WHERE id = ?'
+
+	/** Whether a user belongs to the master tenant (is_master 1); the report runs for those only. */
+	static final String USER_MASTER_SQL = '''
+		SELECT CAST(a.master_account AS UNSIGNED) AS is_master
+		FROM user u JOIN account a ON a.id = u.account_id WHERE u.id = ?'''
+
+	/** Whether an account is the master tenant; checked for a report result without a creator. */
+	static final String ACCOUNT_MASTER_SQL = 'SELECT CAST(master_account AS UNSIGNED) AS is_master FROM account WHERE id = ?'
 
 	/** Bundle keys (after the provider code) of the texts the template shows. */
 	static final List<String> TEXT_KEYS = [
@@ -163,15 +173,33 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 		morpheus.report.updateReportResultStatus(reportResult, ReportResult.Status.generating).blockingAwait()
 		try {
 			Map cfgMap = reportResult.configMap ?: [:]
-			String per = period(cfg(cfgMap, FIELD_MONTH))
+			String month = cfg(cfgMap, FIELD_MONTH)
+			// Checked again here: a report started through the API may skip validateOptions(), and a
+			// month such as 2026-1 would give an empty report that looks complete.
+			if(!isValidMonth(month)) {
+				reject(reportResult, "the month '${month}' is not YYYY-MM with a month from 01 to 12")
+				return
+			}
+			String per = period(month)
 			BigDecimal markup = parsePercent(cfg(cfgMap, FIELD_MARKUP))
 			boolean includeProvider = isTrue(cfg(cfgMap, FIELD_PROVIDER))
+			Long userId = creatorId(reportResult)
+			Long accountId = userId == null ? resultAccountId(reportResult) : null
 			List<GroovyRowResult> rows = []
 			String masterCurrency = null
+			boolean master = false
 			withDbConnection { Connection c ->
-				Sql sql = new Sql(c)
+				Sql sql = newSql(c)
+				// The invoice query sees all tenants, so it runs for the master tenant only.
+				master = runsForMaster(sql, userId, accountId)
+				if(!master) return
 				rows = sql.rows(INVOICE_SQL, [per])
 				masterCurrency = sql.firstRow(MASTER_CURRENCY_SQL)?.currency as String
+			}
+			if(!master) {
+				reject(reportResult, userId != null ? "user ${userId} does not belong to the master tenant" :
+					accountId != null ? "account ${accountId} is not the master tenant" : 'the report result names neither its creator nor its account')
+				return
 			}
 			List<Map> raw = rows.collect { GroovyRowResult r ->
 				[tenantId: r.tenant_id, tenant: r.tenant, isMaster: (r.is_master as Integer) == 1, grpId: r.grp_id, grp: r.grp,
@@ -213,6 +241,46 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 		}
 	}
 
+	/** Marks the report failed without reading any invoice, with one warning that says why. */
+	protected void reject(ReportResult reportResult, String why) {
+		log.warn("Tenant Chargeback report ${reportResult?.id} not run: ${why}")
+		morpheus.report.updateReportResultStatus(reportResult, ReportResult.Status.failed).blockingAwait()
+	}
+
+	/**
+	 * Whether the report may read all tenants: the user who ran it belongs to the master tenant, or,
+	 * for a result without a creator, the result's own account is the master tenant. False when
+	 * neither is known.
+	 */
+	static boolean runsForMaster(Sql sql, Long userId, Long accountId) {
+		def row = userId != null ? sql.firstRow(USER_MASTER_SQL, [userId]) :
+			accountId != null ? sql.firstRow(ACCOUNT_MASTER_SQL, [accountId]) : null
+		(row?.is_master as Integer) == 1
+	}
+
+	/** Id of the user who ran the report, or null when the result carries none. */
+	static Long creatorId(ReportResult reportResult) {
+		try {
+			return reportResult?.createdBy?.id
+		} catch(Throwable ignored) {
+			return null
+		}
+	}
+
+	/** Id of the account the report result belongs to, or null when it carries none. */
+	static Long resultAccountId(ReportResult reportResult) {
+		try {
+			return reportResult?.account?.id
+		} catch(Throwable ignored) {
+			return null
+		}
+	}
+
+	/** The Groovy Sql over the read-only report connection; a seam for the tests. */
+	protected Sql newSql(Connection c) {
+		new Sql(c)
+	}
+
 	@Override
 	HTMLResponse renderTemplate(ReportResult reportResult, Map<String, List<ReportResultRow>> reportRowsBySection) {
 		ViewModel<Map> model = new ViewModel<>()
@@ -224,7 +292,8 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 	 * The template model: stored rows with their formatted values, and the texts, all in {@code locale}.
 	 * A currency whose total cost, list price and invoice amount are all zero (e.g. unpriced servers
 	 * in USD) is left out of every section of the page, as long as another currency has an amount.
-	 * The stored rows, and so the CSV export, keep it.
+	 * The stored rows, and so the CSV export, keep it. The tenant count then counts only the
+	 * tenants the tables still list.
 	 */
 	static Map pageModel(Map<String, List<ReportResultRow>> reportRowsBySection, Locale locale) {
 		Map<String, String> t = texts(locale)
@@ -233,10 +302,13 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 		List<Map> totals = footer.findAll { it.kind == 'total' }
 		Set<String> hidden = zeroCurrencies(totals)
 		Closure<Boolean> shown = { Map m -> !hidden.contains(m.currency as String) }
+		List<Map> tenants = (reportRowsBySection.header?.collect { it.dataMap } ?: []).findAll(shown)
+		// The stored rows carry the tenant name, not its id, so two tenants of the same name count once here.
+		def tenantCount = hidden ? tenants.collect { it.tenant }.unique().size().toString() : meta.tenants
 		[
 			rows   : (reportRowsBySection.main?.collect { it.dataMap } ?: []).findAll(shown).collect { withTexts(it, locale) + [noGroupText: t.noGroup] },
-			tenants: (reportRowsBySection.header?.collect { it.dataMap } ?: []).findAll(shown).collect { withTexts(it, locale) },
-			footer : meta + [isCurrent: isTrue(meta.current), markupPercentText: decimalShort(meta.markupPercent ?: '0', locale)],
+			tenants: tenants.collect { withTexts(it, locale) },
+			footer : meta + [isCurrent: isTrue(meta.current), markupPercentText: decimalShort(meta.markupPercent ?: '0', locale), tenants: tenantCount],
 			totals : totals.findAll(shown).collect { withTexts(it, locale) },
 			t      : t
 		]
@@ -331,12 +403,7 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 	 * A failed lookup logs one debug line and falls back; it never breaks the page.
 	 */
 	Locale viewerLocale(ReportResult reportResult) {
-		Long userId = null
-		try {
-			userId = reportResult?.createdBy?.id
-		} catch(Throwable ignored) {
-			// no creator: browser language
-		}
+		Long userId = creatorId(reportResult)
 		if(userId == null) {
 			log.debug("Tenant Chargeback: report result ${reportResult?.id} has no creator, using the browser language")
 		}
@@ -355,7 +422,7 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 
 	/** One row of a parameterised query over the read-only report connection. */
 	protected Map queryFirstRow(String query, List params) {
-		(Map) withDbConnection { Connection c -> new Sql(c).firstRow(query, params) }
+		(Map) withDbConnection { Connection c -> newSql(c).firstRow(query, params) }
 	}
 
 	/** Locale of the web request (the browser's Accept-Language), or null outside a request. */

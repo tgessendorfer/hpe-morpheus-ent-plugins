@@ -6,6 +6,59 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.3
+
+**The report checks for itself that it runs for the master tenant, and rejects a malformed month
+instead of showing an empty report.** Built against plugin API 1.4.2, minimum appliance 9.0.2;
+plugin code, provider code and options are unchanged.
+
+### What changed
+
+- **Own master-tenant check.** The report reads the invoices of every tenant and so far relied on
+  `masterOnly` alone; whether Morpheus enforces that flag for every way a report can be started
+  (for example `POST /api/reports`) was never checked. `process()` now looks up whether the user
+  who ran the report belongs to the master tenant
+  (`SELECT ... FROM user u JOIN account a ON a.id = u.account_id WHERE u.id = ?`, the same check
+  MSP Tenant Overview makes) before it reads any invoice. A report result without a creator is
+  checked by its own account instead (`account.master_account`). If neither is the master tenant,
+  or neither is known, the report ends as **failed** with one warning in the appliance log and
+  reads no invoice.
+- **Month checked again when the report runs.** The form validates the month, but a report
+  started through the API can skip that validation; a month such as `2026-1` then gave a report
+  that was *ready* but empty. Such a month now fails the report with a warning in the log, before
+  a database connection is taken.
+- **Tenant count matches the tables.** Since 1.2.2 the page hides a currency without any amount.
+  A tenant whose only invoices were in such a currency was still counted on the *Tenants* card
+  but listed in no table. The card now counts the tenants the tables list whenever a currency is
+  hidden; the stored rows and the CSV export keep the full count.
+
+### Behaviour changes from 1.2.2
+
+- **A report run by a user outside the master tenant now fails** instead of listing all tenants
+  (if Morpheus let such a run through at all).
+- **A report result without a creator runs only when its account is the master tenant**; one
+  without creator and account fails. Report results started from the UI carry their creator.
+- A malformed month via the API gives a *failed* report instead of an empty *ready* one.
+- The *Tenants* card can show a lower number than before when a currency is hidden.
+
+### Verified
+
+- Unit tests (Spock), 183 in total: `process()` with a mocked report service and database
+  (column aliases mapped, master tenant left out, rows, tenant totals and currency totals as
+  stored), the master check for creator and account, the month check, and the tenant count with a
+  hidden currency.
+
+### Not yet verified
+
+- Not run on an appliance. Open checks: a report run by a master-tenant user still ends *ready*
+  with the same amounts as 1.2.2; a sub-tenant user who starts the report through the API (if
+  Morpheus accepts the request) gets a *failed* result and no rows; the warning lines in the
+  appliance log.
+- Whether Morpheus ever passes `process()` a report result without a creator (for example from a
+  scheduled report job), and whether it then carries its account, is not known.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.2.2...tenant-chargeback-v1.2.3
+
 ## 1.2.2
 
 **The report page hides currencies without any amount and right-aligns its numbers.** The stored

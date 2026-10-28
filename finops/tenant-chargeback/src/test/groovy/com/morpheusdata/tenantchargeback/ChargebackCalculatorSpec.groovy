@@ -486,6 +486,10 @@ class ChargebackCalculatorSpec extends Specification {
 	 * What INVOICE_SQL returns for the given invoice lines and group table: one row per tenant,
 	 * group id and currency, the group name being MAX(COALESCE(NULLIF(TRIM(site_name), ''), cs.name))
 	 * with cs from LEFT JOIN compute_site. With {@code join = false} it is the 1.1.2 query, MAX(site_name).
+	 *
+	 * Limit: this is a hand-written model of the query, not the query run against a database. The
+	 * SQL text itself is covered only by the string checks in TenantChargebackReportProviderSpec and
+	 * by the lab appliance, so a change to INVOICE_SQL has to be made here as well.
 	 */
 	private static List<Map> queryRows(List<Map> invoices, Map<Long, String> sites, boolean join = true) {
 		Map<List, Map> out = new LinkedHashMap<List, Map>()

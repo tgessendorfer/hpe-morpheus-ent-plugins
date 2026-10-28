@@ -29,7 +29,8 @@ For one month (`account_invoice` with `period_interval = 'month'`):
 
 On the report page (since 1.2.2) a currency whose total cost, list price and invoice amount are
 all zero is left out of the cards and the three tables, as long as another currency has an amount;
-the CSV export keeps every row. Numbers are right-aligned and never broken inside.
+the CSV export keeps every row. The *Tenants* card then counts only the tenants the tables list
+(since 1.2.3). Numbers are right-aligned and never broken inside.
 
 Counted are the invoices of **instances** and of **servers that belong to no instance** (since
 1.2.1 a server belongs to an instance when a `container` row links them (`container.server_id` = the invoice's `ref_id`, `container.instance_id` set); Morpheus leaves `instance_id` empty on the server invoice of an instance's own VM). The
@@ -53,6 +54,11 @@ the month; the heading says so.
 The report is **master tenant only** (`masterOnly = true`): it reads the invoices of all
 tenants. Which roles may run it follows the Morpheus report permissions. Without
 *Include Master Tenant Resources* only the sub-tenants are listed.
+
+Since 1.2.3 the report also checks this itself before it reads any invoice: the user who ran it
+must belong to the master tenant (a report result without a creator: its own account must be the
+master tenant). Otherwise, and for a month that is not `YYYY-MM` (possible through the API), the
+report ends as *failed* with a warning in the appliance log.
 
 ## Options
 
