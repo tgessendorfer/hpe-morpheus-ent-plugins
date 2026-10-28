@@ -1104,7 +1104,7 @@ class OpenRouterProviderSpec extends Specification {
 	def "a request whose question the chat memory dropped gets it back after the system messages"() {
 		given: 'the model answered the question with a tool call'
 		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
-		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')]), integration, false)
 		LlmChatResponse first = new LlmChatResponse()
 		first.metadata = [tool_calls: [[id: 'call_AbCdEfGhIjKlMnOp', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]
 		OpenRouterProvider.rememberQuestion(firstBody, first)
@@ -1132,7 +1132,8 @@ class OpenRouterProviderSpec extends Specification {
 		given:
 		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
 		long old = System.currentTimeMillis() - OpenRouterProvider.QUESTION_BY_TOOL_CALL_TTL_MS - 1000L
-		OpenRouterProvider.QUESTION_BY_TOOL_CALL.put('call_OldAbCdEfGhIjKl', [question: 'Stale question', updated: old])
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.put(OpenRouterProvider.toolCallKey(OpenRouterProvider.questionScope(null, []), 'call_OldAbCdEfGhIjKl'),
+			[question: 'Stale question', updated: old])
 		List<Map> withQuestion = [[role: 'user', content: 'How many VMs?'], [role: 'assistant', content: '', tool_calls: [[id: 'call_OldAbCdEfGhIjKl']]]]
 		List<Map> unknown = [[role: 'assistant', content: '', tool_calls: [[id: 'call_UnknownAbCdEfGh']]]]
 		List<Map> expired = [[role: 'tool', tool_call_id: 'call_OldAbCdEfGhIjKl', content: 'x']]
@@ -1153,6 +1154,11 @@ class OpenRouterProviderSpec extends Specification {
 		LlmChatResponse r = new LlmChatResponse()
 		r.metadata = [tool_calls: calls]
 		return r
+	}
+
+	/** The remembered question of a tool call id, whatever its scope. */
+	private static Map remembered(String id) {
+		return OpenRouterProvider.QUESTION_BY_TOOL_CALL.find { String key, Map entry -> key.endsWith('|' + id) }?.value as Map
 	}
 
 	def "numbered tool call ids are never trusted, so another conversation's question cannot come back"() {
@@ -1177,7 +1183,7 @@ class OpenRouterProviderSpec extends Specification {
 		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
 		String ID = 'call_AbCdEfGhIjKlMnOp'
 		String ID2 = 'call_ZyXwVuTsRqPoNmLk'
-		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')]), integration, false)
 		String originalKey = OpenRouterProvider.questionKey(firstBody)
 		OpenRouterProvider.rememberQuestion(firstBody, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
 		List<Map> msgs = [[role: 'system', content: 'You are Murph.'], [role: 'assistant', content: '', tool_calls: [[id: ID]]], [role: 'tool', tool_call_id: ID, content: 'part']]
@@ -1189,8 +1195,8 @@ class OpenRouterProviderSpec extends Specification {
 		then:
 		restored
 		OpenRouterProvider.questionKey([model: firstBody.model, messages: msgs]) == originalKey
-		OpenRouterProvider.QUESTION_BY_TOOL_CALL.get(ID2).question == 'List the AWS servers'
-		OpenRouterProvider.QUESTION_BY_TOOL_CALL.get(ID2).costKey == originalKey
+		remembered(ID2).question == 'List the AWS servers'
+		remembered(ID2).costKey == originalKey
 
 		cleanup:
 		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
@@ -1211,7 +1217,7 @@ class OpenRouterProviderSpec extends Specification {
 
 		then:
 		OpenRouterProvider.QUESTION_BY_TOOL_CALL.size() == OpenRouterProvider.QUESTION_BY_TOOL_CALL_MAX
-		OpenRouterProvider.QUESTION_BY_TOOL_CALL.get(ID).question == 'List the AWS servers'
+		remembered(ID).question == 'List the AWS servers'
 
 		cleanup:
 		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
@@ -1233,7 +1239,7 @@ class OpenRouterProviderSpec extends Specification {
 		LlmIntegration llm = new LlmIntegration(accountIntegration: ai)
 
 		when:
-		provider.generateResponse(llm, new LlmChatRequest(model: 'm', messages: [message('user', 'List the AWS servers')]), [:])
+		provider.generateResponse(llm, new LlmChatRequest(model: 'm', messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')]), [:])
 		provider.generateResponse(llm, new LlmChatRequest(model: 'm', messages: [
 			message('system', 'You are Murph.'),
 			message('assistant', '', [tool_calls: [[id: 'call_E2eAbCdEfGhIjKlMn', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
@@ -1247,5 +1253,116 @@ class OpenRouterProviderSpec extends Specification {
 
 		cleanup:
 		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a remembered question stays with its integration and its system prompt"() {
+		given: 'a backend whose tool call ids repeat across conversations, and one question on integration 4'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		List<Map> asked = [[role: 'system', content: 'You are Murph for tenant A.'], [role: 'user', content: 'List the AWS servers']]
+		OpenRouterProvider.rememberQuestion([messages: asked], response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]), 4L)
+		Closure<List<Map>> lost = { String system ->
+			[[role: 'system', content: system], [role: 'assistant', content: '', tool_calls: [[id: ID]]], [role: 'tool', tool_call_id: ID, content: 'part']]
+		}
+
+		expect: 'another integration or another system prompt never gets the question'
+		!OpenRouterProvider.restoreLostQuestion(lost('You are Murph for tenant A.'), 5L)
+		!OpenRouterProvider.restoreLostQuestion(lost('You are Murph for tenant B.'), 4L)
+
+		and: 'the conversation it came from does, also with the plugin\'s U+FFFD note among the system messages'
+		List<Map> own = lost('You are Murph for tenant A.')
+		own.add(1, [role: 'system', content: OpenRouterProvider.REPLACEMENT_CHARACTER_NOTE])
+		OpenRouterProvider.restoreLostQuestion(own, 4L)
+		own[2].content == OpenRouterProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "the cost of a question is kept per integration"() {
+		given:
+		Map body = [model: 'm', messages: [[role: 'user', content: 'Clouds?']]]
+
+		expect:
+		OpenRouterProvider.questionKey(body, 4L) != OpenRouterProvider.questionKey(body, 5L)
+		OpenRouterProvider.questionKey(body, 4L) == OpenRouterProvider.questionKey(body + [messages: body.messages + [[role: 'tool', tool_call_id: 'x', content: 'y']]], 4L)
+	}
+
+	def "required arguments, and false for a flag that defaults to true, are not dropped"() {
+		given:
+		OpenRouterApiService api = Stub()
+		api.createChatCompletion(*_) >> [success: true, data: [choices: [[finish_reason: 'tool_calls', message: [content: null, tool_calls: [
+			[id: 't1', type: 'function', function: [name: 'get_result_excerpt', arguments: '{"artifactId":"a1","offset":0,"query":""}']],
+			[id: 't2', type: 'function', function: [name: 'list_servers', arguments: '{"agentInstalled":false,"managed":false,"name":""}']]
+		]]]]]]
+		provider.apiService = api
+		AccountIntegration ai = configured([:])
+		ai.servicePassword = 'sk-or-v1-test'
+		List tools = [
+			[type: 'function', function: [name: 'get_result_excerpt', parameters: [type: 'object', required: ['artifactId', 'offset'],
+				properties: [artifactId: [type: 'string'], offset: [type: 'integer'], query: [type: 'string']]]]],
+			[type: 'function', function: [name: 'list_servers', parameters: [type: 'object',
+				properties: [agentInstalled: [type: 'boolean', default: true], managed: [type: 'boolean'], name: [type: 'string']]]]]
+		]
+
+		when:
+		ServiceResponse<LlmChatResponse> response = provider.generateResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(model: 'openai/gpt-5.4-mini', messages: [message('user', 'Page through it.')], options: [tools: tools]), [:])
+
+		then:
+		response.data.metadata.tool_calls*.function*.arguments == ['{"artifactId":"a1","offset":0}', '{"agentInstalled":false}']
+	}
+
+	def "a tool call the token limit cut off is dropped, and the complete ones still run"() {
+		given:
+		Map data = [choices: [[finish_reason: 'length', message: [role: 'assistant', content: '', tool_calls: [
+			[id: 'c1', type: 'function', function: [name: 'list_clouds', arguments: '{}']],
+			[id: 'c2', type: 'function', function: [name: 'list_servers', arguments: '{"name":"web']]
+		]]]]]
+
+		when:
+		LlmChatResponse response = provider.parseChatResponse(data)
+
+		then:
+		response.finishReason == 'tool_calls'
+		response.metadata.tool_calls*.id == ['c1']
+		!response.metadata.truncated
+	}
+
+	def "with no complete tool call left, the answer says it was cut off"() {
+		when:
+		LlmChatResponse response = provider.parseChatResponse([choices: [[finish_reason: 'length', message: [role: 'assistant', content: '',
+			tool_calls: [[id: 'c2', type: 'function', function: [name: 'list_servers', arguments: '{"name":"web']]]]]]])
+
+		then:
+		response.finishReason == 'length'
+		!response.metadata.tool_calls
+		response.message.content == '*Answer cut off at the output token limit.*'
+	}
+
+	def "a U+FFFD in a tool result of the running question adds no note, so its cost key stays"() {
+		given:
+		List<LlmChatMessage> question = [message('system', 'You are Murph.'), message('user', 'Which servers run?')]
+		List<LlmChatMessage> nextRound = question + [
+			message('assistant', '', [tool_calls: [[id: 'call_AbCdEfGhIjKlMnOp', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '{"name":"L\uFFFDuft"}', [tool_call_id: 'call_AbCdEfGhIjKlMnOp'])
+		]
+
+		when:
+		Map first = provider.buildChatRequestBody(new LlmChatRequest(model: 'm', messages: question), integration, false)
+		Map second = provider.buildChatRequestBody(new LlmChatRequest(model: 'm', messages: nextRound), integration, false)
+
+		then:
+		!second.messages.any { it.content == OpenRouterProvider.REPLACEMENT_CHARACTER_NOTE }
+		OpenRouterProvider.questionKey(first) == OpenRouterProvider.questionKey(second)
+	}
+
+	def "the API key is sent without the spaces it was pasted with"() {
+		given:
+		AccountIntegration ai = new AccountIntegration(serviceUrl: OpenRouterProvider.DEFAULT_API_URL)
+		ai.credentialData = [password: '  sk-or-v1-abc\n']
+
+		expect:
+		provider.resolveApiKey(ai) == 'sk-or-v1-abc'
 	}
 }

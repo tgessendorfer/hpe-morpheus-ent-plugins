@@ -262,6 +262,32 @@ class OpenRouterApiServiceSpec extends Specification {
 		e.statusCode == 429
 	}
 
+	def "a stream that closes without [DONE] and without a finish reason is not taken for the answer"() {
+		given: 'a connection cut halfway through a tool call'
+		CloseableHttpResponse response = streamOf([
+			'data: {"choices":[{"index":0,"delta":{"content":"Let me look."},"finish_reason":null}]}',
+			'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"list_servers","arguments":"{\\"na"}}]},"finish_reason":null}]}'
+		])
+
+		when:
+		service.consumeEventStream(response, null)
+
+		then:
+		OpenRouterApiService.StreamErrorException e = thrown()
+		e.message.contains('closed before the answer was complete')
+		e.statusCode == null
+	}
+
+	def "a finish reason without [DONE] still completes the stream"() {
+		given:
+		CloseableHttpResponse response = streamOf([
+			'data: {"choices":[{"index":0,"delta":{"content":"Red"},"finish_reason":"stop"}]}'
+		])
+
+		expect:
+		service.consumeEventStream(response, null).choices[0].message.content == 'Red'
+	}
+
 	def "a refused request reports its status; HttpApiClient hands over no headers for it"() {
 		given:
 		String baseUrl = serve('/chat/completions', 'application/json',

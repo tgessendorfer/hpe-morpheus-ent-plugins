@@ -181,4 +181,19 @@ class LlmModelsSyncSpec extends Specification {
 		created.isEmpty()
 		removed.isEmpty()
 	}
+
+	def "a catalog with no usable model leaves the stored models alone"() {
+		given: 'a model list that came back empty, or whose fields were renamed so no entry passes the filter'
+		OpenRouterApiService api = Mock()
+		api.listModels(_, _, _) >> [success: true, data: [data: [[id: 'openai/gpt-5.5']]]]
+		LlmModelsSync sync = syncOver([model(1L, 'openai/gpt-5.5'), model(2L, 'z-ai/glm-4.5')], api)
+
+		when:
+		sync.execute('https://openrouter.ai/api/v1', 'sk-or-v1-test', [:]) { Map response -> [] }
+
+		then: 'syncing it would have removed every model and left every agent without one'
+		saved.isEmpty()
+		created.isEmpty()
+		removed.isEmpty()
+	}
 }

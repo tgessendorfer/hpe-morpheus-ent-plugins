@@ -143,6 +143,8 @@ class OpenRouterProvider implements LlmProvider {
 	// that window within one question, the question itself drops out, and the model then
 	// answers as if the message had been empty. Each tool call id the model issues is
 	// mapped to the question it worked on, so a request that lost its question gets it back.
+	// The key is the question's scope (see questionScope) and the id, so a tool call id that
+	// two conversations happen to share never hands one of them the other's question.
 	protected static final ConcurrentHashMap<String, Map> QUESTION_BY_TOOL_CALL = new ConcurrentHashMap<>()
 	static final long QUESTION_BY_TOOL_CALL_TTL_MS = 60L * 60L * 1000L
 	static final int QUESTION_BY_TOOL_CALL_MAX = 10000
@@ -372,7 +374,7 @@ class OpenRouterProvider implements LlmProvider {
 			displayOrder: 12,
 			required: false,
 			defaultValue: 'on',
-			helpText: 'On by default. Some models fill every optional parameter of a tool call with an empty string, 0 or false, and the built-in Morpheus tools treat those as filters: list_servers then finds no servers. With this on, such top-level arguments are removed before Morpheus runs the tool, which is the same as leaving them out. Untick it to forward tool calls exactly as the model wrote them.'
+			helpText: 'On by default. Some models fill every optional parameter of a tool call with an empty string, 0 or false, and the built-in Morpheus tools treat those as filters: list_servers then finds no servers. With this on, such top-level arguments are removed before Morpheus runs the tool, which is the same as leaving them out. Arguments the tool marks as required are kept, and so is false where the tool defaults to true. Untick it to forward tool calls exactly as the model wrote them.'
 		)
 
 		// Labels and help texts resolve through the plugin's i18n bundles in
@@ -501,9 +503,9 @@ class OpenRouterProvider implements LlmProvider {
 				return chatFailure(accountIntegration, request, requestBody, OpenRouterApiService.statusCodeOf(error.code),
 					"Chat completion failed: ${message}".toString())
 			}
-			LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(data))
-			rememberQuestion(requestBody, response)
-			dropEmptyToolArguments(response, accountIntegration)
+			LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(data), accountIntegration.id)
+			rememberQuestion(requestBody, response, accountIntegration.id)
+			dropEmptyToolArguments(response, accountIntegration, requestBody)
 			return ServiceResponse.success(appendUsageFooter(response, accountIntegration))
 		}
 		return chatFailure(accountIntegration, request, requestBody, failureStatus(result),
@@ -608,7 +610,7 @@ class OpenRouterProvider implements LlmProvider {
 		response.metadata = [error: true, error_status: status, answer_language: language]
 
 		// The failed request ends the question, so its cost tally closes here.
-		Map tally = requestBody != null ? QUESTION_COSTS.remove(questionKey(requestBody)) : null
+		Map tally = requestBody != null ? QUESTION_COSTS.remove(questionKey(requestBody, accountIntegration?.id)) : null
 		if (tally) {
 			response.metadata.put('question_cost', tally.total)
 			response.metadata.put('question_requests', tally.requests)
@@ -676,9 +678,9 @@ class OpenRouterProvider implements LlmProvider {
 			}, { streamed.length() == 0 })
 
 			if (result?.success && result.data instanceof Map) {
-				LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(result.data as Map))
-				rememberQuestion(requestBody, response)
-				dropEmptyToolArguments(response, accountIntegration)
+				LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(result.data as Map), accountIntegration.id)
+				rememberQuestion(requestBody, response, accountIntegration.id)
+				dropEmptyToolArguments(response, accountIntegration, requestBody)
 				handler?.onCompleteResponse(appendUsageFooter(response, accountIntegration))
 				return
 			}
@@ -778,7 +780,7 @@ class OpenRouterProvider implements LlmProvider {
 		if (stream != null) {
 			requestBody.stream = stream
 		}
-		if (restoreLostQuestion(messages)) {
+		if (restoreLostQuestion(messages, accountIntegration?.id)) {
 			log.info("Restored the user's question, which the Morpheus chat memory had dropped during a tool loop (${messages.size()} messages)")
 		}
 		// The shape of the request, never its content: enough to see from the log what a
@@ -786,9 +788,13 @@ class OpenRouterProvider implements LlmProvider {
 		log.info("OpenRouter request: model=${requestBody.model} messages=${messages.size()} tools=${tools ? tools.size() : 0} " +
 			"max_tokens=${requestBody.max_tokens} temperature=${requestBody.temperature} reasoning=${requestBody.reasoning?.effort} stream=${requestBody.stream}")
 
-		int replaced = countReplacementChars(messages)
+		// Only the conversation up to the question counts. It is the same on every request of
+		// the question, so a tool result that carries the character cannot add the note halfway
+		// through a tool loop and change the question's cost key with it.
+		List<Map> history = messages.subList(0, lastUserIndex(messages) + 1)
+		int replaced = countReplacementChars(history)
 		if (replaced) {
-			log.warn("Replayed conversation contains ${replaced} U+FFFD replacement characters (${describeReplacementContext(messages)})")
+			log.warn("Replayed conversation contains ${replaced} U+FFFD replacement characters (${describeReplacementContext(history)})")
 			// Left behind by requests sent before bodies went out as ASCII: OpenRouter turned
 			// each non-ASCII byte into U+FFFD, the model repeated it, and Morpheus stored the
 			// answer that way. A model reading "L�uft" in its own answer keeps writing it.
@@ -906,6 +912,17 @@ class OpenRouterProvider implements LlmProvider {
 		response.message = chatMessage
 
 		List<Map> toolCalls = normalizeToolCalls(message.tool_calls)
+		if (toolCalls && response.finishReason == 'length') {
+			// The token limit can stop a model halfway through a call's arguments. Morpheus
+			// would run that call with the broken JSON; the complete calls still run, and
+			// with none left the answer says it was cut off.
+			List<Map> complete = toolCalls.findAll { Map call -> isCompleteArguments((call.function as Map).arguments?.toString()) }
+			if (complete.size() < toolCalls.size()) {
+				log.warn("OpenRouter answer cut off at the output token limit inside a tool call; dropped the incomplete calls: " +
+					(toolCalls - complete).collect { Map call -> (call.function as Map).name }.join(', '))
+			}
+			toolCalls = complete
+		}
 		if (toolCalls) {
 			// Morpheus runs the tools only when the turn ends in tool_calls.
 			response.finishReason = 'tool_calls'
@@ -974,13 +991,24 @@ class OpenRouterProvider implements LlmProvider {
 		return response
 	}
 
+	/** Arguments a tool can be run with: a whole JSON object. */
+	protected static boolean isCompleteArguments(String json) {
+		try {
+			return new JsonSlurper().parseText(json ?: '') instanceof Map
+		} catch (Exception ignored) {
+			return false
+		}
+	}
+
 	/**
 	 * Removes the arguments a model only filled in for the sake of it. gpt-5.4-mini and
 	 * gpt-5.4-nano send list_servers every optional parameter as "", 0 or false; Morpheus'
 	 * built-in tools take each of those as a filter and answer with nothing (verified
 	 * 2026-09-21 on 9.0.2). A dropped argument is the same as one the model never wrote.
+	 * The tool definitions of the request say which parameters are required; those are
+	 * never dropped.
 	 */
-	protected void dropEmptyToolArguments(LlmChatResponse response, AccountIntegration accountIntegration) {
+	protected void dropEmptyToolArguments(LlmChatResponse response, AccountIntegration accountIntegration, Map requestBody = null) {
 		if (!isDropEmptyToolArgumentsEnabled(accountIntegration)) {
 			return
 		}
@@ -988,9 +1016,10 @@ class OpenRouterProvider implements LlmProvider {
 		if (!toolCalls) {
 			return
 		}
+		Map<String, Map> schemas = toolSchemas(requestBody?.tools)
 		toolCalls.each { Map call ->
 			Map function = call.function as Map
-			Map<String, List<String>> result = pruneEmptyArguments(function.arguments?.toString())
+			Map<String, List<String>> result = pruneEmptyArguments(function.arguments?.toString(), schemas[function.name?.toString()])
 			if (result.dropped) {
 				function.arguments = result.json
 				log.info("OpenRouter dropped empty arguments from ${function.name}: ${result.dropped.join(', ')}")
@@ -1002,11 +1031,25 @@ class OpenRouterProvider implements LlmProvider {
 		}
 	}
 
+	/** The parameters schema of each tool of a request, by tool name. */
+	protected static Map<String, Map> toolSchemas(def tools) {
+		Map<String, Map> schemas = [:]
+		(tools instanceof List ? tools as List : []).each { def tool ->
+			Map function = tool instanceof Map && (tool as Map).function instanceof Map ? (tool as Map).function as Map : null
+			if (function?.name && function.parameters instanceof Map) {
+				schemas.put(function.name.toString(), function.parameters as Map)
+			}
+		}
+		return schemas
+	}
+
 	/**
 	 * The arguments JSON without its empty top-level entries, and the names of those
-	 * entries. Anything that is not a JSON object is returned as it is.
+	 * entries. Anything that is not a JSON object is returned as it is. With the tool's
+	 * parameters schema, a required parameter is kept whatever its value, and so is false
+	 * for a flag that defaults to true: the model chose those.
 	 */
-	protected static Map pruneEmptyArguments(String json) {
+	protected static Map pruneEmptyArguments(String json, Map schema = null) {
 		if (!json?.trim()) {
 			return [json: json, dropped: []]
 		}
@@ -1019,10 +1062,14 @@ class OpenRouterProvider implements LlmProvider {
 		if (!(parsed instanceof Map)) {
 			return [json: json, dropped: []]
 		}
+		List<String> required = schema?.required instanceof List ? (schema.required as List).collect { it?.toString() } : []
+		Map properties = schema?.properties instanceof Map ? schema.properties as Map : [:]
 		List<String> dropped = []
 		Map kept = [:]
 		(parsed as Map).each { key, value ->
-			if (isEmptyArgument(value)) {
+			def property = properties[key.toString()]
+			boolean deliberateFalse = value == false && property instanceof Map && (property as Map).get('default') == true
+			if (isEmptyArgument(value) && !(key.toString() in required) && !deliberateFalse) {
 				dropped << key.toString()
 			} else {
 				kept.put(key, value)
@@ -1261,14 +1308,14 @@ class OpenRouterProvider implements LlmProvider {
 	 * Adds this request's cost to the running total of its question, and hands the
 	 * total to the response. A final answer closes the question.
 	 */
-	protected LlmChatResponse trackQuestionCost(Map requestBody, LlmChatResponse response) {
+	protected LlmChatResponse trackQuestionCost(Map requestBody, LlmChatResponse response, Long integrationId = null) {
 		def cost = response?.metadata?.get('cost')
 		if (!(cost instanceof BigDecimal)) {
 			return response
 		}
 		long now = System.currentTimeMillis()
 		QUESTION_COSTS.values().removeIf { Map tally -> now - (tally.updated as long) > QUESTION_COST_TTL_MS }
-		String key = questionKey(requestBody)
+		String key = questionKey(requestBody, integrationId)
 		Map tally = QUESTION_COSTS.compute(key) { String ignored, Map existing ->
 			[total   : ((existing?.total ?: BigDecimal.ZERO) as BigDecimal) + (cost as BigDecimal),
 			 requests: ((existing?.requests ?: 0) as int) + 1,
@@ -1283,11 +1330,12 @@ class OpenRouterProvider implements LlmProvider {
 	}
 
 	/**
-	 * Identifies the question a request belongs to: the model and the conversation up
-	 * to the user's latest message. Every tool round of one question repeats exactly
-	 * that prefix and only appends to it. Morpheus passes no conversation id.
+	 * Identifies the question a request belongs to: the integration, the model and the
+	 * conversation up to the user's latest message. Every tool round of one question
+	 * repeats exactly that prefix and only appends to it. Morpheus passes no conversation
+	 * id, and no user.
 	 */
-	protected static String questionKey(Map requestBody) {
+	protected static String questionKey(Map requestBody, Long integrationId = null) {
 		List messages = (requestBody?.messages ?: []) as List
 		boolean restored = messages.any { def message ->
 			message instanceof Map && message.role == 'user' && message.content instanceof CharSequence &&
@@ -1296,19 +1344,53 @@ class OpenRouterProvider implements LlmProvider {
 		if (restored) {
 			// The question was put back after the chat memory dropped it: keep counting on
 			// the key its first requests used, so the footer covers the whole question.
-			String original = knownQuestionEntry(messages)?.costKey as String
+			String original = knownQuestionEntry(messages, integrationId)?.costKey as String
 			if (original) {
 				return original
 			}
 		}
+		int last = lastUserIndex(messages)
+		String prefix = JsonOutput.toJson([integration: integrationId, model: requestBody?.model, messages: last >= 0 ? messages[0..last] : []])
+		return sha256(prefix)
+	}
+
+	/** Index of the latest user message, tool results not counted; -1 when there is none. */
+	protected static int lastUserIndex(List messages) {
 		int last = -1
-		messages.eachWithIndex { def message, int index ->
+		(messages ?: []).eachWithIndex { def message, int index ->
 			if (message instanceof Map && message.role == 'user' && message.content instanceof CharSequence) {
 				last = index
 			}
 		}
-		String prefix = JsonOutput.toJson([model: requestBody?.model, messages: last >= 0 ? messages[0..last] : []])
-		return MessageDigest.getInstance('SHA-256').digest(prefix.getBytes('UTF-8')).encodeHex().toString()
+		return last
+	}
+
+	protected static String sha256(String text) {
+		return MessageDigest.getInstance('SHA-256').digest(text.getBytes('UTF-8')).encodeHex().toString()
+	}
+
+	/**
+	 * What a remembered question belongs to: the integration and the system messages the
+	 * conversation starts with. Morpheus' chat memory never evicts its system message, so
+	 * both stay the same through a question's tool loop, while another integration, agent
+	 * or tenant gets another scope. The plugin's own note is left out: it comes and goes.
+	 */
+	protected static String questionScope(Long integrationId, List messages) {
+		List<String> system = []
+		for (def message : (messages ?: [])) {
+			if (!(message instanceof Map) || (message as Map).role != 'system') {
+				break
+			}
+			String content = (message as Map).content?.toString()
+			if (content != REPLACEMENT_CHARACTER_NOTE) {
+				system << content
+			}
+		}
+		return sha256(JsonOutput.toJson([integration: integrationId, system: system]))
+	}
+
+	protected static String toolCallKey(String scope, String id) {
+		return "${scope}|${id}".toString()
 	}
 
 	/** The text of the latest user message that is a question, not a tool result; null when there is none. */
@@ -1339,7 +1421,7 @@ class OpenRouterProvider implements LlmProvider {
 	 * Maps every tool call of this turn to the question of the request, so the question
 	 * can be put back once the chat memory has dropped it.
 	 */
-	protected static void rememberQuestion(Map requestBody, LlmChatResponse response) {
+	protected static void rememberQuestion(Map requestBody, LlmChatResponse response, Long integrationId = null) {
 		String question = latestQuestion(requestBody?.messages as List)
 		def calls = response?.metadata?.get('tool_calls')
 		List<String> ids = toolCallIds([tool_calls: calls instanceof List ? calls : null])
@@ -1347,9 +1429,10 @@ class OpenRouterProvider implements LlmProvider {
 			return
 		}
 		long now = System.currentTimeMillis()
-		String costKey = questionKey(requestBody)
+		String costKey = questionKey(requestBody, integrationId)
+		String scope = questionScope(integrationId, requestBody?.messages as List)
 		ids.findAll { String id -> isDistinctToolCallId(id) }.each { String id ->
-			QUESTION_BY_TOOL_CALL.put(id, [question: question, costKey: costKey, updated: now])
+			QUESTION_BY_TOOL_CALL.put(toolCallKey(scope, id), [question: question, costKey: costKey, updated: now])
 		}
 		QUESTION_BY_TOOL_CALL.values().removeIf { Map entry -> now - (entry.updated as long) > QUESTION_BY_TOOL_CALL_TTL_MS }
 		int excess = QUESTION_BY_TOOL_CALL.size() - QUESTION_BY_TOOL_CALL_MAX
@@ -1369,15 +1452,16 @@ class OpenRouterProvider implements LlmProvider {
 		return id != null && id.length() >= 16 && !(id ==~ /.*[:_.\-]\d{1,4}/)
 	}
 
-	/** The remembered entry of the first known tool call in these messages, or null. */
-	protected static Map knownQuestionEntry(List messages) {
+	/** The remembered entry of the first known tool call in these messages, within their scope, or null. */
+	protected static Map knownQuestionEntry(List messages, Long integrationId = null) {
 		long now = System.currentTimeMillis()
+		String scope = questionScope(integrationId, messages)
 		for (def message : (messages ?: [])) {
 			if (!(message instanceof Map)) {
 				continue
 			}
 			for (String id : toolCallIds(message as Map)) {
-				Map entry = isDistinctToolCallId(id) ? QUESTION_BY_TOOL_CALL.get(id) : null
+				Map entry = isDistinctToolCallId(id) ? QUESTION_BY_TOOL_CALL.get(toolCallKey(scope, id)) : null
 				if (entry && now - (entry.updated as long) <= QUESTION_BY_TOOL_CALL_TTL_MS) {
 					return entry
 				}
@@ -1391,12 +1475,17 @@ class OpenRouterProvider implements LlmProvider {
 	 * left: Morpheus evicted it from its chat memory, but the tool calls that worked on
 	 * it are still there. Returns true when a question was restored.
 	 */
-	protected static boolean restoreLostQuestion(List<Map> messages) {
+	protected static boolean restoreLostQuestion(List<Map> messages, Long integrationId = null) {
 		if (!messages || latestQuestion(messages)) {
 			return false
 		}
-		String question = knownQuestionEntry(messages)?.question as String
+		String question = knownQuestionEntry(messages, integrationId)?.question as String
 		if (!question) {
+			Set<String> ids = messages.collectMany { Map message -> toolCallIds(message) }.findAll { String id -> isDistinctToolCallId(id) } as Set
+			if (ids && QUESTION_BY_TOOL_CALL.keySet().any { String key -> key.substring(key.indexOf('|') + 1) in ids }) {
+				// Says why nothing was restored, should a question's system prompt ever change mid-loop.
+				log.info("Not restoring a dropped question: its tool calls were remembered for another integration or system prompt")
+			}
 			return false
 		}
 		int position = 0
@@ -1509,7 +1598,10 @@ class OpenRouterProvider implements LlmProvider {
 			}
 			logCredentialDiagnosis(accountIntegration, handedOver, lookup)
 		}
-		return accountIntegration.credentialData?.password ?: accountIntegration.serviceToken ?: accountIntegration.servicePassword
+		// Trimmed: a key pasted with a space or line break around it goes out in the header
+		// as it is, and OpenRouter answers 401 without a word about the format.
+		return [accountIntegration.credentialData?.password, accountIntegration.serviceToken, accountIntegration.servicePassword]
+			.collect { def key -> key?.toString()?.trim() }.find { String key -> key } as String
 	}
 
 	// Integrations whose credential handover has been logged, so a Local Credentials

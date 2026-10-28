@@ -214,7 +214,8 @@ servers were found*).
 With **Drop Empty Tool Arguments** on, the default — also for existing integrations — the plugin
 removes top-level arguments whose value is `""`, `0`, `false`, `null`, `[]` or `{}` from the
 model's tool calls before Morpheus runs the tool, which is the same as the model leaving them out.
-The log names what was dropped:
+Arguments the tool's definition marks as required are kept whatever their value, and so is `false`
+for a parameter that defaults to `true`: the model chose those. The log names what was dropped:
 
 ```
 OpenRouter tool calls: list_servers {"name":"","phrase":"","zoneId":0,"siteId":0,"managed":false,...}

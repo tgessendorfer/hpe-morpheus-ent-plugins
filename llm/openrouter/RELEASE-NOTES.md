@@ -6,6 +6,88 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 0.2.5
+
+**Fix release from a code review: a restored question stays in its own conversation, tool calls
+keep their required arguments and lose the ones the token limit cut off, and an empty model
+catalog no longer empties the integration.** Built against plugin API 1.4.2. No new setting.
+
+- **A restored question stays with its conversation.** Since 0.2.3 the plugin remembers which
+  question each tool call worked on, to put back a question that the Morpheus 9.1 chat memory
+  dropped. That map was keyed by the tool call id alone and shared by every integration, tenant and
+  user; only numbered ids were refused. A backend that names its tool calls in a fixed pattern
+  (`tool_0_list_servers`) could have handed one conversation the question of another. Each entry is
+  now bound to **the integration and the system messages the conversation starts with**, which
+  Morpheus' chat memory never evicts, and a question is restored only within that scope. When a
+  known tool call belongs to another scope, the log says *Not restoring a dropped question: its tool
+  calls were remembered for another integration or system prompt*. This narrows the leak; it does
+  not close it. Two users of the same agent on the same integration share one scope, because
+  Morpheus hands the plugin no user, so with such fixed-pattern tool call ids one of them can still
+  get the other's question restored.
+- **The cost footer counts per integration.** The key of a question's running cost now includes
+  the integration. Morpheus hands the plugin no user, so two users asking the same first question
+  through the same agent at the same moment can still share one tally.
+- ***Drop Empty Tool Arguments* keeps required arguments.** It removed `""`, `0` and `false`
+  without looking at the tool's definition, so a required `offset: 0` of `get_result_excerpt` went
+  too. It now reads the parameters schema the request carries with its tools: **a parameter listed
+  as required is kept whatever its value, and so is `false` for a parameter that defaults to
+  `true`.** Help text (English, German, Polish) and README say so.
+- **A tool call the output token limit cut off is no longer passed on.** With `finish_reason:
+  length` the plugin still made the turn a tool-call turn, so half-written JSON arguments reached
+  Morpheus. Calls whose arguments are not a complete JSON object are now dropped and logged; the
+  complete ones still run. With none left, the answer carries the truncation note, like a text
+  answer that was cut off.
+- **An empty catalog no longer removes every model.** A model list that came back empty, or with
+  no entry that passes the filter (after a field rename, say), was synced as "nothing listed": every
+  model was removed, and the ones agents use were disabled. The sync now keeps the stored models and
+  logs *Skipping OpenRouter model sync ... no usable model in the catalog*.
+- **A stream that ends early is an error.** A stream that closed without `[DONE]` and without a
+  finish reason was taken for the whole answer, partial tool arguments included. It now fails as
+  *OpenRouter stream closed before the answer was complete*: asked again while no text has reached
+  the chat, otherwise the error follows the text that did.
+- **The U+FFFD note no longer changes a question's cost key halfway.** Only the conversation up to
+  the question is checked for replacement characters, so a tool result that carries one does not
+  add the note in a later round of the same question.
+- **The API key is trimmed** before it goes into the `Authorization` header. A key pasted with a
+  space or line break around it failed with 401.
+
+### Behaviour changes from 0.2.4
+
+- A dropped question is restored only for a request from the same integration that starts with the
+  same system messages as the request whose tool calls worked on it.
+- Required arguments, and `false` where the tool defaults to `true`, reach the tool even when empty.
+- Incomplete tool calls in an answer cut off by the token limit are not run.
+- A catalog without a usable model leaves the integration's models as they are.
+- A stream cut off without `[DONE]` or a finish reason ends as an error answer (with *Show
+  OpenRouter Errors in Chat* unticked: as an error) instead of as a partial answer.
+
+### Verified
+
+- Unit tests (Spock), ten of them new: a remembered question is not restored for another
+  integration or another system prompt, and is for its own conversation, also with the plugin's
+  U+FFFD note among the system messages; the cost key differs per integration and stays the same
+  through a tool round; a required `offset: 0` and a `false` over a `true` default are kept while
+  other empty arguments go; an incomplete tool call under `finish_reason: length` is dropped and the
+  complete one runs, and with none left the answer is the truncation note; a U+FFFD in a tool result
+  of the running question adds no note and keeps the cost key; the key is trimmed; a catalog without
+  a usable model leaves the stored models alone; a stream without `[DONE]` and finish reason fails,
+  one with a finish reason but no `[DONE]` completes. The restore tests now send the agent's system
+  prompt with the first request, as Morpheus does.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar`, 161 tests, 0 failures.
+
+### Not yet verified
+
+- On an appliance: a chat whose question the Morpheus 9.1 chat memory drops still gets it back
+  (*Restored the user's question ...* in the log). That relies on Morpheus keeping the system
+  message the same through a tool loop.
+- That Morpheus sends the `required` lists of its MCP tools in the tool definitions it hands to the
+  plugin.
+- A chat and a model refresh with this jar.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.2.4...openrouter-v0.2.5
+
+---
+
 ## 0.2.4
 
 **Fix release: *Default Max Output Tokens* now applies in the Morpheus chat.** Built against plugin

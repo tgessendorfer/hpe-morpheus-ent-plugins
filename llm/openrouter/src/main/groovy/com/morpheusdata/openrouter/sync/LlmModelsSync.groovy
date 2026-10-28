@@ -109,7 +109,16 @@ class LlmModelsSync {
 		disabledCount = 0
 		Collection<LlmModel> listed = uniqueByCode(freshModels)
 		DataQuery query = new DataQuery().withFilter('providerCode', providerCode).withFilter('llmIntegration.id', llmIntegration.id)
-		List<LlmModel> existingModels = removeDuplicateModels(morpheusContext.llm.model.list(query).toList().blockingGet())
+		List<LlmModel> stored = morpheusContext.llm.model.list(query).toList().blockingGet()
+		if (!listed && stored) {
+			// An empty catalog, or one whose fields were renamed so that no entry passes the
+			// filter, would remove every model and leave every agent of the integration without
+			// one. No setting empties the list on purpose: an allow list matching nothing is ignored.
+			log.warn("Skipping OpenRouter model sync for integration ${llmIntegration.id}: no usable model in the catalog; " +
+				"the ${stored.size()} stored models are kept")
+			return
+		}
+		List<LlmModel> existingModels = removeDuplicateModels(stored)
 		SyncTask<LlmModel, LlmModel, LlmModel> syncTask = new SyncTask<>(Observable.fromIterable(existingModels), listed)
 		syncTask.addMatchFunction { LlmModel existingModel, LlmModel freshModel ->
 			existingModel.code == freshModel.code

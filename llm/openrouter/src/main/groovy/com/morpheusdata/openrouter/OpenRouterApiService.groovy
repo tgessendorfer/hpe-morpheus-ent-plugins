@@ -165,6 +165,7 @@ class OpenRouterApiService {
 		StringBuilder reasoning = new StringBuilder()
 		Map<Integer, Map> toolCalls = new TreeMap<>()
 		JsonSlurper slurper = new JsonSlurper()
+		boolean done = false
 
 		response.entity?.content?.withReader('UTF-8') { Reader reader ->
 			String line
@@ -175,6 +176,7 @@ class OpenRouterApiService {
 				}
 				String payload = line.substring(5).trim()
 				if (payload == '[DONE]') {
+					done = true
 					break
 				}
 				if (!payload) {
@@ -218,6 +220,12 @@ class OpenRouterApiService {
 					nativeFinishReason = choice.native_finish_reason.toString()
 				}
 			}
+		}
+		// A connection closed halfway, by a proxy for instance, ends the stream without
+		// [DONE] and without a finish reason. What arrived until then is not the answer,
+		// and a tool call in it may have half its arguments.
+		if (!done && finishReason == null) {
+			throw new StreamErrorException('OpenRouter stream closed before the answer was complete', null)
 		}
 
 		Map message = [role: 'assistant', content: content.toString()]
