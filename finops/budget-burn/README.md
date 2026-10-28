@@ -57,7 +57,8 @@ The page appears in the Morpheus analytics section (category *Cost*); which role
 
 A budget is in the currency of its owner tenant; if that tenant has none, the master tenant's
 currency; otherwise `USD`. Spend is summed per invoice currency (an invoice without a currency
-counts in the budget currency). Amounts in different currencies are **never converted or added
+counts in the budget currency). Only a three-letter ISO code counts as a currency; any other
+value is treated as no currency. Amounts in different currencies are **never converted or added
 up**: spend in another currency is listed next to the budget amount and the row is marked
 *Currency mismatch*, without burn rate and percentages for the affected period. Every amount
 carries its ISO currency code.

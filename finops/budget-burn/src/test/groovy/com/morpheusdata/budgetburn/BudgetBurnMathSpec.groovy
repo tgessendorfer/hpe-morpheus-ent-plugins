@@ -115,8 +115,34 @@ class BudgetBurnMathSpec extends Specification {
 		['EUR', 'USD']       || 'EUR'
 		[null, 'chf']        || 'CHF'
 		['', '  ', 'GBP']    || 'GBP'
+		[' eur ', 'USD']     || 'EUR'
+		['Euro', 'EUR']      || 'EUR'
+		['€', 'chf']         || 'CHF'
+		['US', 'E1R', null]  || 'USD'
 		[null, null]         || 'USD'
 		[]                   || 'USD'
+	}
+
+	def "byCurrency puts rows whose currency is no ISO code into the fallback"() {
+		expect:
+		byCurrency([[currency: 'Euro', running: 1], [currency: '€', running: 2], [currency: 'usd', running: 4]], 'EUR') ==
+			[EUR: [running: 3G, forecast: 0G, total: 0G], USD: [running: 4G, forecast: 0G, total: 0G]]
+	}
+
+	def "the invoice period key has ASCII digits whatever the JVM default locale"() {
+		given:
+		Locale saved = Locale.getDefault()
+		Locale.setDefault(Locale.forLanguageTag('th-TH-u-nu-thai'))
+
+		expect: 'the default locale really formats with other digits'
+		String.format('%04d', 2026) != '2026'
+
+		and:
+		periodKey(2026, 3) == '202603'
+		periodKey(2026, 12) == '202612'
+
+		cleanup:
+		Locale.setDefault(saved)
 	}
 
 	def "money and pctText format in the viewer's locale with half-up rounding"() {

@@ -208,7 +208,7 @@ class BudgetBurnAnalyticsProvider extends AbstractAnalyticsProvider {
 			Calendar now = Calendar.instance
 			int year = now.get(Calendar.YEAR), month = now.get(Calendar.MONTH) + 1
 			int day = now.get(Calendar.DAY_OF_MONTH), days = now.getActualMaximum(Calendar.DAY_OF_MONTH)
-			String per = String.format('%04d%02d', year, month)
+			String per = periodKey(year, month)
 			List<GroovyRowResult> budgets = master ?
 				sql.rows("${BUDGET_SELECT} ORDER BY a.master_account DESC, b.name".toString(), [year.toString()]) :
 				sql.rows("${BUDGET_SELECT} AND b.account_id = ? ORDER BY b.name".toString(), [year.toString(), acc?.id])

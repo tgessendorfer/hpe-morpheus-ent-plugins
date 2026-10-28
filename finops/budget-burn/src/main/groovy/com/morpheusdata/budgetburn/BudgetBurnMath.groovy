@@ -49,10 +49,20 @@ class BudgetBurnMath {
 		v == null ? 0.00G : new BigDecimal(v.toString())
 	}
 
-	/** The first non-blank ISO code from the candidates, upper-cased; otherwise USD. */
+	/** An ISO 4217 style code (three letters, trimmed and upper-cased) or null, as in Instance Showback. */
+	static String iso(String code) {
+		String c = code?.trim()?.toUpperCase(Locale.ROOT)
+		(c ==~ /[A-Z]{3}/) ? c : null
+	}
+
+	/** The first candidate that is a three-letter ISO code, upper-cased; otherwise USD. */
 	static String resolveCurrency(String... candidates) {
-		String hit = candidates?.find { it != null && it.trim() }
-		hit ? hit.trim().toUpperCase(Locale.ROOT) : DEFAULT_CURRENCY
+		candidates?.findResult { iso(it) } ?: DEFAULT_CURRENCY
+	}
+
+	/** Invoice period key yyyyMM, always with ASCII digits whatever the JVM default locale. */
+	static String periodKey(int year, int month) {
+		String.format(Locale.ROOT, '%04d%02d', year, month)
 	}
 
 	/** Amount with two decimals and grouping, in the viewer's locale. */

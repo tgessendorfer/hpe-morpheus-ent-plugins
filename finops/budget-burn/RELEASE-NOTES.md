@@ -6,6 +6,54 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.3
+
+**Fix release: currency codes are checked the way Instance Showback checks them, the invoice
+month no longer depends on the JVM locale, and the page query is covered by tests with
+invoices.** Built against plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code,
+options and the page layout are unchanged.
+
+### What changed
+
+- **Only a three-letter ISO code counts as a currency.** The budget currency (owner tenant, then
+  master tenant, then `USD`) and the currency of each invoice now take the first value that is a
+  three-letter code such as `EUR` (trimmed, case-insensitive). Up to 1.2.2 any non-blank text
+  counted: a tenant currency of `Euro` became a budget currency of its own, and an invoice with
+  such a value was listed as spend in a foreign currency. This is the rule Instance Showback
+  already uses.
+- **The invoice month is built with ASCII digits whatever the JVM default locale.** The month key
+  (`yyyyMM`) of the invoice query was formatted with the JVM's default locale. On a JVM whose
+  default locale writes numbers with non-ASCII digits (for example `th-TH-u-nu-thai`), the key
+  matched no invoice and every budget showed no spend this month. It is now formatted with
+  `Locale.ROOT`.
+- **Tests:** `loadData()` is now tested with invoices, as a master tenant user and as a
+  sub-tenant user: the budget query per viewer, the scope and owner parameters in query order
+  followed by the period, an invoice without a currency counted in the budget currency, and a USD
+  invoice kept apart from a EUR budget. The connection-release test now checks that a successful
+  page result survives a failing release. Test data uses neutral tenant names.
+
+### Behaviour changes from 1.2.2
+
+- Only for currency values that are not a three-letter code: such a value now falls back as if
+  it were empty (owner currency to the master tenant's, invoice currency to the budget
+  currency). With the ISO codes Morpheus stores, amounts and statuses are the same as in 1.2.2.
+
+### Verified
+
+- Unit tests only (Spock): 132 tests, 0 failures (124 in 1.2.2). New: the currency rule with
+  non-ISO values for budget and invoice currencies, the month key under a JVM default locale with
+  Thai digits, `loadData()` with invoices for a master and a sub-tenant viewer. The new tests fail
+  against the 1.2.2 currency rule, the default-locale month key, and a swapped order of the owner
+  and scope parameters.
+- Local build with JDK 17 and Gradle 9.8.0, one jar `morpheus-budget-burn-plugin-1.2.3-all.jar`.
+
+### Not yet verified
+
+- On an appliance: the release jar loads in place of 1.2.2, and the page shows the same budgets,
+  amounts and statuses as 1.2.2 as a master tenant user and as a sub-tenant user.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.2.2...budget-burn-v1.2.3
+
 ## 1.2.2
 
 **The table fits the analytics page without wrapping numbers.** Layout only; amounts, forecasts

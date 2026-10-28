@@ -204,7 +204,7 @@ class BudgetBurnLocaleSpec extends Specification {
 	def "owner and scope sit under the budget name, amounts carry the currency once and stay on one line"() {
 		given:
 		Map text = BudgetBurnAnalyticsProvider.texts(Locale.ENGLISH)
-		Map row = [name: 'Budget Contoso 2026', owner: 'Nordwind Cloud Services Ltd.', scopeText: 'Tenant', target: 'Contoso Ltd.',
+		Map row = [name: 'Operations 2026', owner: 'Example Provider Ltd.', scopeText: 'Tenant', target: 'Example Tenant Ltd.',
 			currency: 'EUR', budgetText: '500.00', runningText: '2.75', usedPct: '0.6 %', burnText: '0.39', forecastText: '29.48',
 			forecastPct: '5.9 %', bar: 5.9, color: '#27AE60', statusText: text.status.ok,
 			ytdText: '35.64', ytdBudgetText: '5,000.00', ytdPct: '0.7 %']
@@ -212,12 +212,12 @@ class BudgetBurnLocaleSpec extends Specification {
 
 		when:
 		String master = renderer.renderTemplate('hbs/budgetBurn', new ViewModel<Map>(object: [text: text, language: 'en', master: true, items: [row]])).html
-		String tenant = renderer.renderTemplate('hbs/budgetBurn', new ViewModel<Map>(object: [text: text, language: 'en', master: false, tenant: 'Contoso Ltd.', items: [row]])).html
+		String tenant = renderer.renderTemplate('hbs/budgetBurn', new ViewModel<Map>(object: [text: text, language: 'en', master: false, tenant: 'Example Tenant Ltd.', items: [row]])).html
 
 		then: 'no owner, scope or currency column; the budget cell carries owner and scope'
 		master.findAll(/<th[ >]/).size() == 8
-		master.contains('<span class="finops-sub">Owner: Nordwind Cloud Services Ltd. &middot; Tenant: Contoso Ltd.</span>')
-		tenant.contains('<span class="finops-sub">Tenant: Contoso Ltd.</span>')
+		master.contains('<span class="finops-sub">Owner: Example Provider Ltd. &middot; Tenant: Example Tenant Ltd.</span>')
+		tenant.contains('<span class="finops-sub">Tenant: Example Tenant Ltd.</span>')
 		!tenant.contains('Owner:')
 
 		and: 'the currency once with the monthly budget, percentages under the amounts'
