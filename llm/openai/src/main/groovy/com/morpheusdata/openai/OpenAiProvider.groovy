@@ -85,6 +85,12 @@ class OpenAiProvider implements LlmProvider {
 	static final Pattern OPENROUTER_HOST = ~/(?i)^https?:\/\/([\w-]+\.)*openrouter\.ai(\/|$)/
 	static final String REASONING_EFFORT_DEFAULT = 'default'
 	static final List<String> REASONING_EFFORTS = ['low', 'medium', 'high']
+	// Parameters the plugin adds on its own, which not every model or API takes:
+	// api.openai.com answers reasoning_effort for gpt-4.1 with 400 "Unsupported parameter",
+	// and so does LiteLLM without drop_params. A 400 that names one is answered by asking
+	// again without it, and that model at that endpoint is not sent it again.
+	static final List<String> OPTIONAL_PARAMETERS = ['reasoning_effort', 'stream_options']
+	protected static final Set<String> REJECTED_PARAMETERS = ConcurrentHashMap.newKeySet()
 	// A rate limit or an overloaded provider is worth waiting for: twice, as long as
 	// the API asks or else 10 and then 20 seconds, never more than 30 seconds at a time.
 	static final Set<Integer> WAIT_AND_RETRY_STATUSES = [429, 503] as Set
@@ -134,10 +140,11 @@ class OpenAiProvider implements LlmProvider {
 	static final String USAGE_FOOTER_PATTERN = '(?:\\s*\\*(?:(?:Tokens|Cost|Kosten|Koszt): [^*\\n]*|Answer cut off at the output token limit\\.|Antwort am Ausgabe-Token-Limit abgeschnitten\\.|Odpowiedź ucięta na limicie tokenów wyjściowych\\.)\\*)+\\s*$'
 	// Enough to pick the footer's language, not a language detector: answers in each
 	// language are full of its words and next to never contain the others'. Letters
-	// only one of the languages uses count extra.
+	// only one of the languages uses count extra. "i" is English as well as Polish, so
+	// "Can I see my VMs?" ties and stays English.
 	static final Map<String, Set<String>> LANGUAGE_MARKERS = [
 		en: ['the', 'and', 'is', 'are', 'of', 'to', 'with', 'not', 'no', 'for', 'there', 'this', 'that', 'it', 'be', 'on', 'as', 'by', 'has', 'have',
-			 'who', 'what', 'which', 'how', 'many', 'you', 'hello', 'please'] as Set,
+			 'who', 'what', 'which', 'how', 'many', 'you', 'hello', 'please', 'i'] as Set,
 		de: ['der', 'die', 'das', 'den', 'dem', 'und', 'ist', 'sind', 'nicht', 'keine', 'mit', 'auf', 'ein', 'eine', 'gibt', 'es', 'auch', 'wird', 'oder', 'bei', 'zu', 'von', 'im', 'sich', 'wie',
 			 'wer', 'welche', 'viele', 'bist', 'du', 'ich', 'hallo', 'bitte'] as Set,
 		pl: ['jest', 'są', 'się', 'nie', 'oraz', 'dla', 'czy', 'które', 'który', 'która', 'będzie', 'żadnych', 'działa', 'działają', 'wszystkie', 'w', 'i', 'na',
@@ -154,6 +161,9 @@ class OpenAiProvider implements LlmProvider {
 	// that window within one question, the question itself drops out, and the model then
 	// answers as if the message had been empty. Each tool call id the model issues is
 	// mapped to the question it worked on, so a request that lost its question gets it back.
+	// The map is shared by every integration and user, so its keys carry the integration and
+	// a hash of the system messages too (questionScope): a question only ever goes back into
+	// a conversation of the same integration and agent prompt.
 	protected static final ConcurrentHashMap<String, Map> QUESTION_BY_TOOL_CALL = new ConcurrentHashMap<>()
 	static final long QUESTION_BY_TOOL_CALL_TTL_MS = 60L * 60L * 1000L
 	static final int QUESTION_BY_TOOL_CALL_MAX = 10000
@@ -293,7 +303,7 @@ class OpenAiProvider implements LlmProvider {
 			inputType: OptionType.InputType.NUMBER,
 			displayOrder: 5,
 			required: false,
-			helpText: 'Sent as max_tokens - max_completion_tokens for OpenAI reasoning models - when the caller does not supply a limit. Leave empty to let each model use its own maximum. Reasoning tokens count against this limit, so a low value can cut off the answers of reasoning models; an OpenAI reasoning model gets at least 8192 unless this field says otherwise. An answer the limit cuts off says so.'
+			helpText: 'Sent as max_tokens - max_completion_tokens for OpenAI reasoning models - when the caller asks for less or for no limit; Morpheus asks for 1000 on every chat request. A larger request from the caller is kept. Leave empty to send what the caller asks for, or nothing so each model uses its own maximum; an OpenAI reasoning model then gets at least 8192. Reasoning tokens count against this limit, so a low value can cut off the answers of reasoning models. An answer the limit cuts off says so.'
 		)
 
 		optionTypes << new OptionType(
@@ -307,7 +317,7 @@ class OpenAiProvider implements LlmProvider {
 			displayOrder: 6,
 			required: false,
 			defaultValue: REASONING_EFFORT_DEFAULT,
-			helpText: 'Model default sends nothing and leaves reasoning to each model. Low, Medium or High is sent as reasoning_effort on every request; an API that does not know the parameter may reject it. More effort is slower and uses more output tokens. Reasoning is never shown in the chat.'
+			helpText: 'Model default sends nothing and leaves reasoning to each model. Low, Medium or High is sent as reasoning_effort on every request; a model whose API rejects the parameter is asked again without it, and is not sent it again. More effort is slower and uses more output tokens. Reasoning is never shown in the chat.'
 		)
 
 
@@ -362,7 +372,7 @@ class OpenAiProvider implements LlmProvider {
 			displayOrder: 10,
 			required: false,
 			defaultValue: 'on',
-			helpText: 'On by default. Some models fill every optional parameter of a tool call with an empty string, 0 or false, and the built-in Morpheus tools treat those as filters: list_servers then finds no servers. With this on, such top-level arguments are removed before Morpheus runs the tool, which is the same as leaving them out. Untick it to forward tool calls exactly as the model wrote them.'
+			helpText: 'On by default. Some models fill every optional parameter of a tool call with an empty string, 0 or false, and the built-in Morpheus tools treat those as filters: list_servers then finds no servers. With this on, such top-level arguments are removed before Morpheus runs the tool, which is the same as leaving them out. Arguments the tool marks as required are kept, and so is false where the tool defaults to true. Untick it to forward tool calls exactly as the model wrote them.'
 		)
 
 		// Labels and help texts resolve through the plugin's i18n bundles in
@@ -482,7 +492,11 @@ class OpenAiProvider implements LlmProvider {
 		Map requestBody = buildChatRequestBody(request, accountIntegration, false)
 		Map requestOpts = buildClientOpts(accountIntegration, opts)
 
-		Map result = callWithRetries { apiService.createChatCompletion(baseUrl, apiKey, requestBody, requestOpts) }
+		Closure<Map> call = { apiService.createChatCompletion(baseUrl, apiKey, requestBody, requestOpts) }
+		Map result = callWithRetries(call)
+		while (dropRejectedParameter(baseUrl, requestBody, result)) {
+			result = callWithRetries(call)
+		}
 
 		if (result?.success && result.data instanceof Map) {
 			Map data = result.data as Map
@@ -492,9 +506,9 @@ class OpenAiProvider implements LlmProvider {
 				return chatFailure(accountIntegration, request, requestBody, OpenAiApiService.statusCodeOf(error.code),
 					"Chat completion failed: ${message}".toString())
 			}
-			LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(data))
-			rememberQuestion(requestBody, response)
-			dropEmptyToolArguments(response, accountIntegration)
+			LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(data), accountIntegration.id)
+			rememberQuestion(requestBody, response, accountIntegration.id)
+			dropEmptyToolArguments(response, accountIntegration, requestBody.tools as List)
 			return ServiceResponse.success(appendUsageFooter(response, accountIntegration))
 		}
 		return chatFailure(accountIntegration, request, requestBody, failureStatus(result),
@@ -514,6 +528,32 @@ class OpenAiProvider implements LlmProvider {
 			return errorResponse(message)
 		}
 		return ServiceResponse.success(buildErrorAnswer(accountIntegration, request, requestBody, status, message, null))
+	}
+
+	/**
+	 * When the API refused the request with a 400 that names a parameter the plugin added
+	 * on its own, removes that parameter and remembers that this model at this endpoint
+	 * does not take it. True when the request is worth sending again.
+	 */
+	protected boolean dropRejectedParameter(String baseUrl, Map requestBody, Map result) {
+		if (result == null || result.success || failureStatus(result) != 400) {
+			return false
+		}
+		String message = result.msg?.toString() ?: ''
+		String parameter = OPTIONAL_PARAMETERS.find { String name -> requestBody?.containsKey(name) && message.contains(name) }
+		if (!parameter) {
+			return false
+		}
+		requestBody.remove(parameter)
+		if (REJECTED_PARAMETERS.add(rejectedParameterKey(baseUrl, requestBody.model, parameter))) {
+			log.warn("The API at ${baseUrl} rejected ${parameter} for model ${requestBody.model}; asking again without it, " +
+				"and not sending it to this model again: ${message}")
+		}
+		return true
+	}
+
+	protected static String rejectedParameterKey(String baseUrl, def model, String parameter) {
+		return "${baseUrl}|${model ?: ''}|${parameter}".toString()
 	}
 
 	/**
@@ -599,7 +639,7 @@ class OpenAiProvider implements LlmProvider {
 		response.metadata = [error: true, error_status: status, answer_language: language]
 
 		// The failed request ends the question, so its cost tally closes here.
-		Map tally = requestBody != null ? QUESTION_COSTS.remove(questionKey(requestBody)) : null
+		Map tally = requestBody != null ? QUESTION_COSTS.remove(questionKey(requestBody, accountIntegration?.id)) : null
 		if (tally) {
 			response.metadata.put('question_cost', tally.total)
 			response.metadata.put('question_requests', tally.requests)
@@ -648,17 +688,22 @@ class OpenAiProvider implements LlmProvider {
 			Map clientOpts = buildClientOpts(accountIntegration, opts)
 
 			// Once text has reached the chat, another try would repeat it.
-			Map result = callWithRetries({
+			Closure<Map> call = {
 				apiService.streamChatCompletion(baseUrl, apiKey, requestBody, { String chunk ->
 					streamed.append(chunk)
 					handler?.onPartialResponse(chunk)
 				}, clientOpts)
-			}, { streamed.length() == 0 })
+			}
+			Closure<Boolean> nothingStreamed = { streamed.length() == 0 }
+			Map result = callWithRetries(call, nothingStreamed)
+			while (nothingStreamed.call() && dropRejectedParameter(baseUrl, requestBody, result)) {
+				result = callWithRetries(call, nothingStreamed)
+			}
 
 			if (result?.success && result.data instanceof Map) {
-				LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(result.data as Map))
-				rememberQuestion(requestBody, response)
-				dropEmptyToolArguments(response, accountIntegration)
+				LlmChatResponse response = trackQuestionCost(requestBody, parseChatResponse(result.data as Map), accountIntegration.id)
+				rememberQuestion(requestBody, response, accountIntegration.id)
+				dropEmptyToolArguments(response, accountIntegration, requestBody.tools as List)
 				handler?.onCompleteResponse(appendUsageFooter(response, accountIntegration))
 				return
 			}
@@ -731,11 +776,12 @@ class OpenAiProvider implements LlmProvider {
 		requestBody.messages = messages
 
 		boolean reasoningModel = isReasoningModel(request.model)
-		Integer maxTokens = request.maxOutputTokens ?: resolveDefaultMaxOutputTokens(accountIntegration)
-		if (reasoningModel && maxTokens != null && maxTokens < REASONING_MIN_OUTPUT_TOKENS) {
-			// The integration's own default is an operator's choice and stays; the caller's
-			// limit is Morpheus' generic 1000, which starves a reasoning model.
-			maxTokens = resolveDefaultMaxOutputTokens(accountIntegration) ?: REASONING_MIN_OUTPUT_TOKENS
+		Integer configuredMaxTokens = resolveDefaultMaxOutputTokens(accountIntegration)
+		Integer maxTokens = resolveMaxTokens(request.maxOutputTokens, configuredMaxTokens)
+		if (reasoningModel && configuredMaxTokens == null && maxTokens != null && maxTokens < REASONING_MIN_OUTPUT_TOKENS) {
+			// The integration's own default is an operator's choice and stays; without one, the
+			// caller's limit is Morpheus' generic 1000, which starves a reasoning model.
+			maxTokens = REASONING_MIN_OUTPUT_TOKENS
 		}
 		if (maxTokens) {
 			requestBody.put(reasoningModel ? 'max_completion_tokens' : 'max_tokens', maxTokens)
@@ -759,17 +805,23 @@ class OpenAiProvider implements LlmProvider {
 			}
 		}
 
+		String baseUrl = resolveBaseUrl(accountIntegration)
 		String effort = resolveReasoningEffort(accountIntegration)
-		if (effort) {
+		if (effort && !isRejectedParameter(baseUrl, request.model, 'reasoning_effort')) {
 			// OpenAI's parameter; OpenRouter and LiteLLM accept it as well.
 			requestBody.reasoning_effort = effort
 		}
 		if (stream != null) {
 			requestBody.stream = stream
 		}
+		if (stream && !isRejectedParameter(baseUrl, request.model, 'stream_options')) {
+			// api.openai.com and vLLM report the usage of a stream only when asked; without it
+			// a streamed answer gets no footer and the log no usage line.
+			requestBody.stream_options = [include_usage: true]
+		}
 		// The shape of the request, never its content: enough to see from the log what a
 		// model was asked for when its answer comes back empty or cut off.
-		if (restoreLostQuestion(messages)) {
+		if (restoreLostQuestion(messages, accountIntegration?.id)) {
 			log.info("Restored the user's question, which the Morpheus chat memory had dropped during a tool loop (${messages.size()} messages)")
 		}
 		log.info("Request: model=${requestBody.model} messages=${messages.size()} tools=${tools ? tools.size() : 0} " +
@@ -900,7 +952,18 @@ class OpenAiProvider implements LlmProvider {
 		chatMessage.content = content
 		response.message = chatMessage
 
-		List<Map> toolCalls = normalizeToolCalls(message.tool_calls)
+		def rawToolCalls = message.tool_calls
+		if (response.finishReason == 'length' && rawToolCalls instanceof List) {
+			// The token limit can cut a tool call off in the middle of its arguments. Run, the
+			// half-written JSON fails or does something else than the model meant; dropped, the
+			// complete calls still run, and with none left the answer says it was cut off.
+			List complete = (rawToolCalls as List).findAll { def entry -> hasCompleteArguments(entry) }
+			if (complete.size() < (rawToolCalls as List).size()) {
+				log.warn("Dropped ${(rawToolCalls as List).size() - complete.size()} tool call(s) the output token limit cut off")
+			}
+			rawToolCalls = complete
+		}
+		List<Map> toolCalls = normalizeToolCalls(rawToolCalls)
 		if (toolCalls) {
 			// Morpheus runs the tools only when the turn ends in tool_calls.
 			response.finishReason = 'tool_calls'
@@ -971,13 +1034,32 @@ class OpenAiProvider implements LlmProvider {
 		return response
 	}
 
+	/** A tool call whose arguments are an object, or a JSON string that parses as one. */
+	protected static boolean hasCompleteArguments(def entry) {
+		def arguments = entry instanceof Map && (entry as Map).function instanceof Map ? ((entry as Map).function as Map).arguments : null
+		if (arguments instanceof Map) {
+			return true
+		}
+		if (!(arguments instanceof CharSequence) || !arguments.toString().trim()) {
+			return false
+		}
+		try {
+			return new JsonSlurper().parseText(arguments.toString()) instanceof Map
+		} catch (Exception ignored) {
+			return false
+		}
+	}
+
 	/**
 	 * Removes the arguments a model only filled in for the sake of it. gpt-5.4-mini
 	 * sends list_servers every optional parameter as "", 0 or false; Morpheus' built-in
 	 * tools take each of those as a filter and answer with nothing (verified 2026-09-21
-	 * on 9.0.2). A dropped argument is the same as one the model never wrote.
+	 * on 9.0.2). A dropped argument is the same as one the model never wrote. What the
+	 * tool's definition in the request says still counts: a required argument stays, since
+	 * leaving it out fails the call (get_result_excerpt from offset 0), and so does false
+	 * where the definition defaults to true, since leaving it out would turn it into true.
 	 */
-	protected void dropEmptyToolArguments(LlmChatResponse response, AccountIntegration accountIntegration) {
+	protected void dropEmptyToolArguments(LlmChatResponse response, AccountIntegration accountIntegration, List tools = null) {
 		if (!isDropEmptyToolArgumentsEnabled(accountIntegration)) {
 			return
 		}
@@ -985,9 +1067,10 @@ class OpenAiProvider implements LlmProvider {
 		if (!toolCalls) {
 			return
 		}
+		Map<String, Map> schemas = toolSchemas(tools)
 		toolCalls.each { Map call ->
 			Map function = call.function as Map
-			Map<String, List<String>> result = pruneEmptyArguments(function.arguments?.toString())
+			Map<String, List<String>> result = pruneEmptyArguments(function.arguments?.toString(), schemas[function.name?.toString()])
 			if (result.dropped) {
 				function.arguments = result.json
 				log.info("Dropped empty arguments from ${function.name}: ${result.dropped.join(', ')}")
@@ -999,11 +1082,41 @@ class OpenAiProvider implements LlmProvider {
 		}
 	}
 
+	/** The parameters schema of each tool in the request, by tool name. */
+	protected static Map<String, Map> toolSchemas(List tools) {
+		Map<String, Map> schemas = [:]
+		(tools ?: []).each { def tool ->
+			Map function = tool instanceof Map && (tool as Map).function instanceof Map ? (tool as Map).function as Map : null
+			if (function?.name && function.parameters instanceof Map) {
+				schemas.put(function.name.toString(), function.parameters as Map)
+			}
+		}
+		return schemas
+	}
+
+	/**
+	 * Whether the schema says an empty value means something: the argument is required,
+	 * or it is false where the default is true.
+	 */
+	protected static boolean isMeaningfulEmptyArgument(String name, def value, Map schema) {
+		if (!schema) {
+			return false
+		}
+		def required = schema.get('required')
+		if (required instanceof Collection && name in (required as Collection)*.toString()) {
+			return true
+		}
+		Map properties = schema.get('properties') instanceof Map ? schema.get('properties') as Map : [:]
+		Map property = properties.get(name) instanceof Map ? properties.get(name) as Map : [:]
+		return value == false && property.get('default') == true
+	}
+
 	/**
 	 * The arguments JSON without its empty top-level entries, and the names of those
-	 * entries. Anything that is not a JSON object is returned as it is.
+	 * entries. Anything that is not a JSON object is returned as it is. With the tool's
+	 * parameters schema, entries whose empty value means something are kept.
 	 */
-	protected static Map pruneEmptyArguments(String json) {
+	protected static Map pruneEmptyArguments(String json, Map schema = null) {
 		if (!json?.trim()) {
 			return [json: json, dropped: []]
 		}
@@ -1019,7 +1132,7 @@ class OpenAiProvider implements LlmProvider {
 		List<String> dropped = []
 		Map kept = [:]
 		(parsed as Map).each { key, value ->
-			if (isEmptyArgument(value)) {
+			if (isEmptyArgument(value) && !isMeaningfulEmptyArgument(key.toString(), value, schema)) {
 				dropped << key.toString()
 			} else {
 				kept.put(key, value)
@@ -1247,14 +1360,14 @@ class OpenAiProvider implements LlmProvider {
 	 * Adds this request's cost to the running total of its question, and hands the
 	 * total to the response. A final answer closes the question.
 	 */
-	protected LlmChatResponse trackQuestionCost(Map requestBody, LlmChatResponse response) {
+	protected LlmChatResponse trackQuestionCost(Map requestBody, LlmChatResponse response, def integrationId = null) {
 		def cost = response?.metadata?.get('cost')
 		if (!(cost instanceof BigDecimal)) {
 			return response
 		}
 		long now = System.currentTimeMillis()
 		QUESTION_COSTS.values().removeIf { Map tally -> now - (tally.updated as long) > QUESTION_COST_TTL_MS }
-		String key = questionKey(requestBody)
+		String key = questionKey(requestBody, integrationId)
 		Map tally = QUESTION_COSTS.compute(key) { String ignored, Map existing ->
 			[total   : ((existing?.total ?: BigDecimal.ZERO) as BigDecimal) + (cost as BigDecimal),
 			 requests: ((existing?.requests ?: 0) as int) + 1,
@@ -1271,9 +1384,11 @@ class OpenAiProvider implements LlmProvider {
 	/**
 	 * Identifies the question a request belongs to: the model and the conversation up
 	 * to the user's latest message. Every tool round of one question repeats exactly
-	 * that prefix and only appends to it. Morpheus passes no conversation id.
+	 * that prefix and only appends to it. Morpheus passes no conversation id. The
+	 * integration is part of the key, so two integrations never share a tally, and the
+	 * plugin's own U+FFFD note is not: it can turn up in a later round of the same question.
 	 */
-	protected static String questionKey(Map requestBody) {
+	protected static String questionKey(Map requestBody, def integrationId = null) {
 		List messages = (requestBody?.messages ?: []) as List
 		boolean restored = messages.any { def message ->
 			message instanceof Map && message.role == 'user' && message.content instanceof CharSequence &&
@@ -1282,19 +1397,39 @@ class OpenAiProvider implements LlmProvider {
 		if (restored) {
 			// The question was put back after the chat memory dropped it: keep counting on
 			// the key its first requests used, so the footer covers the whole question.
-			String original = knownQuestionEntry(messages)?.costKey as String
+			String original = knownQuestionEntry(messages, integrationId)?.costKey as String
 			if (original) {
 				return original
 			}
 		}
+		List conversation = messages.findAll { def message -> !isReplacementNote(message) }
 		int last = -1
-		messages.eachWithIndex { def message, int index ->
+		conversation.eachWithIndex { def message, int index ->
 			if (message instanceof Map && message.role == 'user' && message.content instanceof CharSequence) {
 				last = index
 			}
 		}
-		String prefix = JsonOutput.toJson([model: requestBody?.model, messages: last >= 0 ? messages[0..last] : []])
-		return MessageDigest.getInstance('SHA-256').digest(prefix.getBytes('UTF-8')).encodeHex().toString()
+		return sha256Hex(JsonOutput.toJson([integration: integrationId?.toString(), model: requestBody?.model,
+											messages: last >= 0 ? conversation[0..last] : []]))
+	}
+
+	protected static boolean isReplacementNote(def message) {
+		return message instanceof Map && message.role == 'system' && message.content == REPLACEMENT_CHARACTER_NOTE
+	}
+
+	protected static String sha256Hex(String text) {
+		return MessageDigest.getInstance('SHA-256').digest(text.getBytes('UTF-8')).encodeHex().toString()
+	}
+
+	/**
+	 * Where a tool call id is valid: the integration and the agent's system messages, which
+	 * Morpheus keeps in its chat memory when it evicts everything else.
+	 */
+	protected static String questionScope(def integrationId, List messages) {
+		List system = (messages ?: []).findAll { def message ->
+			message instanceof Map && message.role == 'system' && !isReplacementNote(message)
+		}.collect { def message -> (message as Map).content?.toString() }
+		return "${integrationId ?: ''}|${sha256Hex(JsonOutput.toJson(system))}".toString()
 	}
 
 	/** The text of the latest user message that is a question, not a tool result; null when there is none. */
@@ -1325,7 +1460,7 @@ class OpenAiProvider implements LlmProvider {
 	 * Maps every tool call of this turn to the question of the request, so the question
 	 * can be put back once the chat memory has dropped it.
 	 */
-	protected static void rememberQuestion(Map requestBody, LlmChatResponse response) {
+	protected static void rememberQuestion(Map requestBody, LlmChatResponse response, def integrationId = null) {
 		String question = latestQuestion(requestBody?.messages as List)
 		def calls = response?.metadata?.get('tool_calls')
 		List<String> ids = toolCallIds([tool_calls: calls instanceof List ? calls : null])
@@ -1333,9 +1468,10 @@ class OpenAiProvider implements LlmProvider {
 			return
 		}
 		long now = System.currentTimeMillis()
-		String costKey = questionKey(requestBody)
+		String costKey = questionKey(requestBody, integrationId)
+		String scope = questionScope(integrationId, requestBody?.messages as List)
 		ids.findAll { String id -> isDistinctToolCallId(id) }.each { String id ->
-			QUESTION_BY_TOOL_CALL.put(id, [question: question, costKey: costKey, updated: now])
+			QUESTION_BY_TOOL_CALL.put(toolCallKey(scope, id), [question: question, costKey: costKey, updated: now])
 		}
 		QUESTION_BY_TOOL_CALL.values().removeIf { Map entry -> now - (entry.updated as long) > QUESTION_BY_TOOL_CALL_TTL_MS }
 		int excess = QUESTION_BY_TOOL_CALL.size() - QUESTION_BY_TOOL_CALL_MAX
@@ -1347,23 +1483,28 @@ class OpenAiProvider implements LlmProvider {
 	}
 
 	/**
-	 * Only ids that look random are trusted. The map is shared by every integration and user,
-	 * and a backend that numbers its tool calls (call_0, functions.list_servers:0) would
+	 * Only ids that look random are trusted. The map is shared by every user of an integration
+	 * and agent, and a backend that numbers its tool calls (call_0, functions.list_servers:0) would
 	 * otherwise hand one conversation another conversation's question.
 	 */
 	protected static boolean isDistinctToolCallId(String id) {
 		return id != null && id.length() >= 16 && !(id ==~ /.*[:_.\-]\d{1,4}/)
 	}
 
+	protected static String toolCallKey(String scope, String id) {
+		return "${scope}|${id}".toString()
+	}
+
 	/** The remembered entry of the first known tool call in these messages, or null. */
-	protected static Map knownQuestionEntry(List messages) {
+	protected static Map knownQuestionEntry(List messages, def integrationId = null) {
 		long now = System.currentTimeMillis()
+		String scope = questionScope(integrationId, messages)
 		for (def message : (messages ?: [])) {
 			if (!(message instanceof Map)) {
 				continue
 			}
 			for (String id : toolCallIds(message as Map)) {
-				Map entry = isDistinctToolCallId(id) ? QUESTION_BY_TOOL_CALL.get(id) : null
+				Map entry = isDistinctToolCallId(id) ? QUESTION_BY_TOOL_CALL.get(toolCallKey(scope, id)) : null
 				if (entry && now - (entry.updated as long) <= QUESTION_BY_TOOL_CALL_TTL_MS) {
 					return entry
 				}
@@ -1377,11 +1518,11 @@ class OpenAiProvider implements LlmProvider {
 	 * left: Morpheus evicted it from its chat memory, but the tool calls that worked on
 	 * it are still there. Returns true when a question was restored.
 	 */
-	protected static boolean restoreLostQuestion(List<Map> messages) {
+	protected static boolean restoreLostQuestion(List<Map> messages, def integrationId = null) {
 		if (!messages || latestQuestion(messages)) {
 			return false
 		}
-		String question = knownQuestionEntry(messages)?.question as String
+		String question = knownQuestionEntry(messages, integrationId)?.question as String
 		if (!question) {
 			return false
 		}
@@ -1529,6 +1670,24 @@ class OpenAiProvider implements LlmProvider {
 			return DEFAULT_API_URL
 		}
 		return url.replaceAll('/+$', '').replaceAll('/(chat/completions|models)$', '').replaceAll('/+$', '')
+	}
+
+	/**
+	 * The configured default is a floor: Morpheus asks for 1000 output tokens on every chat
+	 * request, which would otherwise always win. A larger request is kept; without a configured
+	 * default the request goes out as asked, or without a limit.
+	 */
+	protected static Integer resolveMaxTokens(Integer requested, Integer configured) {
+		Integer asked = (requested != null && requested > 0) ? requested : null
+		if (configured == null) {
+			return asked
+		}
+		return (asked != null && asked > configured) ? asked : configured
+	}
+
+	/** Whether this model at this endpoint has refused the parameter before. */
+	protected static boolean isRejectedParameter(String baseUrl, String model, String parameter) {
+		return REJECTED_PARAMETERS.contains(rejectedParameterKey(baseUrl, model, parameter))
 	}
 
 	/** Null when nothing usable is configured, so each model keeps its own maximum. */

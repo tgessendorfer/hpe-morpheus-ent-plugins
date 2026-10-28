@@ -166,6 +166,20 @@ class LlmModelsSyncSpec extends Specification {
 		created.isEmpty()
 	}
 
+	def "an endpoint that lists no chat model leaves the stored models alone"() {
+		given: 'an empty catalog, or one the filters leave nothing of'
+		LlmModelsSync sync = syncOver([model(1L, 'openai/gpt-5.5'), model(2L, 'z-ai/glm-4.5')])
+
+		when:
+		sync.execute([])
+
+		then: 'removing them would break every agent on them'
+		removed.isEmpty()
+		saved.isEmpty()
+		created.isEmpty()
+		sync.removedCount == 0
+	}
+
 	def "a response without a model list leaves the stored models alone"() {
 		given: 'a wrong base URL answering 200 with a web page'
 		OpenAiApiService api = Mock()

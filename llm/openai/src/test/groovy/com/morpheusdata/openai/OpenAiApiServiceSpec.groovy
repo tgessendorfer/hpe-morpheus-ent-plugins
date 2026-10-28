@@ -230,6 +230,34 @@ class OpenAiApiServiceSpec extends Specification {
 		accumulated.choices[0].message.reasoning == 'We need three words.'
 	}
 
+	def "reasoning_content and a streamed refusal are kept, and usage comes from a last chunk without choices"() {
+		given: 'reasoning_content as LiteLLM relays it from DeepSeek; a refusal and the include_usage chunk as api.openai.com sends them'
+		CloseableHttpResponse response = streamOf([
+			'data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"The user asks"},"finish_reason":null}]}',
+			'data: {"choices":[{"index":0,"delta":{"reasoning_content":" for a secret."},"finish_reason":null}]}',
+			'data: {"choices":[{"index":0,"delta":{"refusal":"I cannot help"},"finish_reason":null}]}',
+			'data: {"choices":[{"index":0,"delta":{"refusal":" with that."},"finish_reason":"stop"}]}',
+			'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19}}',
+			'data: [DONE]'
+		])
+		List<String> chunks = []
+
+		when:
+		Map accumulated = service.consumeEventStream(response, { String chunk -> chunks << chunk })
+		def parsed = new OpenAiProvider(null, null).parseChatResponse(accumulated)
+
+		then:
+		chunks.isEmpty()
+		accumulated.choices[0].message.reasoning == 'The user asks for a secret.'
+		accumulated.choices[0].message.refusal == 'I cannot help with that.'
+		accumulated.usage.completion_tokens == 7
+
+		and: 'the refusal is the answer, as in a response that was not streamed'
+		parsed.message.content == 'I cannot help with that.'
+		parsed.finishReason == 'stop'
+		parsed.tokenUsage.outputTokens == 7
+	}
+
 	def "an error event after the stream started aborts it"() {
 		given: 'HTTP 200 is already sent, so the error arrives as a chunk'
 		CloseableHttpResponse response = streamOf([

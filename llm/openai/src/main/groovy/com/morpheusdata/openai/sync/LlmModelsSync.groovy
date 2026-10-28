@@ -108,6 +108,13 @@ class LlmModelsSync {
 		removedCount = 0
 		disabledCount = 0
 		Collection<LlmModel> listed = uniqueByCode(freshModels)
+		if (!listed) {
+			// An endpoint that answers with an empty list, or whose entries the filters all
+			// drop, would otherwise remove every model, and every agent on them would fail.
+			// The stored models stay until the endpoint lists a chat model again.
+			log.warn("Skipping model sync for integration ${llmIntegration.id}: the endpoint lists no chat model, so the stored models are kept")
+			return
+		}
 		DataQuery query = new DataQuery().withFilter('providerCode', providerCode).withFilter('llmIntegration.id', llmIntegration.id)
 		List<LlmModel> existingModels = removeDuplicateModels(morpheusContext.llm.model.list(query).toList().blockingGet())
 		SyncTask<LlmModel, LlmModel, LlmModel> syncTask = new SyncTask<>(Observable.fromIterable(existingModels), listed)

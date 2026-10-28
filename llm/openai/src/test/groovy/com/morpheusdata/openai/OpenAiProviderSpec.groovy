@@ -490,6 +490,8 @@ class OpenAiProviderSpec extends Specification {
 		'How many servers are there?'    || 'en'
 		'Cześć, kim jesteś?'             || 'pl'
 		'Ile jest serwerów?'             || 'pl'
+		'Can I see my VMs?'              || 'en'
+		'Ile serwerów i instancji?'      || 'pl'
 	}
 
 	def "every error hint and heading speaks each language of the footer"() {
@@ -589,8 +591,8 @@ class OpenAiProviderSpec extends Specification {
 		!body.containsKey('tool_choice')
 	}
 
-	def "max_tokens comes from the request, then from the integration, else it is left out"() {
-		given:
+	def "the integration's max_tokens is a floor under the request's, and without one the request's goes out"() {
+		given: 'Morpheus asks for 1000 on every chat request'
 		LlmChatRequest request = new LlmChatRequest(model: 'm', maxOutputTokens: requested, messages: [message('user', 'hi')])
 
 		expect:
@@ -598,8 +600,11 @@ class OpenAiProviderSpec extends Specification {
 
 		where:
 		requested | configuredValue || expected
-		1000      | '4096'          || 1000
+		1000      | '4096'          || 4096
+		8192      | '4096'          || 8192
+		0         | '4096'          || 4096
 		null      | '4096'          || 4096
+		1000      | null            || 1000
 		null      | null            || null
 		null      | '0'             || null
 	}
@@ -639,6 +644,7 @@ class OpenAiProviderSpec extends Specification {
 		caller | config                     || expected
 		1000   | [:]                        || 8192
 		1000   | [maxOutputTokens: '2000']  || 2000
+		5000   | [maxOutputTokens: '2000']  || 5000
 		20000  | [:]                        || 20000
 		null   | [:]                        || null
 		null   | [maxOutputTokens: '500']   || 500
@@ -1146,7 +1152,7 @@ class OpenAiProviderSpec extends Specification {
 	def "a request whose question the chat memory dropped gets it back after the system messages"() {
 		given: 'the model answered the question with a tool call'
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
-		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')]), integration, false)
 		LlmChatResponse first = new LlmChatResponse()
 		first.metadata = [tool_calls: [[id: 'call_AbCdEfGhIjKlMnOp', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]
 		OpenAiProvider.rememberQuestion(firstBody, first)
@@ -1174,7 +1180,8 @@ class OpenAiProviderSpec extends Specification {
 		given:
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
 		long old = System.currentTimeMillis() - OpenAiProvider.QUESTION_BY_TOOL_CALL_TTL_MS - 1000L
-		OpenAiProvider.QUESTION_BY_TOOL_CALL.put('call_OldAbCdEfGhIjKl', [question: 'Stale question', updated: old])
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.put(OpenAiProvider.toolCallKey(OpenAiProvider.questionScope(null, []), 'call_OldAbCdEfGhIjKl'),
+			[question: 'Stale question', updated: old])
 		List<Map> withQuestion = [[role: 'user', content: 'How many VMs?'], [role: 'assistant', content: '', tool_calls: [[id: 'call_OldAbCdEfGhIjKl']]]]
 		List<Map> unknown = [[role: 'assistant', content: '', tool_calls: [[id: 'call_UnknownAbCdEfGh']]]]
 		List<Map> expired = [[role: 'tool', tool_call_id: 'call_OldAbCdEfGhIjKl', content: 'x']]
@@ -1219,7 +1226,7 @@ class OpenAiProviderSpec extends Specification {
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
 		String ID = 'call_AbCdEfGhIjKlMnOp'
 		String ID2 = 'call_ZyXwVuTsRqPoNmLk'
-		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('user', 'List the AWS servers')]), integration, false)
+		Map firstBody = provider.buildChatRequestBody(new LlmChatRequest(messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')]), integration, false)
 		String originalKey = OpenAiProvider.questionKey(firstBody)
 		OpenAiProvider.rememberQuestion(firstBody, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
 		List<Map> msgs = [[role: 'system', content: 'You are Murph.'], [role: 'assistant', content: '', tool_calls: [[id: ID]]], [role: 'tool', tool_call_id: ID, content: 'part']]
@@ -1231,8 +1238,9 @@ class OpenAiProviderSpec extends Specification {
 		then:
 		restored
 		OpenAiProvider.questionKey([model: firstBody.model, messages: msgs]) == originalKey
-		OpenAiProvider.QUESTION_BY_TOOL_CALL.get(ID2).question == 'List the AWS servers'
-		OpenAiProvider.QUESTION_BY_TOOL_CALL.get(ID2).costKey == originalKey
+		Map entry = OpenAiProvider.QUESTION_BY_TOOL_CALL.get(OpenAiProvider.toolCallKey(OpenAiProvider.questionScope(null, msgs), ID2))
+		entry.question == 'List the AWS servers'
+		entry.costKey == originalKey
 
 		cleanup:
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
@@ -1253,7 +1261,7 @@ class OpenAiProviderSpec extends Specification {
 
 		then:
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.size() == OpenAiProvider.QUESTION_BY_TOOL_CALL_MAX
-		OpenAiProvider.QUESTION_BY_TOOL_CALL.get(ID).question == 'List the AWS servers'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.get(OpenAiProvider.toolCallKey(OpenAiProvider.questionScope(null, firstBody.messages as List), ID)).question == 'List the AWS servers'
 
 		cleanup:
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
@@ -1273,21 +1281,178 @@ class OpenAiProviderSpec extends Specification {
 		provider.apiService = api
 		AccountIntegration ai = new AccountIntegration(id: 4L, serviceUrl: OpenAiProvider.DEFAULT_API_URL, servicePassword: 'sk-test-0000000000')
 		LlmIntegration llm = new LlmIntegration(accountIntegration: ai)
+		LlmIntegration otherIntegration = new LlmIntegration(accountIntegration: new AccountIntegration(id: 5L,
+			serviceUrl: OpenAiProvider.DEFAULT_API_URL, servicePassword: 'sk-test-0000000000'))
+		Closure<LlmChatRequest> evicted = { String systemPrompt ->
+			new LlmChatRequest(model: 'm', messages: [
+				message('system', systemPrompt),
+				message('assistant', '', [tool_calls: [[id: 'call_E2eAbCdEfGhIjKlMn', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+				message('tool', '{"truncated":true}', [tool_call_id: 'call_E2eAbCdEfGhIjKlMn'])
+			])
+		}
 
 		when:
-		provider.generateResponse(llm, new LlmChatRequest(model: 'm', messages: [message('user', 'List the AWS servers')]), [:])
-		provider.generateResponse(llm, new LlmChatRequest(model: 'm', messages: [
-			message('system', 'You are Murph.'),
-			message('assistant', '', [tool_calls: [[id: 'call_E2eAbCdEfGhIjKlMn', type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
-			message('tool', '{"truncated":true}', [tool_call_id: 'call_E2eAbCdEfGhIjKlMn'])
-		]), [:])
+		provider.generateResponse(llm, new LlmChatRequest(model: 'm', messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')]), [:])
+		provider.generateResponse(llm, evicted('You are Murph.'), [:])
+		provider.generateResponse(otherIntegration, evicted('You are Murph.'), [:])
+		provider.generateResponse(llm, evicted('You are another agent.'), [:])
 
 		then:
-		sent.size() == 2
+		sent.size() == 4
 		sent[1].messages*.role == ['system', 'user', 'assistant', 'tool']
 		sent[1].messages[1].content == OpenAiProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
 
+		and: 'the same tool call id from another integration or another agent prompt never gets that question'
+		sent[2].messages*.role == ['system', 'assistant', 'tool']
+		sent[3].messages*.role == ['system', 'assistant', 'tool']
+
 		cleanup:
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "the cost key keeps integrations apart and ignores the plugin's own U+FFFD note"() {
+		given:
+		Map body = [model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: 'Which servers run?']]]
+		Map withNote = [model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'system', content: OpenAiProvider.REPLACEMENT_CHARACTER_NOTE],
+											   [role: 'user', content: 'Which servers run?'], [role: 'tool', tool_call_id: 't1', content: 'L�uft']]]
+
+		expect:
+		OpenAiProvider.questionKey(body, 4L) == OpenAiProvider.questionKey(withNote, 4L)
+		OpenAiProvider.questionKey(body, 4L) != OpenAiProvider.questionKey(body, 5L)
+	}
+
+	// ------------------------------------------------------------------
+	// Parameters an API rejects, streamed usage and cut-off tool calls
+	// ------------------------------------------------------------------
+
+	def "a model that rejects reasoning_effort is asked again without it, and is not sent it again"() {
+		given: 'what api.openai.com answers for gpt-4.1 with a reasoning effort'
+		OpenAiProvider.REJECTED_PARAMETERS.clear()
+		List<Map> sent = []
+		OpenAiApiService api = Stub()
+		api.createChatCompletion(*_) >> { args ->
+			Map body = args[2] as Map
+			sent << new LinkedHashMap(body)
+			body.containsKey('reasoning_effort') ?
+				[success: false, statusCode: 400, msg: "API returned 400: Unsupported parameter: 'reasoning_effort' is not supported with this model."] :
+				[success: true, data: [choices: [[finish_reason: 'stop', message: [content: 'Two servers.']]]]]
+		}
+		provider.apiService = api
+		LlmIntegration llm = new LlmIntegration(accountIntegration: configured([reasoningEffort: 'high', chatErrors: false]))
+		LlmChatRequest request = new LlmChatRequest(model: 'gpt-4.1', messages: [message('user', 'How many servers?')])
+
+		when:
+		ServiceResponse<LlmChatResponse> first = provider.generateResponse(llm, request, [:])
+		ServiceResponse<LlmChatResponse> second = provider.generateResponse(llm, request, [:])
+
+		then:
+		first.success
+		first.data.message.content == 'Two servers.'
+		second.data.message.content == 'Two servers.'
+		sent*.containsKey('reasoning_effort') == [true, false, false]
+
+		and: 'a reasoning model at the same endpoint still gets it'
+		provider.buildChatRequestBody(new LlmChatRequest(model: 'gpt-5.5', messages: [message('user', 'hi')]),
+			configured([reasoningEffort: 'high']), false).reasoning_effort == 'high'
+
+		cleanup:
+		OpenAiProvider.REJECTED_PARAMETERS.clear()
+	}
+
+	def "a 400 that names no parameter the plugin added is not asked again"() {
+		given:
+		OpenAiProvider.REJECTED_PARAMETERS.clear()
+		int calls = 0
+		OpenAiApiService api = Stub()
+		api.createChatCompletion(*_) >> { calls++; [success: false, statusCode: 400, msg: 'API returned 400: Invalid value for messages.'] }
+		provider.apiService = api
+		LlmIntegration llm = new LlmIntegration(accountIntegration: configured([reasoningEffort: 'high', chatErrors: false]))
+
+		when:
+		ServiceResponse<LlmChatResponse> response = provider.generateResponse(llm, new LlmChatRequest(model: 'gpt-4.1', messages: [message('user', 'hi')]), [:])
+
+		then:
+		!response.success
+		calls == 1
+		OpenAiProvider.REJECTED_PARAMETERS.isEmpty()
+	}
+
+	def "a stream asks for its usage, and an API that rejects stream_options is asked again without it"() {
+		given:
+		OpenAiProvider.REJECTED_PARAMETERS.clear()
+		List<Map> sent = []
+		OpenAiApiService api = Stub()
+		api.streamChatCompletion(*_) >> { args ->
+			Map body = args[2] as Map
+			sent << new LinkedHashMap(body)
+			body.containsKey('stream_options') ?
+				[success: false, statusCode: 400, msg: 'API returned 400: Unrecognized request argument supplied: stream_options'] :
+				[success: true, data: [choices: [[finish_reason: 'stop', message: [content: 'Pong']]]]]
+		}
+		provider.apiService = api
+		LlmStreamingResponseHandler handler = Mock()
+		LlmIntegration llm = new LlmIntegration(accountIntegration: configured([:]))
+
+		when:
+		provider.streamResponse(llm, new LlmChatRequest(model: 'm', messages: [message('user', 'Ping')]), handler, [:])
+
+		then:
+		1 * handler.onCompleteResponse({ LlmChatResponse r -> r.message.content == 'Pong' })
+		0 * handler.onError(_)
+		sent*.containsKey('stream_options') == [true, false]
+
+		and: 'only a stream asks for usage, and a model that never refused it still does'
+		provider.buildChatRequestBody(new LlmChatRequest(model: 'm2', messages: [message('user', 'hi')]), integration, true).stream_options == [include_usage: true]
+		!provider.buildChatRequestBody(new LlmChatRequest(model: 'm2', messages: [message('user', 'hi')]), integration, false).containsKey('stream_options')
+		!provider.buildChatRequestBody(new LlmChatRequest(model: 'm', messages: [message('user', 'hi')]), integration, true).containsKey('stream_options')
+
+		cleanup:
+		OpenAiProvider.REJECTED_PARAMETERS.clear()
+	}
+
+	def "a tool call the token limit cut off is dropped, and with none left the answer says it was cut off"() {
+		given:
+		Map complete = [id: 'call_a', type: 'function', function: [name: 'list_clouds', arguments: '{"max":10}']]
+		Map cutOff = [id: 'call_b', type: 'function', function: [name: 'list_servers', arguments: '{"name":"web-']]
+		Map noArguments = [id: 'call_c', type: 'function', function: [name: 'list_groups', arguments: '']]
+
+		when:
+		LlmChatResponse partly = provider.parseChatResponse([choices: [[finish_reason: 'length', message: [content: null, tool_calls: [complete, cutOff]]]]])
+		LlmChatResponse none = provider.parseChatResponse([choices: [[finish_reason: 'length', message: [content: 'Checking.', tool_calls: [cutOff, noArguments]]]]])
+
+		then: 'the complete call still runs'
+		partly.finishReason == 'tool_calls'
+		partly.metadata.tool_calls*.id == ['call_a']
+
+		and: 'without one, the turn is an answer that says it was cut off'
+		none.finishReason == 'length'
+		!none.metadata.containsKey('tool_calls')
+		none.message.content == 'Checking.\n\n*Answer cut off at the output token limit.*'
+
+		and: 'a turn that ended on its own keeps every call'
+		provider.parseChatResponse([choices: [[finish_reason: 'tool_calls', message: [content: null, tool_calls: [complete, noArguments]]]]])
+			.metadata.tool_calls*.id == ['call_a', 'call_c']
+	}
+
+	def "empty arguments the tool definition needs are kept: required ones, and false where the default is true"() {
+		given:
+		List tools = [
+			[type: 'function', function: [name: 'get_result_excerpt', parameters: [type: 'object', required: ['artifactId', 'offset'],
+				properties: [artifactId: [type: 'string'], offset: [type: 'integer'], length: [type: 'integer']]]]],
+			[type: 'function', function: [name: 'list_servers', parameters: [type: 'object',
+				properties: [name: [type: 'string'], managed: [type: 'boolean'], includeDetails: [type: 'boolean', 'default': true],
+							 showDeleted: [type: 'boolean', 'default': false]]]]]
+		]
+		LlmChatResponse response = provider.parseChatResponse([choices: [[finish_reason: 'tool_calls', message: [content: null, tool_calls: [
+			[id: 't1', type: 'function', function: [name: 'get_result_excerpt', arguments: '{"artifactId":"a1","offset":0,"length":0}']],
+			[id: 't2', type: 'function', function: [name: 'list_servers', arguments: '{"name":"","managed":false,"includeDetails":false,"showDeleted":false}']],
+			[id: 't3', type: 'function', function: [name: 'not_in_request', arguments: '{"offset":0}']]
+		]]]]])
+
+		when:
+		provider.dropEmptyToolArguments(response, integration, tools)
+
+		then:
+		response.metadata.tool_calls*.function*.arguments == ['{"artifactId":"a1","offset":0}', '{"includeDetails":false}', '{}']
 	}
 }

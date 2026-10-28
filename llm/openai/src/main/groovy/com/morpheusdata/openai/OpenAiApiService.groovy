@@ -150,10 +150,13 @@ class OpenAiApiService {
 	 * What OpenRouter and api.openai.com send, as observed:
 	 *  - text in {@code choices[0].delta.content}; chunks that carry reasoning or a
 	 *    tool call have it empty or null, and only real text reaches onText
-	 *  - reasoning in {@code delta.reasoning}, kept apart from the answer
+	 *  - reasoning in {@code delta.reasoning} or {@code delta.reasoning_content}, kept apart
+	 *    from the answer; a refusal in {@code delta.refusal}
 	 *  - tool calls as fragments per {@code index}: id and name in the first,
 	 *    the arguments in pieces
-	 *  - a last chunk before {@code [DONE]} that repeats finish_reason and carries usage
+	 *  - a last chunk before {@code [DONE]} that repeats finish_reason and carries usage;
+	 *    api.openai.com and vLLM send it only for {@code stream_options.include_usage}, with
+	 *    no choices
 	 *  - {@code : OPENROUTER PROCESSING} comment lines as keep-alive
 	 *  - an error after the response has started as a chunk with a top-level
 	 *    {@code error}, the HTTP status having been 200
@@ -164,6 +167,7 @@ class OpenAiApiService {
 		String nativeFinishReason = null
 		StringBuilder content = new StringBuilder()
 		StringBuilder reasoning = new StringBuilder()
+		StringBuilder refusal = new StringBuilder()
 		Map<Integer, Map> toolCalls = new TreeMap<>()
 		JsonSlurper slurper = new JsonSlurper()
 
@@ -206,8 +210,15 @@ class OpenAiApiService {
 					content.append(chunk)
 					onText?.call(chunk)
 				}
+				// OpenRouter names it reasoning, LiteLLM and DeepSeek-style APIs reasoning_content.
 				if (delta.reasoning instanceof CharSequence) {
 					reasoning.append(delta.reasoning.toString())
+				} else if (delta.reasoning_content instanceof CharSequence) {
+					reasoning.append(delta.reasoning_content.toString())
+				}
+				// A refusal streams in its own field; it becomes the answer like an unstreamed one.
+				if (delta.refusal instanceof CharSequence) {
+					refusal.append(delta.refusal.toString())
 				}
 				if (delta.tool_calls instanceof List) {
 					accumulateToolCalls(toolCalls, delta.tool_calls as List)
@@ -224,6 +235,9 @@ class OpenAiApiService {
 		Map message = [role: 'assistant', content: content.toString()]
 		if (reasoning.length() > 0) {
 			message.reasoning = reasoning.toString()
+		}
+		if (refusal.length() > 0) {
+			message.refusal = refusal.toString()
 		}
 		if (toolCalls) {
 			message.tool_calls = toolCalls.values().collect { Map call ->

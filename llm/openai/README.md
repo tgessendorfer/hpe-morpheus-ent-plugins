@@ -79,7 +79,7 @@ upload it under *Administration > Integrations > Plugins > Add*. The plugin regi
 | **API Key** | the key, for *Local Credentials* |
 | **Route Outbound Calls Through a Proxy** | off means a direct connection; see [Network proxy](#network-proxy) |
 | **Network Proxy** | the proxy to use when the box above is ticked |
-| **Default Max Output Tokens** | leave empty to let each model use its own maximum; see [Output limit](#output-limit-and-reasoning-models) |
+| **Default Max Output Tokens** | a floor over what the caller asks for; leave empty to send what the caller asks for; see [Output limit](#output-limit-and-reasoning-models) |
 | **Reasoning Effort** | *Model default* sends nothing; see [Reasoning](#reasoning) |
 | **Only List These Models** | `*` lists every chat model; see [Allow list](#allow-list) |
 | **Append Usage to Answers** | optional; see [Usage footer](#usage-footer) |
@@ -160,7 +160,9 @@ Saving the integration refreshes the list, as does *Actions > Refresh* and Morph
 A model that is no longer listed — gone from the endpoint, or filtered out by a changed setting —
 is **removed**, because Morpheus offers disabled models in the agent form like enabled ones. A model
 that an agent still uses cannot be removed; it stays **disabled** until it is listed again, and the
-log names it. Each refresh logs one line:
+log names it. An endpoint that lists no chat model at all — an empty catalog, or one the rules above
+leave nothing of — changes nothing: the stored models stay, and the log says so. Each refresh logs
+one line:
 
 ```
 Model sync for integration 8: 45 listed, 0 added, 0 updated, 2 removed, 0 disabled because an agent still uses them
@@ -170,20 +172,24 @@ Model sync for integration 8: 45 listed, 0 added, 0 updated, 2 removed, 0 disabl
 
 ## Output limit and reasoning models
 
-Morpheus asks for **1000 output tokens** on every chat request. For most models that is enough for
-an answer built from MCP data. OpenAI's reasoning models — the o-series, GPT-5 and codex, with or
+Morpheus asks for **1000 output tokens** on every chat request. **Default Max Output Tokens** is a
+floor over that: with a value set, the plugin sends the larger of the caller's limit and that value,
+so a caller asking for more keeps its limit. Empty, the request goes out with the caller's limit, or
+without one. For most models 1000 is enough for an answer built from MCP data. OpenAI's reasoning models — the o-series, GPT-5 and codex, with or
 without a vendor prefix such as `openai/` — think inside that budget: `gpt-5-mini` spent 960 tokens
 reasoning and answered nothing. The plugin therefore
 
 - sends them `max_completion_tokens` instead of the deprecated `max_tokens`, and **at least 8192**
-  when the caller asks for less, unless **Default Max Output Tokens** sets a limit of its own;
+  when the caller asks for less and **Default Max Output Tokens** is empty;
 - sends them no `temperature` and no `top_p`, which api.openai.com would reject with `400`;
 - forwards `temperature`, `top_p` and stop sequences unchanged to every other model.
 
 An answer that hits the limit anyway ends mid-sentence, and the chat gives no sign of it. The
 plugin appends a line — *Answer cut off at the output token limit.* — in the language of the answer,
 and shows only that line when there was no text at all. The line is removed before the answer is
-replayed as history.
+replayed as history. A tool call the limit cut off in the middle of its arguments is dropped rather
+than run; the complete calls of the same turn still run, and with none left the answer says it was
+cut off.
 
 ## Reasoning
 
@@ -191,8 +197,10 @@ replayed as history.
 
 - **Model default** sends nothing; each model does what it does by default.
 - **Low**, **Medium** or **High** is sent as `reasoning_effort` on every request, OpenAI's
-  parameter, which OpenRouter and LiteLLM accept as well. An endpoint that does not know it may
-  reject the request.
+  parameter, which OpenRouter and LiteLLM accept as well. A model whose API rejects it with `400`
+  and names the parameter — api.openai.com does for `gpt-4.1`, LiteLLM without `drop_params` for
+  models that do not reason — is asked again without it at once, and is not sent it again until the
+  plugin is reloaded. The log says so once per model and endpoint.
 
 Reasoning text — `reasoning` or `reasoning_content` in the response — is never put into the answer
 or the stream. The appliance log shows the reasoning token count of every request.
@@ -213,6 +221,10 @@ the tool, which is the same as the model leaving them out. The log names what wa
 Tool calls: list_servers {"name":"","phrase":"","zoneId":0,"siteId":0,"managed":false,...}
 Dropped empty arguments from list_servers: name, phrase, zoneId, siteId, managed, ...
 ```
+
+The tool definitions in the request still count: an argument the tool marks as **required** is
+kept, since leaving it out fails the call (`get_result_excerpt` from `offset: 0`), and so is `false`
+where the tool's `default` is `true`, since leaving it out would turn it into `true`.
 
 Untick it to forward tool calls exactly as the model wrote them.
 
