@@ -127,20 +127,34 @@ class MspTenantOverviewAnalyticsProvider extends AbstractAnalyticsProvider {
 		locale?.language == 'de' ? Locale.GERMAN : Locale.ENGLISH
 	}
 
+	/** Bundle key that only this plugin's bundles carry; tells them from another jar's i18n/messages. */
+	static final String BUNDLE_MARKER_KEY = "${PROVIDER_CODE}.title".toString()
+
 	// The plugin's own bundles, read from the jar. The template's i18n helper follows the browser
-	// locale, so the provider resolves every text itself.
+	// locale, so the provider resolves every text itself. A class loader that asks its parent first
+	// could find another i18n/messages*.properties of the same name before the plugin's own, so every
+	// copy on the class path is checked and the first one that carries BUNDLE_MARKER_KEY is used.
 	private static Properties bundle(Locale locale) {
 		String path = messageLocale(locale) == Locale.GERMAN ? 'i18n/messages_de.properties' : 'i18n/messages.properties'
 		BUNDLES.computeIfAbsent(path) { String p ->
-			Properties props = new Properties()
 			try {
-				InputStream is = MspTenantOverviewAnalyticsProvider.classLoader.getResourceAsStream(p)
-				if(is != null) is.withCloseable { props.load(it) }
+				return ownBundle(Collections.list(MspTenantOverviewAnalyticsProvider.classLoader.getResources(p)))
 			} catch(Exception e) {
 				log.debug("MSP tenant overview: bundle ${p} could not be read: ${e.message}")
+				return new Properties()
 			}
-			props
 		}
+	}
+
+	/** The first of {@code urls} that carries {@link #BUNDLE_MARKER_KEY}, or an empty bundle. */
+	static Properties ownBundle(List<URL> urls) {
+		for(URL u : urls) {
+			Properties p = new Properties()
+			// The bundles are ASCII with escaped umlauts, which Properties.load reads correctly.
+			u.openStream().withCloseable { InputStream is -> p.load(is) }
+			if(p.containsKey(BUNDLE_MARKER_KEY)) return p
+		}
+		new Properties()
 	}
 
 	String message(String key, String english, Locale locale) {
@@ -203,6 +217,7 @@ class MspTenantOverviewAnalyticsProvider extends AbstractAnalyticsProvider {
 					first = false
 				}
 			}
+			MspTenantOverviewCalc.dropZeroCurrencies(totals)
 			List totalRows = totals.collect { String ccy, Map<String, BigDecimal> x -> [currency: ccy] + MspTenantOverviewCalc.texts(x, locale) }
 			return ServiceResponse.success([items: items, count: tenants.size(), totals: totalRows,
 				month: m.curShown, lastMonth: m.lastShown, instances: instTotal, cores: coresTotal, t: labels(locale)])
@@ -211,7 +226,12 @@ class MspTenantOverviewAnalyticsProvider extends AbstractAnalyticsProvider {
 			return ServiceResponse.error(message('error.loadFailed',
 				'Tenant data could not be loaded. This page reads internal Morpheus tables and is tested on Morpheus 9.0.2 only.', locale))
 		} finally {
-			if(c) morpheus.report.releaseDatabaseConnection(c).blockingAwait()
+			// A failed release must not replace the page result.
+			try {
+				if(c) morpheus.report.releaseDatabaseConnection(c).blockingAwait()
+			} catch(Exception e) {
+				log.warn("MSP tenant overview: releasing the database connection failed: ${e.message}", e)
+			}
 		}
 	}
 

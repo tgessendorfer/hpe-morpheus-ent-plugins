@@ -117,6 +117,35 @@ class MspTenantOverviewCalcSpec extends Specification {
 		totals.USD.rev == 5G
 	}
 
+	def "a zero total in the fallback currency is dropped next to a priced currency"() {
+		given: 'one priced tenant in EUR and one without invoices, whose zero entry falls back to USD'
+		Map totals = new TreeMap()
+		MspTenantOverviewCalc.addTo(totals, MspTenantOverviewCalc.groupByCurrency([[cur: 'EUR', period: '202610', rev: 28.58, cost: 23.22]], '202610', null))
+		MspTenantOverviewCalc.addTo(totals, MspTenantOverviewCalc.groupByCurrency([], '202610', null))
+
+		when:
+		MspTenantOverviewCalc.dropZeroCurrencies(totals)
+
+		then:
+		totals.keySet() as List == ['EUR']
+		totals.EUR.rev == 28.58G
+	}
+
+	def "zero totals stay when no currency has an amount, and a previous-month amount counts"() {
+		given:
+		Map allZero = new TreeMap([USD: MspTenantOverviewCalc.zero(), EUR: MspTenantOverviewCalc.zero()])
+		Map lastOnly = new TreeMap([USD: MspTenantOverviewCalc.zero(), EUR: [rev: 0.00G, cost: 0.00G, lrev: 0.00G, lcost: 1.00G]])
+		Map empty = new TreeMap()
+
+		when:
+		[allZero, lastOnly, empty].each { MspTenantOverviewCalc.dropZeroCurrencies(it) }
+
+		then:
+		allZero.keySet() as List == ['EUR', 'USD']
+		lastOnly.keySet() as List == ['EUR']
+		empty.isEmpty()
+	}
+
 	@Unroll
 	def "r2(#v) == #expected (half up)"() {
 		expect:

@@ -6,6 +6,57 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
+## 1.2.3
+
+**No zero total next to a priced currency, the plugin's own texts even when another jar ships a
+bundle of the same name, and a failed connection release no longer breaks the page.** Built
+against plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and options are
+unchanged.
+
+### What changed
+
+- **Zero totals dropped.** A tenant without any amount keeps one zero row in the fallback currency
+  (the master account's currency, else USD), so it is still listed. That zero entry was also added
+  to the totals, so with a master account without a currency the page showed a *Total USD 0.00*
+  row and USD cards next to the priced currency, the rows 1.2.1 removed. A currency whose four
+  totals (revenue and cost of both months) are all zero is now left out of the totals and cards
+  as long as another currency has an amount. The tenant's own zero row stays. When no currency
+  has any amount, the zero totals are shown as before.
+- **Own bundle, found by a marker key.** The page texts were read from the first
+  `i18n/messages*.properties` the class loader returned. A class loader that asks its parent first
+  can return another jar's file of the same name, and the page then showed bundle keys instead of
+  texts until the plugin was reloaded. Every copy on the class path is now checked and the first
+  one that carries the plugin's own `msp-tenant-overview-analytics.title` key is used, as Tenant
+  Chargeback has done since 1.2.0.
+- **Connection release cannot replace the page result.** The read-only report connection was
+  released in a `finally` block without a `catch`, so a failing release replaced the page data or
+  the error message with an exception. A failed release is now logged as a warning and the page
+  result stands.
+
+### Behaviour changes from 1.2.2
+
+- A tenant without invoices falls back to the master account's currency (USD when the master
+  account has none). Whenever no other tenant has an amount in that currency, its zero total
+  (*Total USD 0.00*, for example) and its cards are gone; the tenant's own zero row stays. That
+  also happens with a master currency set, for example USD or CHF over tenants invoiced in EUR.
+
+### Verified
+
+- Unit tests (Spock), 79 in total: zero totals dropped next to a priced currency and kept when
+  every currency is zero, `loadData` with two tenants of which one has no invoices, the rendered
+  page without a USD total, a failing connection release, and the bundle lookup with a foreign
+  bundle of the same name ahead of the plugin's own.
+
+### Not yet verified
+
+- Not run on an appliance. Open checks: the page shows the same tenants, amounts and totals as
+  1.2.2, except that a tenant without invoices no longer adds a zero total and cards in a
+  currency no other tenant uses (see above); English and German texts still resolve after the
+  upload; a failed release
+  appears as one warning in the appliance log (not provoked yet).
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.2.2...msp-tenant-overview-v1.2.3
+
 ## 1.2.2
 
 **Cards and table fit the analytics page in one row each.** Layout only; the numbers are

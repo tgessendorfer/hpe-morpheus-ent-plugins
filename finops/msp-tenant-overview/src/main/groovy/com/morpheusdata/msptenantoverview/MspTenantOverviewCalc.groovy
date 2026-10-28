@@ -104,6 +104,17 @@ class MspTenantOverviewCalc {
 		}
 	}
 
+	/**
+	 * Removes the currencies whose four amounts are all zero from the totals, as long as another
+	 * currency has an amount. A tenant without any amount adds a zero entry in the fallback
+	 * currency (see groupByCurrency), which would otherwise show as a zero total (e.g. USD 0.00)
+	 * next to the priced currency. When every currency is zero, the totals are kept as they are.
+	 */
+	static void dropZeroCurrencies(Map<String, Map<String, BigDecimal>> totals) {
+		Set<String> zero = totals.findAll { String ccy, Map<String, BigDecimal> x -> x.values().every { it.signum() == 0 } }.keySet()
+		if(zero.size() < totals.size()) totals.keySet().removeAll(zero)
+	}
+
 	static String money(def v, Locale locale) {
 		DecimalFormat f = new DecimalFormat('#,##0.00', DecimalFormatSymbols.getInstance(locale))
 		f.roundingMode = RoundingMode.HALF_UP

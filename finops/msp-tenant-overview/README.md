@@ -30,7 +30,10 @@ One row per active sub-tenant (`account.master_account = 0`, `active = 1`), orde
   servers that belong to no instance, so a VM is never counted twice. Since 1.2.1 a server belongs to an instance when a `container` row links them (`container.server_id` = the invoice's `ref_id`, `container.instance_id` set); Morpheus leaves `instance_id` empty on the server invoice of an instance's own VM.
 - **Zero currencies are hidden (since 1.2.1).** A currency whose revenue and cost are 0.00 in both
   months gets no tenant row and no total; a tenant with nothing but zero amounts keeps one zero row
-  in the master currency.
+  in the master currency. Since 1.2.3 that zero row adds no zero total (and no zero cards) next to a
+  currency with an amount: whenever no other tenant has an amount in that currency, for example
+  USD (or CHF) as the master currency over tenants invoiced in EUR, or USD as the fallback when the
+  master account has no currency.
 - **Months:** the current month, which Morpheus projects to month end (forecast), and the previous
   month, each under its own column group heading.
 - **Layout (since 1.2.2):** the page brings its own scoped CSS, shows the five summary cards in

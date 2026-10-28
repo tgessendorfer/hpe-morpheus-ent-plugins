@@ -200,6 +200,71 @@ class MspTenantOverviewAnalyticsProviderSpec extends Specification {
 		resp.errors.error == 'Nur der Provider-Tenant (Master) kann diese Seite \u00f6ffnen.'
 	}
 
+	def "a tenant without invoices is listed, but adds no zero total in the fallback currency"() {
+		given: 'a master tenant without a currency, Tenant A with revenue in EUR, Tenant B without invoices'
+		def env = tenantsEnv(null, [
+			[id: 2L, name: 'Tenant A', users: 1, sites: 1, instances: 1, cores: 2, memory: 2147483648L, servers: 1],
+			[id: 3L, name: 'Tenant B', users: 0, sites: 0, instances: 0, cores: 0, memory: 0L, servers: 0]],
+			[(2L): [[cur: 'EUR', period: currentPeriod(), rev: 28.58G, cost: 23.22G]]])
+
+		when:
+		def resp = env.p.loadData(new User(id: 7L), [:])
+		String html = render(resp.data)
+
+		then: 'Tenant B keeps its zero row in USD, the totals and cards show EUR only'
+		resp.success
+		resp.data.items*.name == ['Tenant A', 'Tenant B']
+		resp.data.items*.currency == ['EUR', 'USD']
+		resp.data.totals*.currency == ['EUR']
+		html.contains('<strong>Total EUR</strong>')
+		!html.contains('<strong>Total USD</strong>')
+		!html.contains('(forecast, USD)')
+	}
+
+	def "with no amount in any currency the zero total stays"() {
+		given:
+		def env = tenantsEnv(null, [[id: 3L, name: 'Tenant B', users: 0, sites: 0, instances: 0, cores: 0, memory: 0L, servers: 0]], [:])
+
+		when:
+		def resp = env.p.loadData(new User(id: 7L), [:])
+
+		then:
+		resp.success
+		resp.data.totals*.currency == ['USD']
+		resp.data.totals[0].revText == '0.00'
+	}
+
+	def "a failing connection release does not replace the page result"() {
+		given:
+		def env = loadEnv(Locale.US, 'en-US')
+
+		when:
+		def resp = env.p.loadData(new User(id: 7L), [:])
+
+		then:
+		1 * env.report.releaseDatabaseConnection(_) >> { throw new IllegalStateException('pool closed') }
+		noExceptionThrown()
+		resp.success
+		resp.data.totals[0].revText == '1,234.56'
+	}
+
+	def "a bundle of the same name found first on the class path is skipped for the plugin's own"() {
+		given: 'a foreign i18n/messages.properties ahead of the plugin one, as a parent-first class loader would order them'
+		File foreign = File.createTempFile('foreign-messages', '.properties')
+		foreign.text = 'default.title=Other\n'
+		URL own = MspTenantOverviewAnalyticsProvider.classLoader.getResource('i18n/messages.properties')
+
+		when:
+		Properties p = MspTenantOverviewAnalyticsProvider.ownBundle([foreign.toURI().toURL(), own])
+
+		then:
+		p.getProperty(MspTenantOverviewAnalyticsProvider.BUNDLE_MARKER_KEY) == 'MSP Tenant Overview'
+		MspTenantOverviewAnalyticsProvider.ownBundle([foreign.toURI().toURL()]).isEmpty()
+
+		cleanup:
+		foreign?.delete()
+	}
+
 	def "every label key exists in both bundles and the template uses only provided labels"() {
 		given:
 		String hbs = resource('renderer/hbs/mspTenantOverview.hbs')
@@ -328,7 +393,27 @@ class MspTenantOverviewAnalyticsProviderSpec extends Specification {
 		def p = Spy(MspTenantOverviewAnalyticsProvider, constructorArgs: [new MspTenantOverviewPlugin(), ctx]) {
 			newSql(_) >> sql
 		}
-		[p: p, sql: sql]
+		[p: p, sql: sql, report: report]
+	}
+
+	/** Several tenants, each with its own invoice rows (by tenant id), for an English user. */
+	private Map tenantsEnv(String masterCurrency, List<Map> tenants, Map<Long, List<Map>> invoicesByTenant) {
+		MorpheusWebRequestService web = Mock() { getLocale() >> Locale.US }
+		Connection conn = Mock()
+		MorpheusReportService report = Mock() {
+			getReadOnlyDatabaseConnection() >> Single.just(conn)
+			releaseDatabaseConnection(_) >> Completable.complete()
+		}
+		MorpheusContext ctx = Mock() { getWebRequest() >> web; getReport() >> report }
+		Sql sql = Mock()
+		sql.firstRow(MspTenantOverviewAnalyticsProvider.USER_LOCALE_SQL, [7L]) >> [locale: 'en-US']
+		sql.firstRow({ it.contains('master_account') }, [7L]) >> [is_master: 1, currency: masterCurrency]
+		sql.rows({ it.contains('FROM account a') }) >> tenants
+		sql.rows({ it.contains('account_invoice') }, _) >> { String q, List params -> invoicesByTenant[params[0] as Long] ?: [] }
+		def p = Spy(MspTenantOverviewAnalyticsProvider, constructorArgs: [new MspTenantOverviewPlugin(), ctx]) {
+			newSql(_) >> sql
+		}
+		[p: p, sql: sql, report: report]
 	}
 
 	private static String currentPeriod() {
