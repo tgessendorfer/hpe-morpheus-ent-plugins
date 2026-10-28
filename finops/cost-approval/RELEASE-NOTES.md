@@ -6,6 +6,53 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 1.2.4
+
+**Fix release: an extreme threshold such as `1e999999999` is skipped at once instead of hanging
+the approval.** Plugin code, provider code, option codes, plugin API 1.4.2 and minimum appliance
+9.0.2 are unchanged; no new options.
+
+### Fixed
+
+- **What went wrong.** The threshold parser accepted exponent notation of any size. A value such
+  as `1e999999999` in the policy, the call options or the integration parsed cheaply, but rounding
+  it to cents and formatting it for the request name then tried to build a number with a billion
+  digits, which hangs the thread that decides the approval or exhausts its memory. A smaller one
+  such as `1e300` was used as a threshold and wrote a request name of more than 300 characters.
+- **What the plugin does now.** A threshold with **more than 12 integer digits, more than 32
+  decimal places or more than 32 characters** is malformed. Like any other malformed value it is
+  skipped with one warning, and the next level (policy, call options, integration, default 100)
+  applies. The size is checked from the digit counts, so the value is never expanded. Exponent
+  notation within these bounds still works: `1.0E7` reads as 10,000,000.
+- **The warning names the bound and cuts the raw value after 40 characters:** *Cost threshold
+  approval: policy threshold '1e999999999' is not a non-negative amount of at most 12 integer
+  digits, ignored*.
+
+### Behaviour changes from 1.2.3
+
+- A threshold of 1,000,000,000,000 or more is skipped and the next level applies. In 1.2.3 it was
+  used, or, written with a large exponent, hung the approval.
+- The warning text for a skipped threshold is longer (see above); a log filter that matches the
+  old text *is not a non-negative amount, ignored* needs the new one.
+- Thresholds within the bounds, prices, currencies and request types are decided as in 1.2.3.
+
+### Verified
+
+- New unit tests (Spock): `1e999999999`, `1E+2147483647` (whose digit count overflows an `int`),
+  `1e-999999999`, `1e300`, `1000000000000` and over-long texts give no amount, each under a
+  10-second timeout; `999999999999.99`, `1.0E7` and `5e-3` still parse; an exponent policy
+  threshold is skipped with the short warning and the integration threshold rejects 60 EUR
+  against 50 EUR. The three tests that check the warning text are changed to the new text.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon --warning-mode all`,
+  142 tests, 0 failures.
+
+### Not yet verified
+
+- On an appliance: a policy with the threshold `1e999999999` (set through the API) logs the
+  warning and the integration threshold decides; the jar replaces 1.2.3 in place.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.2.3...cost-approval-v1.2.4
+
 ## 1.2.3
 
 **Fix release: a request with an unpriced reference is rejected instead of approved on the price

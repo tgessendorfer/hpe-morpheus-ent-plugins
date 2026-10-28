@@ -3,6 +3,7 @@ package com.morpheusdata.costapproval
 import com.morpheusdata.costapproval.CostApprovalLogic.Outcome
 import com.morpheusdata.model.RequestReference
 import spock.lang.Specification
+import spock.lang.Timeout
 import spock.lang.Unroll
 
 class CostApprovalLogicSpec extends Specification {
@@ -84,6 +85,39 @@ class CostApprovalLogicSpec extends Specification {
 		'-50,00'    | null
 	}
 
+	@Unroll
+	@Timeout(10)
+	def "toAmount refuses an amount that is too large, too precise or too long: '#shown'"() {
+		expect:
+		CostApprovalLogic.toAmount(text) == null
+
+		where:
+		text << ['1e999999999', '1E+2147483647', '1e-999999999', '1e300', '1000000000000', '0.' + '1' * 40, '9' * 40]
+		shown = text.length() > 20 ? text.take(20) + '...' : text
+	}
+
+	def "toAmount keeps the largest plain amount and exponent forms within the bounds"() {
+		expect:
+		CostApprovalLogic.toAmount('999999999999.99') == 999999999999.99G
+		CostApprovalLogic.toAmount(1.0E7d) == 10000000G
+		CostApprovalLogic.toAmount('5e-3') == 0.005G
+	}
+
+	@Timeout(10)
+	def "an exponent threshold is ignored at once with a short warning, and the next level applies"() {
+		given:
+		List<String> warnings = []
+
+		when:
+		BigDecimal t = CostApprovalLogic.threshold([costThreshold: '1e999999999'], [costThreshold: '9' * 100],
+			[costThreshold: '30'], { String m -> warnings << m })
+
+		then:
+		t == 30G
+		warnings == ["Cost threshold approval: policy threshold '1e999999999' is not a non-negative amount of at most 12 integer digits, ignored",
+			"Cost threshold approval: call options threshold '${'9' * 40}...' is not a non-negative amount of at most 12 integer digits, ignored".toString()]
+	}
+
 	def "a threshold with a decimal comma is used, not the default"() {
 		expect:
 		CostApprovalLogic.threshold(null, null, [cm: [plugin: [costThreshold: '50,00']]], {}) == 50.00G
@@ -99,8 +133,8 @@ class CostApprovalLogicSpec extends Specification {
 
 		then:
 		t == 30G
-		warnings == ["Cost threshold approval: policy threshold '1.000,50' is not a non-negative amount, ignored",
-			"Cost threshold approval: call options threshold 'abc' is not a non-negative amount, ignored"]
+		warnings == ["Cost threshold approval: policy threshold '1.000,50' is not a non-negative amount of at most 12 integer digits, ignored",
+			"Cost threshold approval: call options threshold 'abc' is not a non-negative amount of at most 12 integer digits, ignored"]
 	}
 
 	def "an unparsable integration threshold warns and the default applies; empty values stay silent"() {
@@ -112,7 +146,7 @@ class CostApprovalLogicSpec extends Specification {
 
 		then:
 		t == 100G
-		warnings == ["Cost threshold approval: integration threshold '-5' is not a non-negative amount, ignored"]
+		warnings == ["Cost threshold approval: integration threshold '-5' is not a non-negative amount of at most 12 integer digits, ignored"]
 	}
 
 	def "a valid threshold logs nothing"() {

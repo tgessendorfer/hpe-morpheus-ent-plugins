@@ -75,9 +75,11 @@ type cannot be read is checked.
 **Threshold format:** a plain non-negative number such as `50` or `50.00`. A single decimal comma
 with one or two digits after it is accepted too (`50,00` is 50.00). Forms that mix comma and dot
 or look like a thousands separator (`1.000,50`, `1,000`) are not guessed: such a value, like any
-other value that does not parse, is skipped and the next level applies. Each skipped value writes
-one warning to the Morpheus log that names the level and the raw value, for example
-`Cost threshold approval: policy threshold '1.000,50' is not a non-negative amount, ignored`.
+other value that does not parse, is skipped and the next level applies. So is a value with more
+than 12 integer digits, more than 32 decimal places or more than 32 characters (`1e999999999`,
+`1000000000000`). Each skipped value writes one warning to the Morpheus log that names the level
+and the raw value (cut after 40 characters), for example
+`Cost threshold approval: policy threshold '1.000,50' is not a non-negative amount of at most 12 integer digits, ignored`.
 
 **Currency of a request:** `Request.currency`, else the one currency all references share, else
 the currency of the integration's tenant, else of the master tenant, else `USD`.

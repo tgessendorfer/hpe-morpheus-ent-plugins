@@ -244,6 +244,20 @@ class CostApprovalProviderSpec extends Specification {
 		rsp.externalRequestName == 'Approved automatically (10.50 EUR <= 10.50 EUR per month)'
 	}
 
+	@Timeout(10)
+	def "an exponent policy threshold is ignored at once, so the integration threshold decides"() {
+		given:
+		Policy policy = new Policy()
+		policy.config = JsonOutput.toJson([cm: [plugin: [costThreshold: '1e999999999']]])
+
+		when:
+		def rsp = provider.createApprovalRequest([], request(60G, 'EUR'), integration(7, [costThreshold: '50']), policy, [:])
+
+		then:
+		rsp.references*.status == [RequestReference.ApprovalStatus.rejected]
+		rsp.externalRequestName == 'Above cost threshold of 50.00 EUR/month (requested 60.00 EUR). Please contact your provider for approval.'
+	}
+
 	/** Holds the first put of a decision until the test releases it. */
 	static class SlowPutProvider extends CostApprovalProvider {
 		final CountDownLatch putStarted = new CountDownLatch(1)

@@ -38,6 +38,11 @@ class CostApprovalLogic {
 	static final String FIELD_THRESHOLD = 'costThreshold'
 	static final String FIELD_CURRENCY = 'thresholdCurrency'
 
+	/** Most integer digits of a threshold: 999,999,999,999.99 per month is far above any real limit. */
+	static final int MAX_INTEGER_DIGITS = 12
+	/** Longest threshold text that is parsed at all, and the most decimal places it may have. */
+	static final int MAX_AMOUNT_LENGTH = 32
+
 	enum Outcome {
 		/** Same currency, monthly price at or below the threshold. */
 		APPROVED,
@@ -138,19 +143,30 @@ class CostApprovalLogic {
 	 * A non-negative amount, or null for empty, malformed or negative input. A single decimal
 	 * comma with one or two digits after it is read as a decimal point ({@code 50,00} is 50.00);
 	 * forms that mix comma and dot or look like a thousands separator ({@code 1.000,50},
-	 * {@code 1,000}) stay malformed rather than being guessed.
+	 * {@code 1,000}) stay malformed rather than being guessed. More than
+	 * {@link #MAX_INTEGER_DIGITS} integer digits, more than {@link #MAX_AMOUNT_LENGTH} decimal
+	 * places or a longer text are malformed too: an exponent such as {@code 1e999999999} parses
+	 * cheaply, but rounding or formatting it would build a billion-digit number.
 	 */
 	static BigDecimal toAmount(Object value) {
 		if (blank(value)) {
 			return null
 		}
 		String text = value.toString().trim()
+		if (text.length() > MAX_AMOUNT_LENGTH) {
+			return null
+		}
 		if (text ==~ /\d+,\d{1,2}/) {
 			text = text.replace(',', '.')
 		}
 		try {
 			BigDecimal amount = new BigDecimal(text)
-			return amount.signum() < 0 ? null : amount
+			// Checked by digit counts, never expanded; long, since precision - scale can overflow an int.
+			long integerDigits = (long) amount.precision() - amount.scale()
+			if (amount.signum() < 0 || integerDigits > MAX_INTEGER_DIGITS || amount.scale() > MAX_AMOUNT_LENGTH) {
+				return null
+			}
+			return amount
 		} catch (Exception ignored) {
 			return null
 		}
@@ -178,7 +194,10 @@ class CostApprovalLogic {
 				return amount
 			}
 			if (!blank(raw)) {
-				warn?.call("Cost threshold approval: ${level.key} threshold '${raw}' is not a non-negative amount, ignored".toString())
+				String shown = raw.toString().trim()
+				shown = shown.length() > 40 ? shown.take(40) + '...' : shown
+				warn?.call(("Cost threshold approval: ${level.key} threshold '${shown}' is not a non-negative amount " +
+					"of at most ${MAX_INTEGER_DIGITS} integer digits, ignored").toString())
 			}
 		}
 		return DEFAULT_THRESHOLD
