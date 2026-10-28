@@ -96,16 +96,30 @@ class ShowbackLocale {
 	 * missing in German stays English.
 	 */
 	static Map<String, String> messages(Locale locale) {
-		String lang = bundleLocale(locale).language
-		CACHE.computeIfAbsent(lang) { String l ->
-			Properties p = load("${BUNDLE}.properties")
-			if (l != 'en') p.putAll(load("${BUNDLE}_${l}.properties"))
-			Map<String, String> m = [:]
-			p.stringPropertyNames().each { String k ->
-				if (k.startsWith(KEY_PREFIX)) m[k.substring(KEY_PREFIX.length())] = p.getProperty(k)
-			}
-			m.asImmutable()
+		cached(CACHE, bundleLocale(locale).language, ShowbackLocale.classLoader)
+	}
+
+	/**
+	 * The messages of a bundle language from the cache, else read and cached. An empty read is
+	 * not cached, so the next render tries again.
+	 */
+	protected static Map<String, String> cached(Map<String, Map<String, String>> cache, String lang, ClassLoader loader) {
+		Map<String, String> m = cache[lang]
+		if (m != null) return m
+		m = read(loader, lang)
+		if (m) cache[lang] = m
+		m
+	}
+
+	/** The messages of a bundle language as read with the given class loader, German over English. */
+	protected static Map<String, String> read(ClassLoader loader, String lang) {
+		Properties p = bundle(loader, "${BUNDLE}.properties")
+		if (lang != 'en') p.putAll(bundle(loader, "${BUNDLE}_${lang}.properties"))
+		Map<String, String> m = [:]
+		p.stringPropertyNames().each { String k ->
+			if (k.startsWith(KEY_PREFIX)) m[k.substring(KEY_PREFIX.length())] = p.getProperty(k)
 		}
+		m.asImmutable()
 	}
 
 	/** One message in the bundle language of the locale, else the English default given. */
@@ -117,10 +131,16 @@ class ShowbackLocale {
 		}
 	}
 
-	private static Properties load(String path) {
-		Properties p = new Properties()
-		InputStream is = ShowbackLocale.classLoader.getResourceAsStream(path)
-		if (is != null) is.withCloseable { p.load(it) }
-		p
+	/**
+	 * A bundle of this plugin. Other jars on the class path can carry a file of the same name,
+	 * so the first one whose keys start with the provider code counts; without one, an empty bundle.
+	 */
+	protected static Properties bundle(ClassLoader loader, String path) {
+		for (URL url in loader.getResources(path)) {
+			Properties p = new Properties()
+			url.openStream().withCloseable { p.load(it) }
+			if (p.stringPropertyNames().any { it.startsWith(KEY_PREFIX) }) return p
+		}
+		new Properties()
 	}
 }

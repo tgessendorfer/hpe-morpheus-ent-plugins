@@ -70,24 +70,29 @@ class InstanceShowbackTabProvider extends AbstractInstanceTabProvider {
 	@Override String getName() { TAB_NAME }
 
 	/**
-	 * Id of the viewing user, handed from show() to renderTemplate(). renderTemplate() gets
-	 * no user, but Morpheus calls show() and then renderTemplate() for the same tab in the
-	 * same request (InstancesController.show, 9.0.2), so the id travels on the thread.
+	 * Instance id and viewing user id, handed from show() to renderTemplate(). renderTemplate()
+	 * gets no user, but Morpheus calls show() and then renderTemplate() for the same tab in the
+	 * same request (InstancesController.show, 9.0.2), so the ids travel on the thread. The
+	 * instance id keeps a value that a show() without a render left on a pooled thread away
+	 * from the render of another instance.
 	 */
-	private final ThreadLocal<Long> viewerId = new ThreadLocal<>()
+	private final ThreadLocal<List<Long>> viewer = new ThreadLocal<>()
 
 	@Override
 	Boolean show(Instance instance, User user, Account account) {
 		// Set on every call, so a value left over from an earlier request is replaced.
-		viewerId.set(user?.id)
+		viewer.set([instance?.id, user?.id])
 		true
 	}
 
-	/** The id stored by the last show() on this thread, once; null when there is none. */
-	protected Long takeViewerId() {
-		Long id = viewerId.get()
-		viewerId.remove()
-		id
+	/**
+	 * The user id stored by the last show() on this thread, once, if that show() was for the
+	 * given instance; null otherwise.
+	 */
+	protected Long takeViewerId(Instance instance) {
+		List<Long> v = viewer.get()
+		viewer.remove()
+		(v != null && v[0] != null && v[0] == instance?.id) ? v[1] : null
 	}
 
 	/** The browser's locale from the web request, or null outside a web request. */
@@ -106,7 +111,7 @@ class InstanceShowbackTabProvider extends AbstractInstanceTabProvider {
 
 	@Override
 	HTMLResponse renderTemplate(Instance instance) {
-		Long userId = takeViewerId()
+		Long userId = takeViewerId(instance)
 		Locale request = requestLocale()
 		// Until the user's own setting is read: browser language, else English.
 		Locale locale = ShowbackLocale.resolve(null, request)
@@ -141,7 +146,12 @@ class InstanceShowbackTabProvider extends AbstractInstanceTabProvider {
 			return HTMLResponse.error(ShowbackLocale.text('loadError',
 				'Cost data could not be loaded. The appliance log has the details.', locale))
 		} finally {
-			if (c) morpheus.report.releaseDatabaseConnection(c).blockingAwait()
+			// A failed release must not replace the tab content or its error message.
+			try {
+				if (c) morpheus.report.releaseDatabaseConnection(c).blockingAwait()
+			} catch (Exception e) {
+				log.warn("Instance showback tab: releasing the database connection failed: ${e.message}", e)
+			}
 		}
 		Map model = ShowbackCalculator.buildModel(rows, periods, masterCurrency, locale, now)
 		model.instanceName = instance.name

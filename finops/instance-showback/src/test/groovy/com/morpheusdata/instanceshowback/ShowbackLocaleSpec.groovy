@@ -11,6 +11,7 @@ import com.morpheusdata.views.ViewModel
 import groovy.sql.GroovyRowResult
 import groovy.sql.Sql
 import spock.lang.Specification
+import spock.lang.TempDir
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Single
 import spock.lang.Unroll
@@ -161,26 +162,96 @@ class ShowbackLocaleSpec extends Specification {
 		l == BROWSER_DE
 	}
 
-	def "show() hands the viewing user's id to the next render on the same thread, once"() {
+	def "show() hands the viewing user's id to the next render of the same instance on the same thread, once"() {
 		given:
 		InstanceShowbackTabProvider p = new InstanceShowbackTabProvider(null, null)
+		Instance i11 = instance(11L), i12 = instance(12L)
 		User u = new User()
 		u.id = 7L
 
 		when:
-		boolean visible = p.show(null, u, null)
+		boolean visible = p.show(i11, u, null)
 
 		then:
 		visible
-		p.takeViewerId() == 7L
-		p.takeViewerId() == null
+		p.takeViewerId(i11) == 7L
+		p.takeViewerId(i11) == null
 
 		when: 'a later show() without a user replaces the id'
-		p.show(null, u, null)
-		p.show(null, null, null)
+		p.show(i11, u, null)
+		p.show(i11, null, null)
 
 		then:
-		p.takeViewerId() == null
+		p.takeViewerId(i11) == null
+
+		when: 'a show() left over for another instance is not used, and is gone afterwards'
+		p.show(i12, u, null)
+
+		then:
+		p.takeViewerId(i11) == null
+		p.takeViewerId(i12) == null
+
+		when: 'a show() without an instance hands over nothing'
+		p.show(null, u, null)
+
+		then:
+		p.takeViewerId(i11) == null
+	}
+
+	static Instance instance(Long id) {
+		Instance i = new Instance()
+		i.id = id
+		i
+	}
+
+	def "messages come from the first bundle that carries the provider prefix"() {
+		given:
+		File foreign = bundleDir('foreign', 'i18n/messages.properties': 'default.title=Something else\n')
+		File own = bundleDir('own', 'i18n/messages.properties': 'instance-showback-tab.history=History\n',
+			'i18n/messages_de.properties': 'instance-showback-tab.history=Verlauf\n')
+		URLClassLoader both = new URLClassLoader([foreign.toURI().toURL(), own.toURI().toURL()] as URL[], (ClassLoader) null)
+		URLClassLoader none = new URLClassLoader([foreign.toURI().toURL()] as URL[], (ClassLoader) null)
+
+		expect:
+		ShowbackLocale.read(both, 'en') == [history: 'History']
+		ShowbackLocale.read(both, 'de') == [history: 'Verlauf']
+		ShowbackLocale.read(none, 'en').isEmpty()
+
+		cleanup:
+		both?.close()
+		none?.close()
+	}
+
+	def "an empty read is not cached, so the next render tries again"() {
+		given:
+		Map<String, Map<String, String>> cache = [:]
+		File own = bundleDir('own', 'i18n/messages.properties': 'instance-showback-tab.history=History\n')
+		URLClassLoader empty = new URLClassLoader([] as URL[], (ClassLoader) null)
+		URLClassLoader loaded = new URLClassLoader([own.toURI().toURL()] as URL[], (ClassLoader) null)
+
+		expect:
+		ShowbackLocale.cached(cache, 'en', empty).isEmpty()
+		cache.isEmpty()
+		ShowbackLocale.cached(cache, 'en', loaded) == [history: 'History']
+		ShowbackLocale.cached(cache, 'en', empty) == [history: 'History']
+
+		cleanup:
+		empty?.close()
+		loaded?.close()
+	}
+
+	@TempDir
+	File tmp
+
+	/** A class path folder with the given files (path: content). */
+	File bundleDir(Map<String, String> files, String name) {
+		File dir = new File(tmp, name)
+		files.each { String path, String content ->
+			File f = new File(dir, path)
+			f.parentFile.mkdirs()
+			f.setText(content, 'ISO-8859-1')
+		}
+		dir
 	}
 
 	@Unroll
@@ -282,5 +353,59 @@ class ShowbackLocaleSpec extends Specification {
 		1 * t.report.releaseDatabaseConnection(t.connection) >> Completable.complete()
 		html.contains('Bisher in diesem Monat')
 		html.contains('1.234,57')
+	}
+
+	def "renderTemplate() of another instance than the last show() makes no user query"() {
+		given:
+		Map t = providerWith('en-US', BROWSER_DE)
+		InstanceShowbackTabProvider p = t.provider
+		User u = new User()
+		u.id = 7L
+
+		when:
+		p.show(instance(12L), u, null)
+		String html = p.renderTemplate(instance(11L)).html
+
+		then:
+		1 * t.report.getReadOnlyDatabaseConnection() >> Single.just(t.connection)
+		0 * t.sql.firstRow(ShowbackLocale.USER_LOCALE_SQL, _)
+		1 * t.sql.rows(_ as String, { it[0] == 11L }) >> [new GroovyRowResult(t.row)]
+		1 * t.sql.firstRow({ it.contains('master_account') }) >> null
+		1 * t.report.releaseDatabaseConnection(t.connection) >> Completable.complete()
+		html.contains('Bisher in diesem Monat')
+	}
+
+	def "a failing connection release does not replace the tab content"() {
+		given:
+		Map t = providerWith('en-US', BROWSER_EN)
+		InstanceShowbackTabProvider p = t.provider
+
+		when:
+		def response = p.renderTemplate(instance(11L))
+
+		then:
+		1 * t.report.getReadOnlyDatabaseConnection() >> Single.just(t.connection)
+		1 * t.sql.rows(_ as String, _ as List) >> [new GroovyRowResult(t.row)]
+		1 * t.sql.firstRow({ it.contains('master_account') }) >> null
+		1 * t.report.releaseDatabaseConnection(t.connection) >> { throw new IllegalStateException('pool closed') }
+		noExceptionThrown()
+		response.html.contains('Month to date')
+		response.html.contains('1,234.57')
+	}
+
+	def "a failing connection release after a failed query keeps the load error message"() {
+		given:
+		Map t = providerWith('en-US', BROWSER_EN)
+		InstanceShowbackTabProvider p = t.provider
+
+		when:
+		def response = p.renderTemplate(instance(11L))
+
+		then:
+		1 * t.report.getReadOnlyDatabaseConnection() >> Single.just(t.connection)
+		1 * t.sql.rows(_ as String, _ as List) >> { throw new java.sql.SQLException('table gone') }
+		1 * t.report.releaseDatabaseConnection(t.connection) >> { throw new IllegalStateException('pool closed') }
+		noExceptionThrown()
+		response.html == 'Cost data could not be loaded. The appliance log has the details.'
 	}
 }

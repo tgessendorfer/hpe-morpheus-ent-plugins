@@ -6,6 +6,61 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 1.2.1
+
+**Fix release: a failed release of the database connection no longer breaks the Costs tab, the
+texts come only from the plugin's own bundles, and the viewer's language is handed over only to
+the render of the same instance.** Patch release; plugin code, provider code, plugin API 1.4.2,
+minimum appliance 9.0.2, the query and the figures are unchanged.
+
+### What changed
+
+- **A failed connection release no longer replaces the tab.** Handing the read-only report
+  connection back ran unguarded after the query, so an error there replaced the rendered tab, or
+  its own *Cost data could not be loaded* message, with an exception on the instance page. It is
+  now logged as a warning and the tab shows its content as before. Budget Burn has had the same
+  guard since 1.1.1.
+- **Texts from the plugin's own bundle.** The messages were read from the first
+  `i18n/messages.properties` on the class path, which can belong to another jar, and whatever came
+  back was cached for the life of the plugin, an empty result included. Now the first bundle whose
+  keys start with the provider code counts, and an empty read is not cached, so the next render
+  tries again. Budget Burn and Tenant Chargeback already read their bundles this way.
+- **The viewer's language is handed over only for the same instance.** `show()` keeps the
+  instance id together with the viewing user's id, and `renderTemplate()` uses that user only
+  when it renders the same instance. A value that a `show()` without a render left on a pooled
+  request thread can no longer give another instance's tab the language of another user. Without
+  a matching `show()` the tab uses the browser language, as before.
+
+### Behaviour changes from 1.2.0
+
+- None in the normal flow (`show()` and then `renderTemplate()` of the same instance in one
+  request). A render without a matching `show()` falls back to the browser language, where 1.2.0
+  could take the user of an earlier `show()` on the same thread.
+- The *Costs* tab no longer turns into an error page when the connection release fails; that
+  failure is logged at warning level.
+
+### Verified
+
+- Unit tests only (Spock): 84 tests, 0 failures (79 in 1.2.0). New: a failing connection release
+  after a successful query (the tab renders) and after a failed query (the load error message
+  stays); bundle selection with two class path entries of which only the second carries the
+  provider prefix, and no bundle at all; an empty read that is not cached and a later read that
+  is; the user hand-over only for the same instance, with no user query for the render of another
+  instance. Each of these tests fails against the 1.2.0 code paths.
+- Local build with JDK 17 and Gradle 9.8.0, one jar
+  `morpheus-instance-showback-plugin-1.2.1-all.jar`.
+
+### Not yet verified
+
+- On an appliance: the release jar loads in place of 1.2.0, and the *Costs* tab shows the same
+  figures as 1.2.0.
+- On Morpheus 9.1.0: that `show()` and `renderTemplate()` still run on one thread for the same
+  instance, so a user whose Morpheus setting is `en-US` sees the tab in English with a German
+  browser. The call order was read from the 9.0.2 bytecode only; if it differs, the tab falls back
+  to the browser language.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/instance-showback-v1.2.0...instance-showback-v1.2.1
+
 ## 1.2.0
 
 **The Costs tab now speaks the language set in the viewer's Morpheus user settings,** the same
