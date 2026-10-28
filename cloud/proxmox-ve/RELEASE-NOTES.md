@@ -13,6 +13,121 @@ new number, and why the digests are recorded.
 
 ---
 
+## 0.1.33
+
+The medium findings of the code review that 0.1.31 started from, plus a few small ones. They
+concern provisioning with more than one NIC, the template an image is cloned from, what the VM,
+network and image syncs write, and the commands run as root on the node.
+
+**Every NIC of a new VM gets its own interface.** Provisioning numbered every interface `net0`,
+so a VM with two networks came up with one NIC, on the last network, and that network's
+`ipconfig0` replaced the primary's. Interfaces now get `net0`, `net1`, ... with the primary
+interface first (then by display order), and cloud-init gets one `ipconfigN` each. A NIC added
+on reconfigure takes the index above the highest the VM has, not the number of NICs, so a VM
+with `net0` and `net2` gets `net3` instead of overwriting `net2`.
+
+**An image is cloned only from a template of this cloud.** The provision looked the image's
+template up by the image's global `externalId`, which is a VMID of whichever cluster the image
+came from, and cloned whatever VM had that id in this cluster, a running guest included. It now
+takes the template ids from the image's locations in this cloud (the global id only when the
+image has no location here), and uses an id only when Proxmox lists it as a template. When the
+cluster's resources cannot be listed, the provision fails instead of building a second template.
+
+**The VM sync keeps addresses and follows migrations.** The listing leaves a VM's address
+empty when the guest agent is not asked (stopped VM, no agent), and the sync wrote that empty
+value over the address the agent or Morpheus had reported; an empty address now changes
+nothing. After a migration or HA failover a VM kept its old node, and start, stop, resize and
+delete went to a node where its config no longer exists; the sync now moves the record to the
+node Proxmox lists. A VM that still carries the `clone` or `create` lock is not added as a
+discovered server: during Morpheus's own clone the server record does not know the VMID yet,
+and a refresh in that window created a second, discovered record for the same VM. This narrows
+the window rather than closing it: the few seconds between the end of the clone and the moment
+the VMID is saved on the server (the disk resize runs in between) remain.
+
+**Parallel provisions no longer fail on the same VMID.** `cluster/nextid` reserves nothing, so
+two provisions could ask for the same id; the second failed with *VM N already exists*. A clone,
+or the blank template created for the first use of an uploaded or system image on a node,
+refused that way asks for a fresh id and tries again, up to three times. A collision that only
+shows up inside the clone task is not retried.
+
+**A failed SDN listing no longer deletes the SDN networks.** The vnet listing swallowed its
+failure and the network listing reported the bridges alone, so the network sync deleted every
+vnet network. A failed vnet listing now fails the listing (the sync skips that run); a cluster
+without the SDN API (HTTP 404 or 501) still counts as having no vnets.
+
+**The image sync rewrites only its own records.** For every image with a location in this
+cloud it wrote the template's name (spaces stripped), size, `remotePath`, region and bucket onto
+the image, system and uploaded images included: a system image lost its `remotePath` after its
+first provision and was no longer offered for download in other clouds. Those fields are now
+written only to the sync's own template records (category `proxmox.image`, neither a system
+image nor uploaded); the location itself is still updated for every image.
+
+**Image paths are quoted in commands run on the node.** `qm disk import`, the download and the
+file check put the image path, which comes from an uploaded file name or a URL, into a root
+shell command unquoted: a space broke the import, and `;` or `$(...)` would have run. Every such
+value is now a single-quoted shell word. The file check also reads its answer line by line: it
+looked for `EXISTS` anywhere in the answer, which `NOT_EXISTS` contains, so it always reported the
+image as present on the node.
+
+**Smaller fixes:**
+
+- The Proxmox network types are no longer offered for *Add Network*. `createNetwork` creates
+  nothing on Proxmox, and the next network sync deleted the record again.
+- Query strings reach Proxmox: they were passed where `callJsonApi` expects a user name and
+  dropped, so `?type=vm` and `?content=images&vmid=N` listed everything. They now go in
+  `RequestOptions.queryParams`; the plugin filters the results itself, so no listing changes.
+- The client of each API login, and the clients of the clone's task wait and resize, are shut
+  down after use instead of keeping their connection pools until garbage collection.
+- The node lookup of a provision waits for its answer and matches nodes only.
+- Debug logs no longer print a node's SSH password (host sync) or the session ticket and CSRF
+  token (volume delete).
+- Tests and these notes use documentation addresses (192.0.2.0/24) instead of lab addresses.
+
+**Behaviour changes from 0.1.32:**
+
+- A provision with several networks creates one NIC per network instead of one NIC.
+- The Proxmox network types disappear from the *Add Network* dialog.
+- A VMID that is not a template is never cloned; an image that has a location in this cloud is
+  looked up only through that location. A provision fails when the cluster's resources cannot
+  be listed.
+- A refresh during a failing SDN vnet listing skips the network sync (WARN in the log) instead
+  of deleting the vnet networks.
+- A VM's address stays at the last reported value while the listing has none.
+- System and uploaded images keep their name, `remotePath`, region, bucket and minimum disk
+  when their template is synced.
+- The first provision of an uploaded or system image on a node now copies the image to the node
+  (an upload, or a download on the node, up to the image's size). The old file check always
+  reported it as present, so `qm disk import` ran on a file that was not there.
+
+Still open from the review, not changed here: TLS certificate and SSH host key verification
+(an option for the cloud form), stop and restart as hard power-off instead of a guest shutdown,
+a fresh API login for every call (ticket cache or API token auth), and the image sync matching
+images across clusters by VMID. An image with no location in this cloud still falls back to its
+global id, which in another cluster can be an unrelated template with the same VMID; and the few
+seconds after a clone in which a refresh can still add a discovered server (above).
+
+### Verified
+
+- Local build with JDK 17 and Gradle 9.8.0: 125 test cases (48 new: NIC order and the next NIC
+  index, the template check and the template ids per cloud, the clone lock, the address and
+  node tracking of the VM sync, the image rewrite rule, shell quoting, the node's file check
+  answer, query parameters, the SDN error codes, the taken-VMID check), 0 failures. The retry
+  loops around a taken VMID are not unit-tested: they need a live API.
+
+### Not yet verified
+
+- On the lab appliance: a provision with two networks (`net0`/`net1`, `ipconfig1`) and a NIC
+  added on reconfigure; provisions from a synced template, an uploaded image and a system image
+  through this cloud's locations; that a refresh during a clone adds no discovered server (the
+  `clone` lock in the VM config); a VM migrated between nodes and then stopped from Morpheus;
+  two provisions started at the same time; a cluster with and without SDN vnets; the system
+  image keeping its `remotePath` after a template sync; an uploaded image whose file name has a
+  space; the *Add Network* dialog.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.32-lab...proxmox-ve-v0.1.33-lab
+
+---
+
 ## 0.1.32
 
 **Deleting a Proxmox cloud no longer deletes the images of every other Proxmox cloud.** The
@@ -390,8 +505,8 @@ open items of the upstream TODO list that a single-node lab can verify.
 
 Verified on HPE Morpheus Enterprise 9.0.2 with Proxmox VE 9.2.20, on top of
 0.1.22's checks: a **static address** given per interface (`ipMode: static`,
-`192.168.0.240`) reached the guest as `ipconfig0: ip=192.168.0.240/24,
-gw=192.168.0.1`, the guest agent and Morpheus both report it; a **resize**
+`192.0.2.240`) reached the guest as `ipconfig0: ip=192.0.2.240/24,
+gw=192.0.2.1`, the guest agent and Morpheus both report it; a **resize**
 from 1 vCPU / 1 GB / 5 GB to 2 vCPU / 2 GB / 6 GB changed `cores`, `memory`
 and the disk on the running VM and kept the NIC's MAC address; provisioning
 **into a resource pool** places the VM in it; **`noAgentInstall`** reaches

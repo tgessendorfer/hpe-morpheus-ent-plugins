@@ -570,9 +570,10 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 			}
 			server = saveAndGet(server)
 
-			def ifCounter = 0
-			server.interfaces.each { ComputeServerInterface iface ->
-				iface.externalId = "net$ifCounter"
+			// One netN per interface. Every interface used to get net0, so only the last network
+			// was attached and its ipconfig0 overwrote the primary's.
+			ProxmoxApiComputeUtil.orderInterfaces(server.interfaces).eachWithIndex { ComputeServerInterface iface, int idx ->
+				iface.externalId = "net$idx"
 				context.services.computeServer.computeServerInterface.save(iface)
 			}
 			server = saveAndGet(server)
@@ -881,13 +882,12 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 		log.debug("Fetch Hypervisor Host by Cloud/External Id: $cloudId/$externalId")
 
 		ComputeServer hvNode
-		def hostIdentityProjection = context.async.computeServer.listIdentityProjections(cloudId, null).filter {
+		// Nodes only, and wait for the answer: a VM's externalId is its VMID, and a non-blocking
+		// subscribe could return before the lookup had run.
+		context.async.computeServer.listIdentityProjections(cloudId, null).filter {
 			ComputeServerIdentityProjection projection ->
-				if (projection.externalId == externalId) {
-					return true
-				}
-				false
-		}.subscribe {
+				projection.computeServerTypeCode == 'proxmox-ve-node' && projection.externalId == externalId
+		}.blockingSubscribe {
 			log.debug("Found Host IdentityProjection: $it.id")
 			List<Long> idList = [it.id]
 			hvNode = context.async.computeServer.listById(idList).blockingFirst()
@@ -897,6 +897,33 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 		return hvNode
 	}
 
+
+
+	/**
+	 * The template ids to try for an image in this cloud: the external ids of the image's
+	 * locations in this cloud; the image's global externalId only when it has none here (an
+	 * image from before locations were kept). VMIDs repeat across clusters, so another cloud's
+	 * id is no evidence for this one once this cloud has its own location.
+	 */
+	static List<String> templateCandidates(Collection<String> locationIds, String globalId) {
+		List<String> ids = (locationIds ?: []).findAll { it }.collect { it.toString() }.unique()
+		return ids ?: (globalId ? [globalId] : [])
+	}
+
+	private List<String> templateIdsInCloud(Cloud cloud, VirtualImage virtualImage) {
+		List<String> locationIds = []
+		if (virtualImage?.id) {
+			context.async.virtualImage.location.listIdentityProjections(new DataQuery().withFilters([
+					new DataFilter("refType", "ComputeZone"),
+					new DataFilter("refId", cloud.id)
+			])).blockingSubscribe { location ->
+				if (location.virtualImage?.id == virtualImage.id) {
+					locationIds << location.externalId
+				}
+			}
+		}
+		return templateCandidates(locationIds, virtualImage?.externalId)
+	}
 
 
 	/**
@@ -914,20 +941,26 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 		try {
 			lock = context.acquireLock(lockKey, [timeout: 60l * 60l * 1000l, ttl: 60l * 60l * 1000l]).blockingGet()
 			
-			VirtualImageLocation existingLocation = null
-			if (virtualImage?.externalId) {
-				log.debug("Checking for existing template: $virtualImage.externalId on node: $hvNode.externalId")
-				
-				String templateNodeName = ProxmoxApiComputeUtil.findNodeForVM(client, authConfig, virtualImage.externalId)
+			// The image's own externalId is global, but VMIDs are per cluster: the templates of
+			// this cloud are its image locations. The global id is only the last resort, and
+			// whatever id is used must be a template, never a guest that happens to have it.
+			List<String> candidateIds = templateIdsInCloud(cloud, virtualImage)
+			String crossNodeTemplateId = null
+			for (String candidateId : candidateIds) {
+				log.debug("Checking for existing template: $candidateId on node: $hvNode.externalId")
+				String templateNodeName = ProxmoxApiComputeUtil.findNodeForTemplate(client, authConfig, candidateId)
 				if (templateNodeName == hvNode.externalId) {
 					// Scenario 3: Template already exists on target node
-					log.debug("Template ${virtualImage.externalId} already exists on target node ${hvNode.externalId} - using existing template")
-					return virtualImage.externalId
-				} else if (templateNodeName) {
-					log.debug("Template ${virtualImage.externalId} exists on node ${templateNodeName}, but not on target node ${hvNode.externalId}")
-					log.debug("Will use cross-node cloning from ${templateNodeName} to ${hvNode.externalId}")
-					return virtualImage.externalId
+					log.debug("Template ${candidateId} already exists on target node ${hvNode.externalId} - using existing template")
+					return candidateId
+				} else if (templateNodeName && !crossNodeTemplateId) {
+					log.debug("Template ${candidateId} exists on node ${templateNodeName}, but not on target node ${hvNode.externalId}")
+					crossNodeTemplateId = candidateId
 				}
+			}
+			if (crossNodeTemplateId) {
+				log.debug("Will use cross-node cloning of template ${crossNodeTemplateId} to ${hvNode.externalId}")
+				return crossNodeTemplateId
 			}
 			
 			def cloudFiles = context.async.virtualImage.getVirtualImageFiles(virtualImage).blockingGet()
@@ -954,13 +987,13 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 			String fileName = imageFile ? new File(imageFile).getName() : remoteUrl.substring(remoteUrl.lastIndexOf('/') + 1).replaceAll(/[?#].*$/, '')
 			String remoteImagePath = "${ProxmoxSshUtil.REMOTE_IMAGE_DIR}/$fileName"
 			
-			def checkFileCmd = "test -f $remoteImagePath && echo 'EXISTS' || echo 'NOT_EXISTS'"
+			def checkFileCmd = "test -f ${ProxmoxSshUtil.shellQuote(remoteImagePath)} && echo 'EXISTS' || echo 'NOT_EXISTS'"
 			def fileCheckResult = context.executeSshCommand(hvNode.sshHost, 22, hvNode.sshUsername, hvNode.sshPassword, checkFileCmd, "", "", "", false, LogLevel.info, true, null, false).blockingGet()
 			if (!fileCheckResult.success) {
 				log.error("SSH FAILED on ${hvNode.sshHost}: file check | Exit Code: ${fileCheckResult.exitCode} | Output: ${fileCheckResult.output} | Error: ${fileCheckResult.error}")
 				throw new Exception("Failed to check if image exists on ${hvNode.sshHost}: ${fileCheckResult.error}")
 			}
-			boolean imageExistsOnNode = fileCheckResult.output?.contains('EXISTS')
+			boolean imageExistsOnNode = ProxmoxSshUtil.saysExists(fileCheckResult.output)
 			
 			if (!imageExistsOnNode) {
 				// Scenario 1: New image on new host - upload (or download) the image and create the template
@@ -1476,7 +1509,7 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 		List<Map> proxVMInterfaces = ProxmoxApiComputeUtil.getExistingVMInterfaces(resizeClient, authConfigMap, extNodeId, extServerId)
 		List<ComputeServerInterface> newInterfaces = []
 		if (resizeRequest.interfacesAdd.each) {
-			int nicCounter = proxVMInterfaces.size()
+			int nicCounter = ProxmoxApiComputeUtil.nextNicIndex(proxVMInterfaces)
 			resizeRequest.interfacesAdd.each { Map nic ->
 				log.debug("NIC map: $nic")
 				def networkObj = context.services.network.get(nic.network.id)

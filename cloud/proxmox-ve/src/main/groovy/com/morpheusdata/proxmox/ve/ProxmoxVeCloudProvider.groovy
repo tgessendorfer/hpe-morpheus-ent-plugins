@@ -253,7 +253,9 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 				canAssignPool     : true,
 				name              : 'Proxmox VE Bridge Network',
 				hasNetworkServer  : true,
-				creatable: true
+				// Nothing creates a network on Proxmox (createNetwork is a no-op), and the next
+				// network sync deleted the record again: networks come from the cluster only.
+				creatable: false
 		])
 
 		NetworkType vlanNetwork = new NetworkType([
@@ -267,7 +269,9 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 				canAssignPool     : true,
 				name              : 'Proxmox VE VLAN Network',
 				hasNetworkServer  : true,
-				creatable: true
+				// Nothing creates a network on Proxmox (createNetwork is a no-op), and the next
+				// network sync deleted the record again: networks come from the cluster only.
+				creatable: false
 		])
 
 		NetworkType vNetNetwork = new NetworkType([
@@ -281,7 +285,9 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 				canAssignPool     : true,
 				name              : 'Proxmox VE vNet Network',
 				hasNetworkServer  : true,
-				creatable: true
+				// Nothing creates a network on Proxmox (createNetwork is a no-op), and the next
+				// network sync deleted the record again: networks come from the cluster only.
+				creatable: false
 		])
 
 		NetworkType unknownNetwork = new NetworkType([

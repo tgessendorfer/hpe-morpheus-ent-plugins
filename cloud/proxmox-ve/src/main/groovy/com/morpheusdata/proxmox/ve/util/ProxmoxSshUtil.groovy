@@ -28,6 +28,26 @@ class ProxmoxSshUtil {
     static String SSH_HINT = "Check the SSH credentials of the host under the cloud's Hosts tab; the user must be root."
 
     /**
+     * One shell word for a value that ends up in a command run as root on the node: wrapped in
+     * single quotes, each single quote inside closed, escaped and reopened. Image file names come
+     * from uploads and URLs, so a space, `;` or `$(...)` in them must stay part of the name.
+     */
+    static String shellQuote(String value) {
+        return "'" + (value ?: '').replace("'", "'\\''") + "'"
+    }
+
+    /**
+     * Whether the node's answer to `test -f ... && echo 'EXISTS' || echo 'NOT_EXISTS'` says the
+     * file is there. A whole line, not contains(): 'NOT_EXISTS' contains 'EXISTS', and that check
+     * always said yes. Not the whole answer either: a login banner or profile output on the node
+     * would then turn every provision into a fresh upload.
+     */
+    static boolean saysExists(String output) {
+        List<String> lines = (output ?: '').readLines()*.trim()
+        return lines.contains('EXISTS') && !lines.contains('NOT_EXISTS')
+    }
+
+    /**
      * Proves that Morpheus can run qm on the node over SSH before anything is created there.
      * A failed login otherwise surfaces after the clone as an opaque "session is down", and
      * leaves a stopped VM behind.
@@ -128,7 +148,7 @@ class ProxmoxSshUtil {
         String target = "$REMOTE_IMAGE_DIR/$fileName"
         log.info("Downloading image $remoteUrl to $target on node ${hvNode.externalId}")
         String partial = "${target}.part"
-        String cmd = "mkdir -p $REMOTE_IMAGE_DIR && (wget -q -O '$partial' '$remoteUrl' || (rm -f '$partial'; exit 1)) && mv -f '$partial' '$target'"
+        String cmd = "mkdir -p $REMOTE_IMAGE_DIR && (wget -q -O ${shellQuote(partial)} ${shellQuote(remoteUrl)} || (rm -f ${shellQuote(partial)}; exit 1)) && mv -f ${shellQuote(partial)} ${shellQuote(target)}"
         TaskResult result = context.executeSshCommand(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, cmd, "", "", "", false, LogLevel.info, true, null, false).blockingGet()
         if (!result.success) {
             log.error("SSH FAILED on ${hvNode.sshHost}: image download | Exit Code: ${result.exitCode} | Output: ${result.output} | Error: ${result.error}")
@@ -168,7 +188,7 @@ class ProxmoxSshUtil {
         def imageExternalId = templateResp.data.templateId
 
         // Canonical syntax in current Proxmox VE, including PVE 9.
-        TaskResult importResult = context.executeSshCommand(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "qm disk import $imageExternalId $remoteImagePath $targetDS", "", "", "", false, LogLevel.info, true, null, false).blockingGet()
+        TaskResult importResult = context.executeSshCommand(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "qm disk import $imageExternalId ${shellQuote(remoteImagePath)} ${shellQuote(targetDS)}","", "", "", false, LogLevel.info, true, null, false).blockingGet()
         
         if (!importResult.success) {
             log.error("SSH FAILED on ${hvNode.sshHost}: qm disk import | Exit Code: ${importResult.exitCode} | Output: ${importResult.output} | Error: ${importResult.error}")
@@ -206,7 +226,7 @@ class ProxmoxSshUtil {
             }
         }
         
-        TaskResult attachResult = context.executeSshCommand(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "qm set $imageExternalId --scsi0 ${diskId} --boot order=scsi0", "", "", "", false, LogLevel.info, true, null, false).blockingGet()
+        TaskResult attachResult = context.executeSshCommand(hvNode.sshHost, SSH_PORT, hvNode.sshUsername, hvNode.sshPassword, "qm set $imageExternalId --scsi0 ${shellQuote(diskId)} --boot order=scsi0","", "", "", false, LogLevel.info, true, null, false).blockingGet()
         if (!attachResult.success) {
             log.error("SSH FAILED on ${hvNode.sshHost}: qm set --scsi0 | Exit Code: ${attachResult.exitCode} | Output: ${attachResult.output} | Error: ${attachResult.error}")
             throw new Exception("Failed to attach disk to template $imageExternalId: ${attachResult.error}")

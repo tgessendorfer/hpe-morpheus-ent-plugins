@@ -189,16 +189,18 @@ class VirtualImageLocationSync {
             def saveImage = false
             def state = 'Active'
 
+            // The template's name, size and storage describe the image only when the image is
+            // the sync's own record of that template. A system or uploaded image whose template
+            // the plugin created keeps its own name, remotePath, region and bucket.
+            boolean ownImage = syncMayRewriteImage(virtualImage)
             def imageName = virtualImageConfig.name
             log.debug("Existing Name: $existingItem.imageName, New Name: $imageName")
             if(existingItem.imageName != imageName) {
                 existingItem.imageName = imageName
-
-                //?? What is this for?
-                //if(virtualImage.imageLocations?.size() < 2) {
+                if (ownImage && virtualImage.name != imageName) {
                     virtualImage.name = imageName
                     saveImage = true
-                //}
+                }
                 save = true
             }
             if(existingItem.externalId != virtualImageConfig.externalId) {
@@ -213,19 +215,19 @@ class VirtualImageLocationSync {
                 existingItem.imageRegion = cloud.regionCode
                 save = true
             }
-            if (virtualImage.remotePath != virtualImageConfig.remotePath) {
+            if (ownImage && virtualImage.remotePath != virtualImageConfig.remotePath) {
                 virtualImage.remotePath = virtualImageConfig.remotePath
                 saveImage = true
             }
-            if (virtualImage.imageRegion != virtualImageConfig.imageRegion) {
+            if (ownImage && virtualImage.imageRegion != virtualImageConfig.imageRegion) {
                 virtualImage.imageRegion = virtualImageConfig.imageRegion
                 saveImage = true
             }
-            if (virtualImage.minDisk != virtualImageConfig.minDisk) {
+            if (ownImage && virtualImage.minDisk != virtualImageConfig.minDisk) {
                 virtualImage.minDisk = virtualImageConfig.minDisk as Long
                 saveImage = true
             }
-            if (virtualImage.bucketId != virtualImageConfig.bucketId) {
+            if (ownImage && virtualImage.bucketId != virtualImageConfig.bucketId) {
                 virtualImage.bucketId = virtualImageConfig.bucketId
                 saveImage = true
             }
@@ -334,6 +336,16 @@ class VirtualImageLocationSync {
         return (virtualImage.imageLocations?.size() ?: 0) <= 1
     }
 
+
+    /**
+     * Whether the sync may write a template's name, size and storage fields onto the image:
+     * only for its own records (category `proxmox.image`, neither a system image nor uploaded
+     * by a user). Unlike syncOwnsImage the number of locations does not matter: the image is
+     * still the template's record, it is only not deleted with one of them.
+     */
+    static boolean syncMayRewriteImage(VirtualImage virtualImage) {
+        return virtualImage?.category == 'proxmox.image' && !virtualImage.systemImage && !virtualImage.userUploaded
+    }
 
     /**
      * Cloud delete: drops this cloud's image locations and the images the sync created for

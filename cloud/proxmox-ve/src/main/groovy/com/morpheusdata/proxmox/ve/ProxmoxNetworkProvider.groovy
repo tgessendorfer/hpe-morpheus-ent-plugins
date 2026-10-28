@@ -68,7 +68,9 @@ class ProxmoxNetworkProvider implements NetworkProvider, CloudInitializationProv
 				canAssignPool     : true,
 				name              : 'Proxmox VE Bridge Network',
 				hasNetworkServer  : true,
-				creatable: true
+				// Nothing creates a network on Proxmox (createNetwork is a no-op), and the next
+				// network sync deleted the record again: networks come from the cluster only.
+				creatable: false
 		])
 
 		return [bridgeNetwork]

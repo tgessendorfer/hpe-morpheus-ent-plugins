@@ -195,7 +195,8 @@ class HostSync {
                 ComputeServer newServer = new ComputeServer(serverConfig)
                 ProxmoxMiscUtil.doUpdateDomainEntity(capacityInfo, capacityFieldValueMap)
                 newServer.capacityInfo = capacityInfo
-                log.debug("Adding Compute Server: $serverConfig")
+                // Without the node's SSH password, which the config carries in plain text.
+                log.debug("Adding Compute Server: ${serverConfig.findAll { k, v -> k != 'sshPassword' }}")
                 if (!morpheusContext.async.computeServer.bulkCreate([newServer]).blockingGet()){
                     log.error "Error in creating host server ${newServer}"
                 }

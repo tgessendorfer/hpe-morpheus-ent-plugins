@@ -221,6 +221,37 @@ class ProxmoxApiComputeUtil {
     }
 
     /**
+     * The server's interfaces in the order they get net0, net1, ...: the primary interface
+     * first, then by display order, otherwise as listed. net0 is the template's own NIC, which
+     * keeps its model and MAC address, and ipconfig0 follows it.
+     */
+    static List<ComputeServerInterface> orderInterfaces(Collection<ComputeServerInterface> interfaces) {
+        List<ComputeServerInterface> list = (interfaces ?: []) as List<ComputeServerInterface>
+        List<Integer> listed = (0..<list.size()).toList()
+        return listed.sort(false) { int a, int b ->
+            ComputeServerInterface left = list[a]
+            ComputeServerInterface right = list[b]
+            // 0 counts as unset on purpose: ComputeServerInterface starts displayOrder at 0, not
+            // null (plugin API 1.4.2), so an interface nobody numbered must not sort first.
+            (right.primaryInterface == true ? 1 : 0) <=> (left.primaryInterface == true ? 1 : 0) ?:
+                    (left.displayOrder ?: Integer.MAX_VALUE) <=> (right.displayOrder ?: Integer.MAX_VALUE) ?:
+                    a <=> b
+        }.collect { list[it] }
+    }
+
+    /**
+     * The index of the next free netN key: one above the highest the VM has, not the number of
+     * NICs, so a VM with net0 and net2 gets net3 instead of overwriting net2.
+     */
+    static int nextNicIndex(Collection<Map> existingNics) {
+        List<Integer> used = (existingNics ?: []).collect { Map nic ->
+            def m = (nic?.label?.toString() =~ /^net(\d+)$/)
+            m.find() ? (m.group(1) as Integer) : null
+        }.findAll { it != null }
+        return used ? used.max() + 1 : 0
+    }
+
+    /**
      * The netN value for a NIC on a bridge. An existing value keeps its model, MAC address and
      * other options, so a resize neither swaps the device nor hands the guest a new address; a
      * new NIC gets the given model and a MAC address from Proxmox.
@@ -452,7 +483,8 @@ class ProxmoxApiComputeUtil {
             ids.each { String diskId ->
                 diskRemoveOpts.body.delete = diskId
                 log.debug("Delete request path: \n${authConfig.v2basePath}/nodes/$node/qemu/$vmId/config")
-                log.debug("Delete request body: \n$diskRemoveOpts")
+                // The body only: the headers carry the session ticket and CSRF token.
+                log.debug("Delete request body: \n${diskRemoveOpts.body}")
                 def diskRemoveResults = withProxy(client, authConfig).callJsonApi(
                         (String) authConfig.apiUrl,
                         "${authConfig.v2basePath}/nodes/$node/qemu/$vmId/config",
@@ -589,6 +621,31 @@ class ProxmoxApiComputeUtil {
 
 
 
+    /**
+     * Runs a call on a new client and shuts the client down afterwards. Each step of a clone
+     * (task wait of up to an hour, resize) gets its own client, as before; they were never shut
+     * down, so each clone left their connection pools open.
+     */
+    static <T> T withFreshClient(Closure<T> call) {
+        HttpApiClient client = new HttpApiClient()
+        try {
+            return call(client)
+        } finally {
+            client.shutdownClient()
+        }
+    }
+
+    /** How often a clone or a template create asks cluster/nextid for a fresh id after the id it had was taken. */
+    static final int CLONE_ID_ATTEMPTS = 3
+
+    /**
+     * Whether a refused clone or create says the new VMID is in use ("VM 105 already exists on
+     * node 'pve1'", "unable to create VM 105: config file already exists").
+     */
+    static boolean vmIdTaken(def responseContent) {
+        return responseContent?.toString()?.contains('already exists') ?: false
+    }
+
     static cloneTemplate(HttpApiClient client, Map authConfig, String templateId, String name, String nodeId, ComputeServer server) {
         log.debug("cloneTemplate: $templateId")
         Long vcpus = server.maxCores
@@ -667,14 +724,26 @@ class ProxmoxApiComputeUtil {
 
             log.debug("Cloning template $templateId from node $templateNode to VM $name($nextId) on node $nodeId")
             
-            // Clone from the node where template actually resides
-            def results = withProxy(client, authConfig).callJsonApi(
-                    (String) authConfig.apiUrl,
-                    "${authConfig.v2basePath}/nodes/$templateNode/qemu/$templateId/clone",
-                    null, null,
-                    new HttpApiClient.RequestOptions(opts),
-                    'POST'
-            )
+            // Clone from the node where template actually resides. cluster/nextid reserves
+            // nothing: a parallel provision can take the same id first, and Proxmox then refuses
+            // the clone with "VM N already exists". Ask for a fresh id and try again.
+            def results = null
+            for (int attempt = 1; attempt <= CLONE_ID_ATTEMPTS; attempt++) {
+                results = withProxy(client, authConfig).callJsonApi(
+                        (String) authConfig.apiUrl,
+                        "${authConfig.v2basePath}/nodes/$templateNode/qemu/$templateId/clone",
+                        null, null,
+                        new HttpApiClient.RequestOptions(opts),
+                        'POST'
+                )
+                if ((results?.success && !results?.hasErrors()) || attempt == CLONE_ID_ATTEMPTS || !vmIdTaken(results?.content)) {
+                    break
+                }
+                def freshId = callListApiV2(client, "cluster/nextid", authConfig).data
+                log.warn("VM id $nextId was taken before the clone of template $templateId started; retrying with $freshId")
+                nextId = freshId
+                requestBody.newid = nextId
+            }
 
             if(!results?.success || results?.hasErrors()) {
                 def errorMsg = "Clone operation failed"
@@ -717,7 +786,7 @@ class ProxmoxApiComputeUtil {
             if (taskUPID) {
                 log.debug("Clone task started with UPID: $taskUPID on node $templateNode")
                 // Wait for the Proxmox task to complete on the source node
-                ServiceResponse taskWaitResult = waitForTaskComplete(new HttpApiClient(), authConfig, templateNode, taskUPID, 3600L)
+                ServiceResponse taskWaitResult = withFreshClient { HttpApiClient c -> waitForTaskComplete(c, authConfig, templateNode, taskUPID, 3600L) }
                 
                 if (!taskWaitResult?.success) {
                     log.error("Clone task failed for VM $nextId: ${taskWaitResult.msg}")
@@ -727,7 +796,7 @@ class ProxmoxApiComputeUtil {
             } else {
                 log.warn("No task UPID returned from clone API, falling back to VM config check")
                 // Fallback to old method
-                ServiceResponse cloneWaitResult = waitForCloneToComplete(new HttpApiClient(), authConfig, templateId, nextId, nodeId, 3600L)
+                ServiceResponse cloneWaitResult = withFreshClient { HttpApiClient c -> waitForCloneToComplete(c, authConfig, templateId, nextId, nodeId, 3600L) }
                 
                 if (!cloneWaitResult?.success) {
                     log.error("Clone wait failed for VM $nextId: ${cloneWaitResult.msg}")
@@ -736,7 +805,7 @@ class ProxmoxApiComputeUtil {
             }
 
             log.debug("Resizing newly cloned VM. Spec: CPU: $vcpus,\n RAM: $ram,\n Volumes: $volumes,\n NICs: $nics")
-            ServiceResponse rtnResize = resizeVM(new HttpApiClient(), authConfig, nodeId, nextId, vcpus, ram, volumes, nics, nicModelFor(server))
+            ServiceResponse rtnResize = withFreshClient { HttpApiClient c -> resizeVM(c, authConfig, nodeId, nextId, vcpus, ram, volumes, nics, nicModelFor(server)) }
 
             if (!rtnResize?.success) {
                 log.error("Resize failed for VM $nextId: ${rtnResize.msg}")
@@ -833,6 +902,33 @@ class ProxmoxApiComputeUtil {
      * @param vmId The VM or template ID to locate
      * @return The node name where the VM/template resides, or null if not found
      */
+    /**
+     * The node of the template with this id in a cluster/resources listing, or null when the id
+     * is not listed or belongs to a guest that is not a template: a full clone of a running VM
+     * must never stand in for a missing template.
+     */
+    static String templateNodeIn(Collection resources, String templateId) {
+        def resource = resources?.find { it?.type == 'qemu' && it?.vmid?.toString() == templateId }
+        return resource?.template?.toString() in ['1', 'true'] ? resource.node?.toString() : null
+    }
+
+    /**
+     * The node holding template `templateId`, or null when the cluster has no template with
+     * that id. Throws when the cluster cannot be listed, so a provision fails instead of
+     * creating a second template for an image that already has one.
+     */
+    static String findNodeForTemplate(HttpApiClient client, Map authConfig, String templateId) {
+        ServiceResponse resources = callListApiV2(client, "cluster/resources?type=vm", authConfig)
+        if (!resources?.success || !(resources.data instanceof Collection)) {
+            throw new Exception("Unable to list the cluster's resources to find template $templateId: ${resources?.msg}")
+        }
+        String node = templateNodeIn(resources.data, templateId)
+        if (!node && resources.data.any { it?.type == 'qemu' && it?.vmid?.toString() == templateId }) {
+            log.warn("VM $templateId is not a template; it is not used as the image's template")
+        }
+        return node
+    }
+
     static String findNodeForVM(HttpApiClient client, Map authConfig, String vmId) {
         try {
             // Try with type=vm filter first for better performance
@@ -1086,13 +1182,25 @@ class ProxmoxApiComputeUtil {
 
             log.debug("Creating blank template for attaching qcow2...")
             log.debug("Path is: $authConfig.apiUrl${authConfig.v2basePath}/nodes/$nodeId/qemu/")
-            def results = withProxy(client, authConfig).callJsonApi(
-                    (String) authConfig.apiUrl,
-                    "${authConfig.v2basePath}/nodes/$nodeId/qemu/",
-                    null, null,
-                    new HttpApiClient.RequestOptions(opts),
-                    'POST'
-            )
+            // The same race as in cloneTemplate: cluster/nextid reserves nothing, so a parallel
+            // provision can take the id first, and Proxmox refuses the create. Fresh id, again.
+            def results = null
+            for (int attempt = 1; attempt <= CLONE_ID_ATTEMPTS; attempt++) {
+                results = withProxy(client, authConfig).callJsonApi(
+                        (String) authConfig.apiUrl,
+                        "${authConfig.v2basePath}/nodes/$nodeId/qemu/",
+                        null, null,
+                        new HttpApiClient.RequestOptions(opts),
+                        'POST'
+                )
+                if ((results?.success && !results?.hasErrors()) || attempt == CLONE_ID_ATTEMPTS || !vmIdTaken(results?.content)) {
+                    break
+                }
+                def freshId = callListApiV2(client, "cluster/nextid", authConfig).data
+                log.warn("VM id $nextId was taken before template $imageName was created; retrying with $freshId")
+                nextId = freshId
+                opts.body.vmid = nextId
+            }
 
             def resultData = new JsonSlurper().parseText(results.content)
             if (results?.success && !results?.hasErrors()) {
@@ -1351,6 +1459,11 @@ class ProxmoxApiComputeUtil {
 
         try {
             ServiceResponse sdnNetworks = callListApiV2(client, "cluster/sdn/vnets", authConfig)
+            // Same rule as the bridges: a failed vnet listing reported as "no vnets" made the
+            // sync delete every SDN network. Only a cluster without SDN (404/501) has none.
+            if (!sdnNetworks?.success && !sdnUnavailable(sdnNetworks?.errorCode)) {
+                return ServiceResponse.error("Unable to list the SDN vnets: ${sdnNetworks?.msg}")
+            }
             if (sdnNetworks.success && sdnNetworks.data) {
                 log.debug("Found SDN Networks: ${sdnNetworks.data}")
                 sdnNetworks.data.each { Map sdn ->
@@ -1391,6 +1504,7 @@ class ProxmoxApiComputeUtil {
             }
         } catch (Exception e) {
             log.warn("Failed to get SDN networks: ${e.message}")
+            return ServiceResponse.error("Unable to list the SDN vnets: ${e.message}")
         }
 
         if (uniqueIfaces) {
@@ -1409,6 +1523,14 @@ class ProxmoxApiComputeUtil {
     }
 
 
+
+    /**
+     * Whether a failed SDN call means the cluster has no SDN API (404, or 501 "not implemented"
+     * without the SDN package) rather than a failure of a cluster that has one.
+     */
+    static boolean sdnUnavailable(def errorCode) {
+        return errorCode?.toString() in ['404', '501']
+    }
 
     static ServiceResponse getTemplateById(HttpApiClient client, Map authConfig, Long templateId) {
 
@@ -1605,6 +1727,8 @@ class ProxmoxApiComputeUtil {
                 }
                 vm.osCode = morpheusOsCode(vmCfg.ostype as String)
                 vm.uuid = vmUuid(vmCfg)
+                // A clone in progress carries `lock: clone` until its disks are copied.
+                vm.lock = vmCfg.lock ?: vm.lock
                 vm.maxCores = (vmConfigInfo?.data?.data?.sockets?.toInteger() ?: 0) * (vmConfigInfo?.data?.data?.cores?.toInteger() ?: 0)
                 vm.coresPerSocket = vmConfigInfo?.data?.data?.cores?.toInteger() ?: 0
 
@@ -1911,11 +2035,14 @@ class ProxmoxApiComputeUtil {
                     contentType: ContentType.APPLICATION_JSON,
                     ignoreSSL: true
             )
-            
-            // Use 6-parameter version if we have a query string, otherwise use 4-parameter version
-            def results = queryString ? 
-                withProxy(client, authConfig).callJsonApi(authConfig.apiUrl, actualPath, queryString, null, opts, 'GET') :
-                withProxy(client, authConfig).callJsonApi(authConfig.apiUrl, actualPath, null, null, opts, 'GET')
+            // The query goes in queryParams: the third argument of callJsonApi is the user name,
+            // so a query string passed there was dropped and every listing came back unfiltered.
+            Map<CharSequence, CharSequence> queryParams = parseQueryString(queryString)
+            if (queryParams) {
+                opts.queryParams = queryParams
+            }
+
+            def results = withProxy(client, authConfig).callJsonApi(authConfig.apiUrl, actualPath, null, null, opts, 'GET')
             
             // The client hands a body it did not parse over as byte[]; read it as JSON before
             // unwrapping, instead of failing with "No signature of method: [B.getAt()".
@@ -1931,6 +2058,7 @@ class ProxmoxApiComputeUtil {
             } else {
                 if(!rtn.success) {
                     rtn.msg = results.data + results.errors
+                    rtn.errorCode = results?.errorCode
                     rtn.success = false
                 }
             }
@@ -1942,6 +2070,21 @@ class ProxmoxApiComputeUtil {
         return rtn
     }
 
+
+    /**
+     * The parameters of a query string ("content=images&vmid=101") as a map for
+     * RequestOptions.queryParams; empty for none.
+     */
+    static Map<CharSequence, CharSequence> parseQueryString(String queryString) {
+        Map<CharSequence, CharSequence> params = [:]
+        (queryString ?: '').split('&').each { String pair ->
+            if (pair) {
+                List<String> kv = pair.split('=', 2) as List<String>
+                params[URLDecoder.decode(kv[0], 'UTF-8')] = kv.size() > 1 ? URLDecoder.decode(kv[1], 'UTF-8') : ''
+            }
+        }
+        return params
+    }
 
     static ServiceResponse getApiV2Token(Map authConfig) {
         def path = "access/ticket"
@@ -1979,6 +2122,10 @@ class ProxmoxApiComputeUtil {
             log.error "Error in getApiV2Token: ${e}", e
             rtn.msg = "Error in getApiV2Token: ${e}"
             rtn.success = false
+        } finally {
+            // Every API call logs in through its own client; without this each one kept its
+            // connection pool open until garbage collection.
+            client.shutdownClient()
         }
         return rtn
     }

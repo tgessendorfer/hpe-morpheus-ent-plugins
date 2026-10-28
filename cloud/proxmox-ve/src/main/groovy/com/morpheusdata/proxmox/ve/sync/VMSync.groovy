@@ -103,6 +103,12 @@ class VMSync {
         }
 
         items.each { Map cloudItem ->
+            if (beingCreated(cloudItem)) {
+                // Most likely Morpheus's own clone: the server record gets the VMID only once the
+                // clone is done, and a discovered record now would duplicate it (billed twice).
+                log.debug("VM ${cloudItem.vmid} (${cloudItem.name}) is locked '${cloudItem.lock}'; not adding it before the lock is released")
+                return
+            }
             def parentServer = hostIdentitiesMap[cloudItem.node]
             if (!parentServer) {
                 log.warn("Could not find parent server for VM ${cloudItem.name} on node ${cloudItem.node}")
@@ -161,6 +167,10 @@ class VMSync {
         def repriced = []
 
         try {
+            def hostIdentitiesMap = context.async.computeServer.listIdentityProjections(cloud.id, null).filter {
+                it.computeServerTypeCode == 'proxmox-ve-node'
+            }.toMap { it.externalId }.blockingGet()
+
             for (def updateItem in updateItems) {
                 def existingItem = updateItem.existingItem
                 def cloudItem = updateItem.masterItem
@@ -174,8 +184,6 @@ class VMSync {
 
                 Map serverFieldValueMap = [
                         hostname   : cloudItem.name,
-                        externalIp : cloudItem.ip,
-                        internalIp : cloudItem.ip,
                         maxCores   : cloudItem.maxCores ?: cloudItem.maxcpu?.toLong(),
                         maxStorage : cloudItem.maxdisk?.toLong(),
                         usedStorage: cloudItem.disk?.toLong(),
@@ -188,7 +196,7 @@ class VMSync {
                         // operator has set a more specific OS by hand, keep theirs.
                         osType     : (existingItem.osType in [null, '', 'unknown'])
                                 ? (cloudItem.osCode ?: 'unknown') : existingItem.osType
-                ]
+                ] + addressFields(cloudItem.ip as String)
 
                 Map capacityFieldValueMap = [
                         maxCores   : cloudItem.maxCores ?: cloudItem.maxcpu?.toLong(),
@@ -240,6 +248,10 @@ class VMSync {
                     needsUpdate = true
                 }
 
+                if (trackParentNode(existingItem, cloudItem.node as String, hostIdentitiesMap)) {
+                    needsUpdate = true
+                }
+
                 if (needsUpdate) {
                     updates << existingItem
                 }
@@ -258,6 +270,41 @@ class VMSync {
         }
     }
 
+
+    /**
+     * Whether a listed VM is still being created: a clone or restore holds the config lock
+     * `clone` or `create` until it is done.
+     */
+    static boolean beingCreated(Map cloudItem) {
+        return cloudItem?.lock?.toString() in ['clone', 'create']
+    }
+
+    /**
+     * The address fields of a sync update: the guest agent's IPv4 address when the listing has
+     * one. The listing leaves it empty for a stopped VM or one whose agent was not asked, and
+     * writing that would wipe the address the agent or Morpheus reported before.
+     */
+    static Map addressFields(String ip) {
+        return ip ? [externalIp: ip, internalIp: ip] : [:]
+    }
+
+    /**
+     * Follows a VM to the node Proxmox lists it on. After a migration or an HA failover the
+     * record kept the old node, and start, stop, resize and delete went to a node where the VM's
+     * config no longer exists. A node unknown to Morpheus leaves the record alone. Returns true
+     * when the record changed.
+     */
+    static boolean trackParentNode(ComputeServer existingItem, String node, Map hostsByExternalId) {
+        def host = node ? hostsByExternalId?.get(node) : null
+        if (!host || existingItem.parentServer?.id == host.id) {
+            return false
+        }
+        if (existingItem.parentServer) {
+            log.info("VM ${existingItem.name}: node ${existingItem.parentServer.externalId ?: existingItem.parentServer.id} -> ${node}")
+        }
+        existingItem.parentServer = host
+        return true
+    }
 
     /**
      * Keeps the managed server's record in step with the VM's smbios uuid. A record with no

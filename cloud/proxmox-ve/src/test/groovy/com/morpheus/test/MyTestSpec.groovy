@@ -41,13 +41,13 @@ class MyTestSpec extends Specification {
     def "finds an orphaned cloud-init volume for provisioning retry"() {
         given:
         def volumes = [
-                [volid: 'LAB-V5-L2:vm-137-disk-0'],
-                [volid: 'LAB-V5-L2:vm-137-cloudinit'],
-                [volid: 'LAB-V5-L2:vm-138-cloudinit']
+                [volid: 'local-lvm:vm-137-disk-0'],
+                [volid: 'local-lvm:vm-137-cloudinit'],
+                [volid: 'local-lvm:vm-138-cloudinit']
         ]
 
         expect:
-        ProxmoxApiComputeUtil.findCloudInitVolumeId(volumes, '137') == 'LAB-V5-L2:vm-137-cloudinit'
+        ProxmoxApiComputeUtil.findCloudInitVolumeId(volumes, '137') == 'local-lvm:vm-137-cloudinit'
         ProxmoxApiComputeUtil.findCloudInitVolumeId(volumes, '139') == null
     }
 
@@ -60,18 +60,18 @@ class MyTestSpec extends Specification {
                 [name: 'ens18', 'ip-addresses': [
                         ['ip-address': '169.254.10.5', 'ip-address-type': 'ipv4', prefix: 16],
                         ['ip-address': 'fe80::be24:11ff:fe7b:fe7e', 'ip-address-type': 'ipv6', prefix: 64],
-                        ['ip-address': '192.168.0.87', 'ip-address-type': 'ipv4', prefix: 24]]]
+                        ['ip-address': '192.0.2.87', 'ip-address-type': 'ipv4', prefix: 24]]]
         ]]
 
         expect:
-        ProxmoxApiComputeUtil.extractGuestIpv4Addresses(agentResult) == ['192.168.0.87']
+        ProxmoxApiComputeUtil.extractGuestIpv4Addresses(agentResult) == ['192.0.2.87']
         ProxmoxApiComputeUtil.extractGuestIpv4Addresses([result: []]) == []
         ProxmoxApiComputeUtil.extractGuestIpv4Addresses(null) == []
     }
 
     def "builds Proxmox cloud-init network settings from the server interfaces"() {
         given:
-        def lan = new Network(name: 'vmbr0', cidr: '192.168.0.0/24', gateway: '192.168.0.1', dhcpServer: true)
+        def lan = new Network(name: 'vmbr0', cidr: '192.0.2.0/24', gateway: '192.0.2.1', dhcpServer: true)
         def dmz = new Network(name: 'vmbr1', netmask: '255.255.255.0', gateway: '10.0.0.1',
                 dnsPrimary: '10.0.0.53', dnsSecondary: '10.0.0.54')
         def dhcpNic = new ComputeServerInterface(externalId: 'net0', network: lan, dhcp: true)
