@@ -6,6 +6,41 @@ shaded `-all.jar` is attached.
 
 ---
 
+## 1.2.1
+
+**Fix release: a hypervisor host whose socket count is 0 now counts the default sockets, as the
+license page does.** Plugin code, report code, option codes, plugin API 1.4.2 and minimum
+appliance 9.0.2 are unchanged; no new options.
+
+### Fixed
+
+- **What went wrong.** The report added a host's `max_sockets` whenever it was set, so a host with
+  `max_sockets` 0 added 0 sockets. Morpheus' license count takes `max_sockets ?: 2`, in which 0
+  counts like a missing value, so the same host adds 2 there and the report total came out lower
+  than `GET /api/license`.
+- **What the report does now.** A host with `max_sockets` 0 counts the option *Sockets per Host
+  Without Value* (default 2), exactly like a host without a value, and is listed under *Hosts
+  counted with default*. The change is one condition in the report's query.
+
+### Behaviour changes from 1.2.0
+
+- Hosts with `max_sockets` 0 add the default instead of 0 and count among the hosts with the
+  default. Hosts with a socket count other than 0, hosts without a value and VMs count as in 1.2.0.
+
+### Verified
+
+- New unit test (Spock) on the query: a socket count of 0 goes to the default branch, not to the
+  known sockets. The query itself runs only on an appliance; no test runs it against a database.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon --warning-mode all`,
+  116 tests, 0 failures.
+
+### Not yet verified
+
+- On an appliance: the report total against `GET /api/license` with a hypervisor host whose
+  `max_sockets` is 0 (no such host in the test setup), and that the jar replaces 1.2.0 in place.
+
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/socket-report-v1.2.0...socket-report-v1.2.1
+
 ## 1.2.0
 
 **The report now shows in the language chosen in the Morpheus user settings, not in the

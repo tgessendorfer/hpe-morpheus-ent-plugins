@@ -23,8 +23,8 @@ import java.text.NumberFormat
  *
  * Counting rule (measured against GET /api/license currentUsage on Morpheus 9.0.2, may change):
  * <ul>
- *   <li>A hypervisor host counts its max_sockets; a host without a value counts the
- *       configured default (2 on 9.0.2).</li>
+ *   <li>A hypervisor host counts its max_sockets; a host without a value or with 0 counts
+ *       the configured default (2 on 9.0.2).</li>
  *   <li>A server in a cloud without any discovered host counts as a VM: VMs / ratio
  *       (15 VMs = 1 socket on 9.0.2).</li>
  *   <li>VMs on discovered hosts add nothing.</li>

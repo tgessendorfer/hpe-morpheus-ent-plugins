@@ -40,6 +40,15 @@ class SocketUsageReportProviderSpec extends Specification {
 		provider.category == 'inventory'
 	}
 
+	def "a host with max_sockets 0 counts the default like one without a value, as the license page does"() {
+		given:
+		String sql = SocketUsageReportProvider.SQL
+
+		expect:
+		sql.contains('h.is_host = 1 AND h.max_sockets IS NOT NULL AND h.max_sockets <> 0 THEN h.max_sockets ELSE 0 END) AS host_sockets_known')
+		sql.contains('h.is_host = 1 AND (h.max_sockets IS NULL OR h.max_sockets = 0) THEN 1 ELSE 0 END) AS hosts_default')
+	}
+
 	def "option codes start with the provider code and are hyphen-separated"() {
 		expect:
 		provider.optionTypes*.code == ['socket-usage-report-vms-per-socket', 'socket-usage-report-default-host-sockets']

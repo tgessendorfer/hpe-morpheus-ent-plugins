@@ -106,14 +106,16 @@ class SocketUsageReportProvider extends AbstractReportProvider {
 	 * Reads internal tables (compute_server, compute_server_type, compute_zone,
 	 * compute_zone_type, account). Tested on 9.0.2 only; a schema change in a later
 	 * appliance version makes the report fail with a log entry instead of wrong numbers.
+	 * A max_sockets of 0 counts as no value: the license page sums max_sockets ?: 2, and 0 is
+	 * false there.
 	 */
 	static final String SQL = '''
 		SELECT z.id AS cloud_id, z.name AS cloud, zt.name AS cloud_type, zt.cloud AS category,
 		  a.id AS tenant_id, a.name AS tenant,
 		  CAST(a.master_account AS UNSIGNED) AS is_master,
 		  SUM(CASE WHEN h.is_host = 1 THEN 1 ELSE 0 END) AS hosts,
-		  SUM(CASE WHEN h.is_host = 1 AND h.max_sockets IS NOT NULL THEN h.max_sockets ELSE 0 END) AS host_sockets_known,
-		  SUM(CASE WHEN h.is_host = 1 AND h.max_sockets IS NULL THEN 1 ELSE 0 END) AS hosts_default,
+		  SUM(CASE WHEN h.is_host = 1 AND h.max_sockets IS NOT NULL AND h.max_sockets <> 0 THEN h.max_sockets ELSE 0 END) AS host_sockets_known,
+		  SUM(CASE WHEN h.is_host = 1 AND (h.max_sockets IS NULL OR h.max_sockets = 0) THEN 1 ELSE 0 END) AS hosts_default,
 		  SUM(CASE WHEN h.is_host = 0 AND zh.zone_hosts = 0 THEN 1 ELSE 0 END) AS vms_without_host,
 		  SUM(CASE WHEN h.is_host = 0 AND zh.zone_hosts > 0 THEN 1 ELSE 0 END) AS vms_on_hosts
 		FROM (SELECT cs.id, cs.zone_id, cs.account_id, cs.max_sockets,

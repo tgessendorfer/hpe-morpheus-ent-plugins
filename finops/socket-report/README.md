@@ -38,7 +38,7 @@ Measured against `GET /api/license` (`currentUsage`) on Morpheus 9.0.2. It may c
 other versions.
 
 - A server is a **hypervisor host** when its server type has `vm_hypervisor` set or its node
-  type ends in `Metal`. A host counts its `max_sockets`; a host without a value counts the
+  type ends in `Metal`. A host counts its `max_sockets`; a host without a value or with 0 counts the
   option *Sockets per Host Without Value* (default 2).
 - A server in a cloud **without any discovered host** counts as a VM: VMs divided by the option
   *VMs per Socket* (default 15).
