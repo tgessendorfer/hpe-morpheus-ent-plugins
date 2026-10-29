@@ -102,17 +102,25 @@ minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
   README note on Morpheus' own budget page. How that page computes its figure is taken from the
   Morpheus 9.1.0 documentation linked there.
 - Local build with JDK 17 and Gradle 9.8.0, one jar `morpheus-budget-burn-plugin-1.3.0-all.jar`.
+- **On HPE Morpheus Enterprise 9.1.0-1**, as a master tenant user, with a release candidate
+  built from this code before its version number was raised to 1.3.0 (the code is identical):
+  a cloud budget of 1.00 EUR per month, switched off with `PUT /api/budgets/<id>` and
+  `{"enabled": false}` (read back as `enabled: false`), was **listed after all other budgets**,
+  with dimmed amounts, a striped slate bar and ***Disabled*** with *would be Over budget* under
+  it, **in no red**; the other budgets kept their place and status, and no currency mismatch note
+  appeared. English, light page. A release candidate of 1.3.0 then loaded in its place (status
+  `loaded`): the page showed the same statuses to a master tenant user, and a sub-tenant user
+  (impersonated) saw only the tenant's own budget.
 
 ### Not yet verified
 
 - On an appliance: the release jar loads in place of 1.2.2, and the page shows the same budgets,
-  amounts and statuses as 1.2.2 as a master tenant user and as a sub-tenant user.
-- A budget switched off through `PUT /api/budgets/<id>` with `enabled: false` on the lab
-  appliance: the row moves to the end of the table, shows *Disabled* with its amounts and the
-  status it would have (English and German), and brings up no currency mismatch note; switched on
-  again, it shows its normal status in its normal place.
-- The look of a disabled row (slate blue italic status, striped bar, dimmed amounts) in the
-  browser, on a light and on a dark page; checked in unit tests and by review only.
+  amounts and statuses as 1.2.2, compared side by side, as a master tenant user and as a
+  sub-tenant user.
+- A switched-off budget on an appliance: in German (*Deaktiviert*, *sonst Über Budget*), with
+  spend in another currency (*would be Currency mismatch*), and switched on again (its normal
+  status in its normal place).
+- The look of a disabled row on a dark page; the light page was seen (above).
 - The new budget query on a 9.0.2 appliance (the minimum version). The `enabled` column is in the
   9.0.2 schema as well.
 - The README note on Morpheus' own budget page was not checked side by side on an appliance (a
