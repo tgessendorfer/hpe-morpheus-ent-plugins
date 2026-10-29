@@ -23,7 +23,10 @@ import java.math.RoundingMode
  */
 class BudgetBurnMath {
 
-	/** Last resort of the currency rule: line currency, then master tenant currency, then this. */
+	/**
+	 * Last resort of the currency rule: a budget is in its owner tenant's currency, then the master
+	 * tenant's, then this. An invoice line without a currency counts in the budget currency (byCurrency).
+	 */
 	static final String DEFAULT_CURRENCY = 'USD'
 
 	/** Forecast share of the monthly budget (percent) from which a budget is flagged as warning. */
@@ -36,11 +39,15 @@ class BudgetBurnMath {
 	static final String STATUS_WARNING = 'warning'
 	static final String STATUS_OVER = 'over'
 	static final String STATUS_MISMATCH = 'mismatch'
+	/** A budget switched off in Morpheus (account_budget.enabled = 0): listed, but never an alarm. */
+	static final String STATUS_DISABLED = 'disabled'
 
 	// Mid tones that stay readable on a light and on a dark page. The Morpheus theme variables are not
 	// used: on 9.0.2 they can switch to dark while the page around the plugin stays light.
+	// Disabled is a slate blue, so it is neither an alarm color nor the grey of a currency mismatch.
 	static final Map<String, String> STATUS_COLORS = [
-		(STATUS_OK): '#27AE60', (STATUS_WARNING): '#E67E22', (STATUS_OVER): '#C0392B', (STATUS_MISMATCH): '#7F8C8D'
+		(STATUS_OK): '#27AE60', (STATUS_WARNING): '#E67E22', (STATUS_OVER): '#C0392B', (STATUS_MISMATCH): '#7F8C8D',
+		(STATUS_DISABLED): '#5B7B9F'
 	].asImmutable()
 
 	static final List<String> SCOPES = ['tenant', 'account', 'group', 'cloud', 'user'].asImmutable()
@@ -123,6 +130,27 @@ class BudgetBurnMath {
 		if(mismatch) return STATUS_MISMATCH
 		if(!hasBudget(budget)) return positive(forecast) ? STATUS_OVER : STATUS_OK
 		status(pct(forecast, budget), false)
+	}
+
+	/**
+	 * The status shown for a budget: its computed status, or disabled when the budget is switched
+	 * off. A disabled budget never shows over budget, warning or currency mismatch as its status.
+	 */
+	static String displayStatus(String computed, boolean enabled) {
+		enabled ? computed : STATUS_DISABLED
+	}
+
+	/** True for an enabled flag as the database returns it (1, true, "1"); null counts as enabled. */
+	static boolean isEnabled(def flag) {
+		if(flag == null) return true
+		if(flag instanceof Boolean) return flag
+		if(flag instanceof Number) return (flag as Number).intValue() != 0
+		return !(flag.toString().trim() in ['0', 'false'])
+	}
+
+	/** The rows of disabled budgets moved to the end; the order within each part is kept. */
+	static List<Map> disabledLast(List<Map> items) {
+		items.findAll { !it.disabled } + items.findAll { it.disabled }
 	}
 
 	static boolean hasBudget(BigDecimal budget) {

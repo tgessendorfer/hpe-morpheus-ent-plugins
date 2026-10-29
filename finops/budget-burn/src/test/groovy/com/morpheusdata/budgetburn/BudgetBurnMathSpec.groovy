@@ -224,6 +224,54 @@ class BudgetBurnMathSpec extends Specification {
 		status(10G, 0G, true) == STATUS_MISMATCH
 	}
 
+	@Unroll
+	def "a #computed budget shows #computed when enabled and disabled when switched off"() {
+		expect:
+		displayStatus(computed, true) == computed
+		displayStatus(computed, false) == STATUS_DISABLED
+
+		where:
+		computed << [STATUS_OK, STATUS_WARNING, STATUS_OVER, STATUS_MISMATCH]
+	}
+
+	def "disabled has a color of its own: not an alarm color and not the currency mismatch grey"() {
+		expect:
+		statusColor(STATUS_DISABLED) == STATUS_COLORS[STATUS_DISABLED]
+		!(statusColor(STATUS_DISABLED) in [STATUS_OK, STATUS_WARNING, STATUS_OVER, STATUS_MISMATCH].collect { STATUS_COLORS[it] })
+
+		and: 'an unknown status still falls back to the mismatch grey'
+		statusColor('unknown') == STATUS_COLORS[STATUS_MISMATCH]
+	}
+
+	def "isEnabled reads the enabled flag in the forms the database returns; null counts as enabled"() {
+		expect:
+		isEnabled(flag) == result
+
+		where:
+		flag            || result
+		null            || true
+		1               || true
+		1L              || true
+		BigInteger.ONE  || true
+		true            || true
+		'1'             || true
+		0               || false
+		0L              || false
+		BigInteger.ZERO || false
+		false           || false
+		'0'             || false
+		' false '       || false
+	}
+
+	def "disabledLast moves disabled rows to the end and keeps the order within each part"() {
+		given:
+		List<Map> items = [[name: 'a', disabled: true], [name: 'b', disabled: false], [name: 'c'], [name: 'd', disabled: true], [name: 'e', disabled: false]]
+
+		expect:
+		disabledLast(items)*.name == ['b', 'c', 'e', 'a', 'd']
+		disabledLast([]) == []
+	}
+
 	def "pctLabel shows a dash without a number when there is no budget"() {
 		expect:
 		pctLabel(10G, 0G, Locale.ENGLISH) == '-'

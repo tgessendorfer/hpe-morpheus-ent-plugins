@@ -259,6 +259,61 @@ class BudgetBurnLocaleSpec extends Specification {
 		empty.contains(text.empty as String)
 	}
 
+	@Unroll
+	def "a disabled budget's status and the status it would have follow the language setting '#setting'"() {
+		given:
+		Sql sql = Mock(Sql)
+		BudgetBurnAnalyticsProvider provider = provider(sql, BROWSER_DE)
+		stubPage(sql, BigInteger.ZERO)
+
+		when:
+		def response = provider.loadData(new User(id: 7L), [:])
+
+		then:
+		1 * sql.firstRow(BudgetBurnAnalyticsProvider.USER_LOCALE_SELECT, [7L]) >> new GroovyRowResult([locale: setting])
+		response.success
+		response.data.items[0].disabled
+		response.data.items[0].statusText == status
+		response.data.items[0].statusDetail == detail
+		response.data.items[0].budgetText == budget
+
+		where:
+		setting | status        | detail              | budget
+		'en-US' | 'Disabled'    | 'would be On track' | '1,234.50'
+		'de'    | 'Deaktiviert' | 'sonst Im Rahmen'   | '1.234,50'
+	}
+
+	def "a disabled budget renders in a look of its own, with the status it would have as a small line"() {
+		given:
+		Map text = BudgetBurnAnalyticsProvider.texts(Locale.ENGLISH)
+		String off = BudgetBurnMath.statusColor(BudgetBurnMath.STATUS_DISABLED)
+		Map row = [name: 'Archive', scopeText: 'Tenant', target: 'Tenant B', currency: 'USD', budgetText: '10.00', runningText: '20.00',
+			usedPct: '200.0 %', burnText: '0.69', forecastText: '50.00', forecastPct: '500.0 %', bar: 100, color: off, disabled: true,
+			statusText: text.status.disabled, statusDetail: 'would be Over budget', ytdText: '50.00', ytdBudgetText: '100.00', ytdPct: '50.0 %']
+		Map enabled = row + [name: 'Ops', disabled: false, statusText: text.status.over, statusDetail: null,
+			color: BudgetBurnMath.statusColor(BudgetBurnMath.STATUS_OVER)]
+		HandlebarsRenderer renderer = new HandlebarsRenderer('renderer', BudgetBurnLocaleSpec.classLoader)
+
+		when:
+		String html = renderer.renderTemplate('hbs/budgetBurn', new ViewModel<Map>(object: [text: text, language: 'en', items: [enabled, row]])).html
+
+		then: 'the row is marked, the status in its own color with the computed status under it'
+		html.count('<tr class="finops-off">') == 1
+		html.contains("<span class=\"finops-status\" style=\"color:${off}\">Disabled</span><span class=\"finops-sub\">would be Over budget</span>")
+		html.contains("style=\"background-color:${off};width:100%\"")
+
+		and: 'the bar color is set as background-color, so the stylesheet can lay the stripes over it'
+		!html.contains('style="background:')
+		html.contains('tr.finops-off .finops-bar { background-image: repeating-linear-gradient(')
+
+		and: 'the amounts are still there'
+		html.contains('<td class="num">10.00 USD</td>')
+		html.contains('<td class="num">20.00<span class="finops-sub">200.0 %</span></td>')
+
+		and: 'the enabled row has no marker and no small status line'
+		html.contains("<span class=\"finops-status\" style=\"color:${BudgetBurnMath.statusColor(BudgetBurnMath.STATUS_OVER)}\">Over budget</span></td>")
+	}
+
 	private MorpheusContext context(Locale browser) {
 		MorpheusWebRequestService web = Mock(MorpheusWebRequestService) {
 			getLocale() >> browser
@@ -284,12 +339,12 @@ class BudgetBurnLocaleSpec extends Specification {
 		return new SqlProvider(morpheus, sql)
 	}
 
-	/** One monthly budget of 1234.50 per month for the viewer's own tenant, no invoices. */
-	private void stubPage(Sql sql) {
+	/** One monthly budget of 1234.50 per month for the viewer's own tenant, no invoices; enabled unless given. */
+	private void stubPage(Sql sql, def enabled = BigInteger.ONE) {
 		sql.firstRow({ it.startsWith('SELECT a.id') }, [7L]) >> new GroovyRowResult([id: 2L, name: 'Tenant A', is_master: 0])
 		sql.firstRow({ it.startsWith('SELECT currency') }) >> new GroovyRowResult([currency: 'EUR'])
 		sql.rows({ it.startsWith('SELECT b.*') }, _ as List) >> [new GroovyRowResult([id: 11L, name: 'Ops', owner: 'Tenant A', owner_currency: 'EUR',
-			owner_master: 0, account_id: 2L, period_interval: 'month', ref_scope: 'account', ref_id: null, ref_name: null])]
+			owner_master: 0, account_id: 2L, period_interval: 'month', ref_scope: 'account', ref_id: null, ref_name: null, budget_enabled: enabled])]
 		sql.rows({ it.startsWith('SELECT interval_index') }, _ as List) >> (1..12).collect { new GroovyRowResult([interval_index: it, cost: 1234.50G]) }
 		sql.rows(_ as String, _ as List) >> []
 	}

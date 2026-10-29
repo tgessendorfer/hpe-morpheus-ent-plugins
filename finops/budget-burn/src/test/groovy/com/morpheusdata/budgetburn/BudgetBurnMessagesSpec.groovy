@@ -28,10 +28,21 @@ class BudgetBurnMessagesSpec extends Specification {
 		given:
 		List<String> keys = (BudgetBurnMath.SCOPES + ['other', null]).collect { BudgetBurnMath.scopeKey(it) } +
 			BudgetBurnMath.STATUS_COLORS.keySet().collect { BudgetBurnMath.statusKey(it) } +
-			["${BudgetBurnAnalyticsProvider.PROVIDER_CODE}.error.load".toString()]
+			["${BudgetBurnAnalyticsProvider.PROVIDER_CODE}.error.load".toString(), "${BudgetBurnAnalyticsProvider.PROVIDER_CODE}.status.wouldBe".toString()]
 
 		expect:
 		keys.findAll { !en.containsKey(it) } == []
+	}
+
+	def "the German bundle has the texts of a disabled budget, with the placeholder of the status it would have"() {
+		given:
+		Properties de = load('i18n/messages_de.properties')
+		String prefix = BudgetBurnAnalyticsProvider.PROVIDER_CODE
+
+		expect:
+		de.getProperty("${prefix}.status.disabled".toString())
+		en.getProperty("${prefix}.status.wouldBe".toString()).contains('{0}')
+		de.getProperty("${prefix}.status.wouldBe".toString()).contains('{0}')
 	}
 
 	def "all keys start with the provider code"() {

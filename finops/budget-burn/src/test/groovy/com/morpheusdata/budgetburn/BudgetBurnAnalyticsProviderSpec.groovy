@@ -26,6 +26,15 @@ class BudgetBurnAnalyticsProviderSpec extends Specification {
 		BudgetBurnAnalyticsProvider.BUDGET_SELECT.contains('a.currency AS owner_currency')
 	}
 
+	def "the budget select reads the enabled flag, NULL as enabled, and filters nothing on it"() {
+		given:
+		String q = BudgetBurnAnalyticsProvider.BUDGET_SELECT
+
+		expect:
+		q.contains('COALESCE(CAST(b.enabled AS UNSIGNED), 1) AS budget_enabled')
+		q.substring(q.indexOf(' WHERE ')) == " WHERE b.period = 'year' AND b.period_value = ?"
+	}
+
 	def "server invoices count only for servers that belong to no instance"() {
 		given:
 		String f = BudgetBurnAnalyticsProvider.INVOICE_FILTER
@@ -143,6 +152,59 @@ class BudgetBurnAnalyticsProviderSpec extends Specification {
 		!data.anyMismatch
 	}
 
+	def "a disabled budget stays listed with its amounts, sorts last, shows Disabled with the status it would have, and raises no flag"() {
+		given:
+		Sql sql = Mock(Sql)
+		Map t = provider(sql)
+		Map text = BudgetBurnAnalyticsProvider.texts(Locale.ENGLISH)
+		sql.firstRow({ it.startsWith('SELECT a.id') }, [1L]) >> row(id: 1L, name: 'Provider', is_master: 1)
+		sql.firstRow({ it.startsWith('SELECT currency FROM account') }) >> row(currency: 'USD')
+
+		and: 'the database order puts a disabled budget first'
+		sql.rows({ it.startsWith('SELECT b.*') }, [YEAR.toString()]) >> [archiveBudget(), tenantBudget(), oldCloudBudget()]
+		sql.rows({ it.startsWith('SELECT interval_index') }, [23L]) >> months(10G)
+		sql.rows({ it.startsWith('SELECT interval_index') }, [21L]) >> months(1000G)
+		sql.rows({ it.startsWith('SELECT interval_index') }, [24L]) >> months(500G)
+
+		and: 'the disabled budget on tenant 3 is five times over its budget'
+		sql.rows({ current(it) }, [3L, PER]) >> [row(currency: 'USD', running: 20G, forecast: 50G)]
+		sql.rows({ current(it) }, [2L, PER]) >> [row(currency: 'USD', running: 10G, forecast: 31G)]
+
+		and: 'the disabled EUR cloud budget of tenant 4 also has USD spend'
+		sql.rows({ current(it) }, [4L, 6L, PER]) >> [row(currency: 'EUR', running: 5G, forecast: 15.5G), row(currency: 'USD', running: 1.11G, forecast: 2.22G)]
+		sql.rows(_ as String, _ as List) >> []
+
+		when:
+		Map data = t.provider.loadData(new User(id: 1L), [:]).data
+
+		then: 'enabled budgets first, in the database order; every budget is counted'
+		data.items*.name == ['Tenant A', 'Archive', 'Old cloud']
+		data.count == 3
+		!data.items[0].disabled
+		data.items[0].statusText == text.status.ok
+		data.items[0].statusDetail == null
+
+		and: 'the over-budget one is Disabled in its own color, with its amounts and the status it would have'
+		data.items[1].disabled
+		data.items[1].statusText == text.status.disabled
+		data.items[1].statusDetail == 'would be Over budget'
+		data.items[1].color == BudgetBurnMath.STATUS_COLORS[BudgetBurnMath.STATUS_DISABLED]
+		data.items[1].color != BudgetBurnMath.STATUS_COLORS[BudgetBurnMath.STATUS_OVER]
+		data.items[1].budgetText == '10.00'
+		data.items[1].runningText == '20.00'
+		data.items[1].forecastText == '50.00'
+		data.items[1].forecastPct == '500.0 %'
+
+		and: 'the one with foreign spend keeps the foreign amounts, but is no currency mismatch and sets no page flag'
+		data.items[2].disabled
+		data.items[2].mismatch
+		data.items[2].foreignForecast == '2.22 USD'
+		data.items[2].statusText == text.status.disabled
+		data.items[2].statusDetail == 'would be Currency mismatch'
+		data.items[2].color != BudgetBurnMath.STATUS_COLORS[BudgetBurnMath.STATUS_MISMATCH]
+		!data.anyMismatch
+	}
+
 	/** The month's spend query of loadData(). */
 	static boolean current(String q) {
 		q.contains('AS forecast FROM account_invoice i WHERE ' + BudgetBurnAnalyticsProvider.INVOICE_FILTER)
@@ -164,13 +226,25 @@ class BudgetBurnAnalyticsProviderSpec extends Specification {
 	/** A master tenant budget on its subtenant 2, in USD. */
 	static GroovyRowResult tenantBudget() {
 		row(id: 21L, name: 'Tenant A', owner: 'Provider', owner_currency: 'USD', owner_master: 1, account_id: 1L,
-			period_interval: 'month', ref_scope: 'tenant', ref_id: 2L, ref_name: 'Tenant A')
+			period_interval: 'month', ref_scope: 'tenant', ref_id: 2L, ref_name: 'Tenant A', budget_enabled: 1)
 	}
 
 	/** Subtenant 2's own budget on the shared cloud 5, in EUR. */
 	static GroovyRowResult cloudBudget() {
 		row(id: 22L, name: 'Tenant A cloud', owner: 'Tenant A', owner_currency: 'EUR', owner_master: 0, account_id: 2L,
-			period_interval: 'month', ref_scope: 'cloud', ref_id: 5L, ref_name: 'Cloud 5')
+			period_interval: 'month', ref_scope: 'cloud', ref_id: 5L, ref_name: 'Cloud 5', budget_enabled: BigInteger.ONE)
+	}
+
+	/** A disabled master tenant budget on subtenant 3, in USD (CAST AS UNSIGNED comes back as BigInteger). */
+	static GroovyRowResult archiveBudget() {
+		row(id: 23L, name: 'Archive', owner: 'Provider', owner_currency: 'USD', owner_master: 1, account_id: 1L,
+			period_interval: 'month', ref_scope: 'tenant', ref_id: 3L, ref_name: 'Tenant B', budget_enabled: BigInteger.ZERO)
+	}
+
+	/** Subtenant 4's disabled budget on cloud 6, in EUR. */
+	static GroovyRowResult oldCloudBudget() {
+		row(id: 24L, name: 'Old cloud', owner: 'Tenant C', owner_currency: 'EUR', owner_master: 0, account_id: 4L,
+			period_interval: 'month', ref_scope: 'cloud', ref_id: 6L, ref_name: 'Cloud 6', budget_enabled: 0)
 	}
 
 	/** The provider over the given Sql, with an English web request. */

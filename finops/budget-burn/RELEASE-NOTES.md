@@ -8,13 +8,35 @@ One section per version, newest first. The same text is the body of the matching
 
 ## 1.2.3
 
-**Fix release: currency codes are checked the way Instance Showback checks them, the invoice
-month no longer depends on the JVM locale, and the page query is covered by tests with
-invoices.** Built against plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code,
-options and the page layout are unchanged.
+**Switched-off budgets show *Disabled* instead of *Over budget* or *Warning*; currency codes are
+checked the way Instance Showback checks them, the invoice month no longer depends on the JVM
+locale, and the page query is covered by tests with invoices.** Built against plugin API 1.4.2,
+minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
 
 ### What changed
 
+- **Switched-off budgets are marked *Disabled*.** Up to 1.2.2 the page ignored a budget's
+  `enabled` flag, so a budget switched off in Morpheus (`enabled: false` through the REST API or
+  the CLI; the 9.1.0 budget form has no such field) still showed *Over budget* or *Warning* and
+  could bring up the currency mismatch note. The budget query now also reads the flag
+  (`COALESCE(CAST(b.enabled AS UNSIGNED), 1)`, so a missing value counts as enabled) and filters
+  nothing on it. **A disabled budget stays in the table with all its amounts**, but:
+  - it sorts **after all enabled budgets** (the order within each part is as before);
+  - its status is ***Disabled*** (German *Deaktiviert*) in a look of its own: a slate blue
+    (`#5B7B9F`) status in italics, a striped bar and dimmed amounts. It is never red or orange,
+    and not the grey (`#7F8C8D`) of *Currency mismatch*;
+  - the status it would have when switched on stays visible as a small line under it, for
+    example *would be Over budget* (German *sonst Über Budget*), or *would be Currency mismatch*
+    (*sonst Währung abweichend*) when it has spend in another currency this month;
+  - it **raises no alarm**: its status is never *Over budget*, *Warning* or *Currency mismatch*,
+    and it does not bring up the currency mismatch note under the table;
+  - **spend in another currency is still shown in its row, as for an enabled budget**: the
+    foreign amounts under *Spend to date* and *Forecast*, no burn rate, *No comparison: costs in a
+    currency other than the budget currency* in place of the bar (so such a row has no striped
+    bar), and in *Year to date*, when the year so far has such spend, the foreign amounts followed
+    by the words *Currency mismatch*.
+- **A source comment on the currency fallback is corrected** (no code change): an invoice line
+  without a currency counts in the budget currency, not in the master tenant's currency.
 - **Only a three-letter ISO code counts as a currency.** The budget currency (owner tenant, then
   master tenant, then `USD`) and the currency of each invoice now take the first value that is a
   three-letter code such as `EUR` (trimmed, case-insensitive). Up to 1.2.2 any non-blank text
@@ -34,23 +56,49 @@ options and the page layout are unchanged.
 
 ### Behaviour changes from 1.2.2
 
+- **A budget switched off in Morpheus no longer has *Over budget*, *Warning* or *Currency
+  mismatch* as its status** and no longer brings up the currency mismatch note; it shows
+  *Disabled* and moves to the end of the table. Its row still marks spend in another currency
+  as before (*No comparison* instead of the bar, *Currency mismatch* next to the foreign amounts
+  in *Year to date*), and the small status line under *Disabled* can read *would be Currency
+  mismatch*. Budgets that are switched on show and sort as in 1.2.2, and every budget is still
+  listed.
 - Only for currency values that are not a three-letter code: such a value now falls back as if
   it were empty (owner currency to the master tenant's, invoice currency to the budget
   currency). With the ISO codes Morpheus stores, amounts and statuses are the same as in 1.2.2.
 
 ### Verified
 
-- Unit tests only (Spock): 132 tests, 0 failures (124 in 1.2.2). New: the currency rule with
+- Unit tests only (Spock): 156 tests, 0 failures (124 in 1.2.2). New: the currency rule with
   non-ISO values for budget and invoice currencies, the month key under a JVM default locale with
   Thai digits, `loadData()` with invoices for a master and a sub-tenant viewer. The new tests fail
   against the 1.2.2 currency rule, the default-locale month key, and a swapped order of the owner
   and scope parameters.
+- Unit tests for switched-off budgets: the budget query reads the flag and filters nothing on it;
+  `loadData()` with one enabled and two disabled budgets (one over budget, one with spend in
+  another currency) lists all three, the disabled ones last with their amounts, *Disabled* in its
+  own color, the status they would have as a small line (*would be Over budget*, *would be
+  Currency mismatch*), the foreign amounts and the mismatch marking of the row kept, and no
+  currency mismatch note; the flag
+  as the database returns it (`0`, `1`, `BigInteger`, `true`/`false`, `NULL` as enabled); the
+  texts in English and German; the rendered row (marker class, striped bar, small status line).
+- Database schema on HPE Morpheus 9.1.0-1: `account_budget.enabled` and `account_budget.active`
+  are both `bit(1) NOT NULL`, and a deleted budget is removed from the table rather than flagged.
+  The REST API and the CLI expose `enabled`, so the page reads that flag; `active` is not used.
 - Local build with JDK 17 and Gradle 9.8.0, one jar `morpheus-budget-burn-plugin-1.2.3-all.jar`.
 
 ### Not yet verified
 
 - On an appliance: the release jar loads in place of 1.2.2, and the page shows the same budgets,
   amounts and statuses as 1.2.2 as a master tenant user and as a sub-tenant user.
+- A budget switched off through `PUT /api/budgets/<id>` with `enabled: false` on the lab
+  appliance: the row moves to the end of the table, shows *Disabled* with its amounts and the
+  status it would have (English and German), and brings up no currency mismatch note; switched on
+  again, it shows its normal status in its normal place.
+- The look of a disabled row (slate blue italic status, striped bar, dimmed amounts) in the
+  browser, on a light and on a dark page; checked in unit tests and by review only.
+- The new budget query on a 9.0.2 appliance (the minimum version). The `enabled` column is in the
+  9.0.2 schema as well.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.2.2...budget-burn-v1.2.3
 
@@ -136,13 +184,13 @@ unchanged.
 
 - **Deleted instances (not verified).** If Morpheus removes the `container` row when an instance
   and its server are deleted, a server invoice of that VM left over in the month counts again next
-  to the instance invoice. In the lab the server invoices of two deleted Contoso instances stayed
-  out, so the row seems to survive the deletion; the amounts involved are what accrued until then.
+  to the instance invoice. In the lab the server invoices of two deleted instances of one tenant
+  stayed out, so the row seems to survive the deletion; the amounts involved are what accrued until then.
 
 ### Verified
 
 - Unit tests (Spock) for the new filter.
-- Lab appliance (Morpheus 9.0.2, master tenant), 1.2.1-rc.1 built from the same source: tenant budgets Contoso forecast 29.48 EUR, Fabrikam 13.62 EUR (1.2.0: 56.71 and 26.72 EUR), the same amounts as MSP Tenant Overview and Tenant Chargeback. The new filter runs against the `container` table without error.
+- Lab appliance (Morpheus 9.0.2, master tenant), 1.2.1-rc.1 built from the same source: two tenant budgets with a forecast of 29.48 EUR and 13.62 EUR (1.2.0: 56.71 and 26.72 EUR), the same amounts as MSP Tenant Overview and Tenant Chargeback. The new filter runs against the `container` table without error.
 - The release jar loads on the lab appliance (9.0.2) in place of 1.2.1-rc.1.
 
 Built by the release workflow from the source at tag `budget-burn-v1.2.1`.

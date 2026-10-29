@@ -43,6 +43,9 @@ import static com.morpheusdata.budgetburn.BudgetBurnMath.*
  * compared with the budget; amounts in other currencies are shown separately, never added
  * up, and the row is flagged as currency mismatch (no burn rate, no percentage).
  *
+ * A budget switched off in Morpheus (enabled = 0) stays in the list with its amounts, marked
+ * disabled with the status it would have as a small line, sorted last, and never flagged.
+ *
  * Language: texts and number formats follow the viewer's own language setting in Morpheus
  * (user.locale), the same setting that picks the language of the Morpheus UI. Without a usable
  * setting the web request's locale (browser language) counts, without a request English.
@@ -57,7 +60,9 @@ class BudgetBurnAnalyticsProvider extends AbstractAnalyticsProvider {
 
 	// Only yearly budgets; the budget currency is the owner's (as GET /api/budgets/{id} shows it).
 	// owner_master feeds the spend rule in scopeCondition (owner's invoices only, plus subtenants' for the master).
-	static final String BUDGET_SELECT = "SELECT b.*, a.name AS owner, a.currency AS owner_currency, CAST(a.master_account AS UNSIGNED) AS owner_master FROM account_budget b JOIN account a ON a.id = b.account_id WHERE b.period = 'year' AND b.period_value = ?"
+	// budget_enabled is the budget's enabled flag (bit(1), the 'enabled' of the REST API); NULL counts as enabled.
+	// Switched-off budgets stay in the list and are marked disabled, so nothing is filtered on it.
+	static final String BUDGET_SELECT = "SELECT b.*, a.name AS owner, a.currency AS owner_currency, CAST(a.master_account AS UNSIGNED) AS owner_master, COALESCE(CAST(b.enabled AS UNSIGNED), 1) AS budget_enabled FROM account_budget b JOIN account a ON a.id = b.account_id WHERE b.period = 'year' AND b.period_value = ?"
 
 	// Instance invoices plus invoices of servers that belong to no instance. The server invoice of an
 	// instance's VM carries no instance_id either; the link is the container table.
@@ -228,17 +233,23 @@ class BudgetBurnAnalyticsProvider extends AbstractAnalyticsProvider {
 				String foreignRunning = foreignText(cur, bc, 'running', locale), foreignForecast = foreignText(cur, bc, 'forecast', locale)
 				String foreignYtd = joinForeign(ytdForeign(ytd, cur, bc), bc, locale)
 				boolean monthMismatch = (foreignRunning || foreignForecast) as boolean, ytdMismatch = foreignYtd as boolean
-				anyMismatch = anyMismatch || monthMismatch || ytdMismatch
-				String st = status(forecast, budgetMonth, monthMismatch)
+				boolean enabled = isEnabled(b.budget_enabled)
+				// A switched-off budget raises no flag: its amounts are still shown, the mismatch note is not.
+				anyMismatch = anyMismatch || (enabled && (monthMismatch || ytdMismatch))
+				String computed = status(forecast, budgetMonth, monthMismatch)
+				String st = displayStatus(computed, enabled)
+				// The status it would have, as a small line under "Disabled".
+				String detail = enabled ? null : text('status.wouldBe', 'would be {0}', locale).replace('{0}', text(statusKey(computed), computed, locale))
 				[name: b.name, owner: b.owner, scopeText: text(scopeKey(b.ref_scope as String), b.ref_scope as String, locale), target: b.ref_name ?: b.owner, currency: bc,
 				 budgetText: money(budgetMonth, locale), runningText: money(running, locale), forecastText: money(forecast, locale),
 				 burnText: money(burnRate(running, day), locale),
 				 usedPct: pctLabel(running, budgetMonth, locale), forecastPct: pctLabel(forecast, budgetMonth, locale), bar: barWidth(forecast, budgetMonth),
 				 mismatch: monthMismatch, foreignRunning: foreignRunning, foreignForecast: foreignForecast,
-				 statusText: text(statusKey(st), st, locale), color: statusColor(st),
+				 statusText: text(statusKey(st), st, locale), color: statusColor(st), disabled: !enabled, statusDetail: detail,
 				 ytdMismatch: ytdMismatch, foreignYtd: foreignYtd,
 				 ytdBudgetText: money(budgetYtd, locale), ytdText: money(ytdSpend, locale), ytdPct: pctLabel(ytdSpend, budgetYtd, locale)]
 			}
+			items = disabledLast(items)
 			ServiceResponse.success([text: texts(locale), language: bundleLanguage(locale), items: items, tenant: acc?.name, master: master, day: day, days: days, anyMismatch: anyMismatch,
 				month: "${year}-${month.toString().padLeft(2, '0')}".toString(), count: items.size()])
 		} catch(Exception e) {

@@ -28,7 +28,8 @@ One row per budget with `period = year` for the current calendar year:
 - **Status** – *On track* below 80 %, *Warning* from 80 % to 100 %, *Over budget* above 100 %
   of the monthly budget (forecast based). A monthly budget of 0 is *Over budget* as soon as
   there is a forecast, and *On track* without one; its percentages show `-` instead of a number,
-  and the bar is full when there is spend.
+  and the bar is full when there is spend. A budget that is switched off shows *Disabled* (see
+  below).
 - **Year to date** – closed months (`total_price`) plus the current month's forecast, against
   the budget for January to the current month. Quarterly and yearly shares are rounded once for
   the whole period, so in December a yearly budget shows exactly its amount.
@@ -44,6 +45,21 @@ budget owned by the master tenant also counts the invoices of its sub-tenants wi
 (for example every tenant's spend on a cloud). A sub-tenant's budget never counts another
 tenant's invoices, even when its cloud is shared by the master tenant or its group or user also
 carries invoices of the master tenant.
+
+**Switched-off budgets (since 1.2.3).** A budget whose `enabled` flag is off (`enabled: false`
+in the REST API and the CLI; the budget form of Morpheus 9.1.0 has no such field) is still
+listed, with all its amounts, but at the end of the table and with the status *Disabled*
+instead of *On track*, *Warning*, *Over budget* or *Currency mismatch*. *Disabled* has a look
+of its own: a slate blue status in italics (neither an alarm color nor the grey of a currency
+mismatch), a striped bar and dimmed amounts. The status the budget would have when switched on
+stays visible as a small line under it, for example *would be Over budget*. A disabled budget
+never raises an alarm: its status is never *Currency mismatch*, and it does not bring up the
+currency mismatch note under the table. Spend in another currency is still shown in its row as
+for an enabled budget: the foreign amounts under *Spend to date* and *Forecast*, no burn rate,
+*No comparison: costs in a currency other than the budget currency* in place of the bar (so no
+striped bar), *would be Currency mismatch* as the small status line when this month has such
+spend, and in *Year to date* the foreign amounts followed by *Currency mismatch* when the year
+so far has such spend. A budget without a value for the flag counts as enabled.
 
 ## Who sees what
 
