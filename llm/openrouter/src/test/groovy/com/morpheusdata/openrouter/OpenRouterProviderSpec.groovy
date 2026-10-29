@@ -11,9 +11,13 @@ import com.morpheusdata.model.llm.LlmIntegration
 import com.morpheusdata.model.llm.LlmModel
 import com.morpheusdata.response.LlmStreamingResponseHandler
 import com.morpheusdata.response.ServiceResponse
+import com.sun.net.httpserver.HttpExchange
+import com.sun.net.httpserver.HttpHandler
+import com.sun.net.httpserver.HttpServer
 import spock.lang.Specification
 
 import java.time.LocalDate
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Covers the form, validation, request and response handling, the cost footer and
@@ -23,6 +27,29 @@ class OpenRouterProviderSpec extends Specification {
 
 	OpenRouterProvider provider = new OpenRouterProvider(null, null)
 	AccountIntegration integration = new AccountIntegration(serviceUrl: OpenRouterProvider.DEFAULT_API_URL)
+	HttpServer server
+
+	def cleanup() {
+		server?.stop(0)
+	}
+
+	/**
+	 * A local /chat/completions that answers its n-th request with the n-th SSE stream (the
+	 * last one again after that) and then closes the connection; requests counts them.
+	 */
+	private String serveStreams(List<List<String>> streams, AtomicInteger requests) {
+		server = HttpServer.create(new InetSocketAddress('127.0.0.1', 0), 0)
+		server.createContext('/api/v1/chat/completions', { HttpExchange exchange ->
+			exchange.requestBody.bytes
+			int index = Math.min(requests.getAndIncrement(), streams.size() - 1)
+			byte[] bytes = streams[index].join('\n').getBytes('UTF-8')
+			exchange.responseHeaders.add('Content-Type', 'text/event-stream')
+			exchange.sendResponseHeaders(200, bytes.length)
+			exchange.responseBody.withStream { it.write(bytes) }
+		} as HttpHandler)
+		server.start()
+		return "http://127.0.0.1:${server.address.port}/api/v1"
+	}
 
 	private static LlmChatMessage message(String role, String content, Map metadata = null) {
 		LlmChatMessage msg = new LlmChatMessage()
@@ -474,6 +501,73 @@ class OpenRouterProviderSpec extends Specification {
 		errors.isEmpty()
 		completed*.message*.content == ['Two servers run\n\n**OpenRouter error 429:** Rate limit exceeded (provider: OpenAI)\n\n' +
 			'Too many requests in a short time. Wait a minute and ask again.']
+	}
+
+	def "a stream that closes before the answer is complete, with nothing shown yet, is asked again and the second answer is used"() {
+		given: 'the first stream breaks off inside a tool call, before any text; the second one completes'
+		AtomicInteger requests = new AtomicInteger()
+		String baseUrl = serveStreams([
+			[': OPENROUTER PROCESSING', '',
+			 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"list_servers","arguments":"{\\"na"}}]},"finish_reason":null}]}', ''],
+			['data: {"choices":[{"index":0,"delta":{"content":"Two servers run."},"finish_reason":"stop"}]}', '', 'data: [DONE]', '']
+		], requests)
+		List<Long> waits = []
+		provider.sleeper = { long millis -> waits << millis }
+		List<String> parts = []
+		List<LlmChatResponse> completed = []
+		List<Throwable> errors = []
+		LlmStreamingResponseHandler handler = [
+			onPartialResponse : { String chunk -> parts << chunk },
+			onCompleteResponse: { LlmChatResponse response -> completed << response },
+			onError           : { Throwable t -> errors << t }
+		] as LlmStreamingResponseHandler
+		AccountIntegration ai = new AccountIntegration(serviceUrl: baseUrl, servicePassword: 'sk-or-v1-test')
+
+		when:
+		provider.streamResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(model: 'openai/gpt-5.5', messages: [message('user', 'Which servers are running?')]), handler, [:])
+
+		then: 'asked once more, after the short wait of a connection failure'
+		requests.get() == 2
+		waits == [1500L]
+		errors.isEmpty()
+		parts == ['Two servers run.']
+		completed*.message*.content == ['Two servers run.']
+
+		and: 'nothing of the broken tool call reaches Morpheus'
+		completed[0].finishReason == 'stop'
+		!completed[0].metadata.tool_calls
+	}
+
+	def "a stream that closes after its first words ends with the error under them, and is not asked again"() {
+		given:
+		AtomicInteger requests = new AtomicInteger()
+		String baseUrl = serveStreams([
+			['data: {"choices":[{"index":0,"delta":{"content":"Two servers"},"finish_reason":null}]}', '']
+		], requests)
+		List<Long> waits = []
+		provider.sleeper = { long millis -> waits << millis }
+		List<String> parts = []
+		List<LlmChatResponse> completed = []
+		List<Throwable> errors = []
+		LlmStreamingResponseHandler handler = [
+			onPartialResponse : { String chunk -> parts << chunk },
+			onCompleteResponse: { LlmChatResponse response -> completed << response },
+			onError           : { Throwable t -> errors << t }
+		] as LlmStreamingResponseHandler
+		AccountIntegration ai = new AccountIntegration(serviceUrl: baseUrl, servicePassword: 'sk-or-v1-test')
+
+		when:
+		provider.streamResponse(new LlmIntegration(accountIntegration: ai),
+			new LlmChatRequest(model: 'openai/gpt-5.5', messages: [message('user', 'Which servers are running?')]), handler, [:])
+
+		then: 'one request only: another try would repeat the words already shown'
+		requests.get() == 1
+		waits.isEmpty()
+		errors.isEmpty()
+		parts == ['Two servers']
+		completed*.message*.content == ['Two servers\n\n**OpenRouter error:** stream closed before the answer was complete']
+		completed[0].metadata.error
 	}
 
 	def "error answers are left out of replayed history, and text before one is kept"() {
@@ -1279,6 +1373,339 @@ class OpenRouterProviderSpec extends Specification {
 		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
 	}
 
+	/** A request of one agent on integration 4 that lost its question; only the tool loop on these ids is left. */
+	private static List<Map> lostQuestion(List<String> ids) {
+		List<Map> messages = [[role: 'system', content: 'You are Murph.']]
+		ids.each { String id ->
+			messages << [role: 'assistant', content: '', tool_calls: [[id: id, type: 'function', function: [name: 'list_servers', arguments: '{}']]]]
+			messages << [role: 'tool', tool_call_id: id, content: 'part']
+		}
+		return messages
+	}
+
+	/** Remembers the question asked of that agent for these tool call ids. */
+	private static void ask(String question, List<String> ids) {
+		OpenRouterProvider.rememberQuestion([messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: question]]],
+			response(ids.collect { String id -> [id: id, type: 'function', function: [name: 'list_servers', arguments: '{}']] }), 4L)
+	}
+
+	def "two tool loops that store different questions on the same tool call id at once restore neither"() {
+		given: 'two users of one agent, on a backend whose tool call ids repeat; the first loop is a round further'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		String ID2 = 'tool_1_get_result_excerpt'
+		ask('List the AWS servers', [ID])
+		ask('List the AWS servers', [ID2])
+		ask('List the Azure servers', [ID])
+		List<Map> first = lostQuestion([ID2, ID])
+		List<Map> second = lostQuestion([ID])
+
+		when:
+		boolean firstRestored = OpenRouterProvider.restoreLostQuestion(first, 4L)
+		boolean secondRestored = OpenRouterProvider.restoreLostQuestion(second, 4L)
+
+		then: 'the shared id is a marker: the time of the clash and two hashes, no question and no cost key'
+		OpenRouterProvider.isAmbiguous(remembered(ID))
+		remembered(ID).keySet() == ['ambiguous', 'clashed', 'updated'] as Set
+		remembered(ID).clashed.size() == 2
+		!remembered(ID).clashed.any { String hash -> hash.contains('AWS') || hash.contains('Azure') }
+
+		and: 'neither request gets a question, not even through the id only the first loop used'
+		!firstRestored
+		!secondRestored
+		first.size() == 5
+		second.size() == 3
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "the loops that clashed storing their own questions again do not renew the mark, which ends 10 minutes after the last clash"() {
+		given: 'a clash on the shared id nine minutes ago; the first loop also called a tool of its own'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		String OWN = 'tool_1_get_result_excerpt'
+		ask('List the AWS servers', [ID])
+		ask('List the Azure servers', [ID])
+		long clash = System.currentTimeMillis() - OpenRouterProvider.QUESTION_CLASH_WINDOW_MS + 60000L
+		remembered(ID).ambiguous = clash
+		remembered(ID).updated = clash
+
+		when: 'both loops call the tool again within the window, each with its own question'
+		ask('List the Azure servers', [ID])
+		ask('List the AWS servers', [ID])
+		ask('List the AWS servers', [OWN])
+
+		then: 'the key is refreshed, but the mark keeps the time of the clash and still holds'
+		(remembered(ID).updated as long) > clash
+		remembered(ID).ambiguous == clash
+		remembered(ID).clashed.size() == 2
+		!OpenRouterProvider.restoreLostQuestion(lostQuestion([OWN, ID]), 4L)
+
+		when: 'the window passes since the clash'
+		remembered(ID).ambiguous = System.currentTimeMillis() - OpenRouterProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		List<Map> lost = lostQuestion([OWN, ID])
+
+		then: 'the mark is over: the loop gets its question back through its own id'
+		!OpenRouterProvider.isAmbiguous(remembered(ID))
+		OpenRouterProvider.restoreLostQuestion(lost, 4L)
+		lost[1].content == OpenRouterProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+
+		when: 'one loop stores its question on the shared id again, while the key is still stored on within the window'
+		ask('List the AWS servers', [ID])
+		lost = lostQuestion([ID])
+
+		then: 'the key holds no question, so a loop with only that id left gets nothing back'
+		remembered(ID).question == null
+		!OpenRouterProvider.isAmbiguous(remembered(ID))
+		!OpenRouterProvider.restoreLostQuestion(lost, 4L)
+		lost*.role == ['system', 'assistant', 'tool']
+
+		when: 'nothing is stored on it for the window, and then a question is'
+		remembered(ID).updated = System.currentTimeMillis() - OpenRouterProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		ask('List the AWS servers', [ID])
+		lost = lostQuestion([ID])
+
+		then: 'that question takes it over'
+		remembered(ID).question == 'List the AWS servers'
+		OpenRouterProvider.restoreLostQuestion(lost, 4L)
+		lost[1].content == OpenRouterProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "after the mark ends, a key the loops still store on hands neither loop the other one's question"() {
+		given: 'loops A and B clashed on X more than 10 minutes ago and both kept storing their questions on it'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		String X = 'tool_0_list_servers'
+		ask('List the AWS servers', [X])
+		ask('Which VMs are stopped?', [X])
+		remembered(X).ambiguous = System.currentTimeMillis() - OpenRouterProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		remembered(X).updated = System.currentTimeMillis() - 60000L
+
+		when: 'A stores its question on X again; B lost its question and has only X left'
+		ask('List the AWS servers', [X])
+		List<Map> lostB = lostQuestion([X])
+
+		then: "B does not get A's question"
+		remembered(X).question == null
+		!OpenRouterProvider.restoreLostQuestion(lostB, 4L)
+		lostB*.role == ['system', 'assistant', 'tool']
+
+		when: 'a question that was not part of the clash is stored on X within the window'
+		ask('Which clouds are offline?', [X])
+
+		then: 'it is a new clash'
+		OpenRouterProvider.isAmbiguous(remembered(X))
+		remembered(X).clashed.size() == 3
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a loop that lost its question marks its tool calls even when nothing was known of it, so another loop's question cannot come back"() {
+		given: 'the plugin knows nothing of loop B (it was reloaded), and B lost its question'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'tool_0_list_servers'
+		List<Map> lostB = lostQuestion(['tool_7_list_clouds'])
+
+		when: 'B calls Y, and loop A, with its own question, gets the same id a moment later'
+		boolean restoredBefore = OpenRouterProvider.restoreLostQuestion(lostB, 4L)
+		OpenRouterProvider.rememberQuestion([messages: lostB], response([[id: Y, type: 'function', function: [name: 'list_servers', arguments: '{}']]]), 4L)
+		Map marked = new LinkedHashMap(remembered(Y))
+		ask('List the AWS servers', [Y])
+		List<Map> nextB = lostQuestion([Y])
+
+		then: 'B left a marker without question on Y'
+		!restoredBefore
+		marked.question == null
+		OpenRouterProvider.isAmbiguous(marked)
+
+		and: "A's question on Y is a clash, and B gets nothing back"
+		remembered(Y).question == null
+		OpenRouterProvider.isAmbiguous(remembered(Y))
+		!OpenRouterProvider.restoreLostQuestion(nextB, 4L)
+		nextB*.role == ['system', 'assistant', 'tool']
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a restored request counts on the cost key of its tool calls only while they name one question"() {
+		given: 'a restored request whose tool calls Y and Z are known'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'tool_0_list_servers'
+		String Z = 'tool_1_list_instances'
+		long now = System.currentTimeMillis()
+		String scope = OpenRouterProvider.questionScope(4L, [[role: 'system', content: 'You are Murph.']])
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.put(OpenRouterProvider.toolCallKey(scope, Y), [question: 'List the AWS servers', costKey: 'kA', updated: now])
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.put(OpenRouterProvider.toolCallKey(scope, Z), z + [updated: now])
+		List<Map> restored = lostQuestion([Y, Z])
+		restored.add(1, [role: 'user', content: OpenRouterProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'])
+
+		expect: 'with Z marked or holding another question, neither cost key is used'
+		!(OpenRouterProvider.questionKey([model: 'm', messages: restored], 4L) in ['kA', 'kB'])
+
+		when: 'Z is no longer known'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.remove(OpenRouterProvider.toolCallKey(scope, Z))
+
+		then: "Y's cost key is used"
+		OpenRouterProvider.questionKey([model: 'm', messages: restored], 4L) == 'kA'
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		where:
+		z << [[ambiguous: System.currentTimeMillis(), clashed: ['a', 'b'] as Set], [question: 'Which VMs are stopped?', costKey: 'kB']]
+	}
+
+	def "a third question on a marked key is a new clash and renews the mark"() {
+		given:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		ask('List the AWS servers', [ID])
+		ask('List the Azure servers', [ID])
+		long earlier = System.currentTimeMillis() - 60000L
+		remembered(ID).ambiguous = earlier
+
+		when:
+		ask('Which VMs are stopped?', [ID])
+
+		then:
+		(remembered(ID).ambiguous as long) > earlier
+		remembered(ID).clashed.size() == 3
+		!OpenRouterProvider.restoreLostQuestion(lostQuestion([ID]), 4L)
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "the same question on a key again only refreshes it, and the restore still works"() {
+		given: 'the key holds the cost key of the conversation that stored the question first'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		ask('List the AWS servers', [ID])
+		long earlier = System.currentTimeMillis() - 60000L
+		remembered(ID).updated = earlier
+		remembered(ID).costKey = 'first'
+
+		when:
+		ask('List the AWS servers', [ID])
+		List<Map> lost = lostQuestion([ID])
+
+		then:
+		remembered(ID).ambiguous == null
+		(remembered(ID).updated as long) > earlier
+		remembered(ID).costKey == 'first'
+		OpenRouterProvider.restoreLostQuestion(lost, 4L)
+		lost[1].content == OpenRouterProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a different question on a key not written for 10 minutes replaces what it held, and is restored"() {
+		given: 'an older question, or a marker nothing was stored on for the window'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		String scope = OpenRouterProvider.questionScope(4L, [[role: 'system', content: 'You are Murph.']])
+		long old = System.currentTimeMillis() - OpenRouterProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.put(OpenRouterProvider.toolCallKey(scope, ID), held + [updated: old])
+
+		when:
+		boolean restoredBefore = OpenRouterProvider.restoreLostQuestion(lostQuestion([ID]), 4L)
+		ask('List the Azure servers', [ID])
+		List<Map> lost = lostQuestion([ID])
+
+		then: 'the old question still came back on its own; the marker never hands one back'
+		restoredBefore == (held.question != null)
+		remembered(ID).ambiguous == null
+		OpenRouterProvider.restoreLostQuestion(lost, 4L)
+		lost[1].content == OpenRouterProvider.RESTORED_QUESTION_NOTE + 'List the Azure servers'
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		where:
+		held << [[question: 'List the AWS servers', costKey: 'k'],
+			[ambiguous: System.currentTimeMillis() - OpenRouterProvider.QUESTION_CLASH_WINDOW_MS - 1000L, clashed: ['a', 'b'] as Set]]
+	}
+
+	def "a request whose known tool calls hold different questions, or a marked one, gets no question back"() {
+		given: 'a loop with two tool calls left, the first of them clean'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'tool_0_list_servers'
+		String Z = 'tool_1_list_instances'
+		long now = System.currentTimeMillis()
+		String scope = OpenRouterProvider.questionScope(4L, [[role: 'system', content: 'You are Murph.']])
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.put(OpenRouterProvider.toolCallKey(scope, Y), [question: 'Which VMs are stopped?', costKey: 'k', updated: now])
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.put(OpenRouterProvider.toolCallKey(scope, Z), z + [updated: now])
+		List<Map> lost = lostQuestion([Y, Z])
+
+		expect:
+		OpenRouterProvider.restoreLostQuestion(lost, 4L) == expected
+		lost*.role == ['system'] + (expected ? ['user'] : []) + ['assistant', 'tool', 'assistant', 'tool']
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		where:
+		z                                                             || expected
+		[question: 'List the AWS servers', costKey: 'k']              || false
+		[ambiguous: System.currentTimeMillis(), clashed: ['a'] as Set] || false
+		[question: 'Which VMs are stopped?', costKey: 'k']            || true
+	}
+
+	def "a loop refused its question marks its next tool calls, so the other loop's question cannot come back through them"() {
+		given: 'loops A and B clashed on Y; A called Z with its question still in memory'
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'tool_0_list_servers'
+		String Z = 'tool_1_list_instances'
+		String W = 'tool_2_get_instance'
+		ask('List the AWS servers', [Y])
+		ask('Which VMs are stopped?', [Y])
+		ask('List the AWS servers', [Z])
+		long clash = System.currentTimeMillis() - 300000L
+		remembered(Y).ambiguous = clash
+
+		when: 'B lost its question, is refused it through Y and calls Z without it'
+		List<Map> refused = lostQuestion([Y])
+		boolean restoredThroughY = OpenRouterProvider.restoreLostQuestion(refused, 4L)
+		long refusedAt = System.currentTimeMillis()
+		OpenRouterProvider.rememberQuestion([messages: refused], response([[id: Z, type: 'function', function: [name: 'list_instances', arguments: '{}']]]), 4L)
+
+		and: 'the chat memory dropped the calls on Y; B calls W, then A does'
+		List<Map> later = lostQuestion([Z])
+		boolean restoredThroughZ = OpenRouterProvider.restoreLostQuestion(later, 4L)
+		OpenRouterProvider.rememberQuestion([messages: later], response([[id: W, type: 'function', function: [name: 'get_instance', arguments: '{}']]]), 4L)
+		long markedW = (remembered(W).ambiguous as long) - 60000L
+		remembered(W).ambiguous = markedW
+		ask('List the AWS servers', [W])
+		List<Map> last = lostQuestion([W])
+
+		then: 'Z holds a marker without question, and B gets nothing back through it'
+		!restoredThroughY
+		OpenRouterProvider.isAmbiguous(remembered(Z))
+		remembered(Z).question == null
+		!restoredThroughZ
+		later*.role == ['system', 'assistant', 'tool']
+
+		and: 'the mark B passed on starts at its own call, not at the clash on Y'
+		(remembered(Z).ambiguous as long) >= refusedAt
+		remembered(Y).ambiguous == clash
+
+		and: "A's question on W is part of the clash, so it neither lifts nor renews the mark B left there"
+		OpenRouterProvider.isAmbiguous(remembered(W))
+		remembered(W).ambiguous == markedW
+		remembered(W).question == null
+		!OpenRouterProvider.restoreLostQuestion(last, 4L)
+		last*.role == ['system', 'assistant', 'tool']
+
+		cleanup:
+		OpenRouterProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
 	def "the cost of a question is kept per integration"() {
 		given:
 		Map body = [model: 'm', messages: [[role: 'user', content: 'Clouds?']]]
@@ -1338,6 +1765,32 @@ class OpenRouterProviderSpec extends Specification {
 		response.finishReason == 'length'
 		!response.metadata.tool_calls
 		response.message.content == '*Answer cut off at the output token limit.*'
+	}
+
+	def "a tool call the token limit cut off before its first argument character is dropped, not run with {}"() {
+		given:
+		List calls = [
+			[id: 'c1', type: 'function', function: [name: 'list_clouds', arguments: '{}']],
+			[id: 'c2', type: 'function', function: [name: 'list_servers', arguments: '']],
+			[id: 'c3', type: 'function', function: [name: 'list_groups']],
+			[id: 'c4', type: 'function', function: [name: 'list_networks', arguments: '[]']],
+			[id: 'c5', type: 'function', function: [name: 'list_instances', arguments: [name: 'web']]]
+		]
+
+		when:
+		LlmChatResponse cut = provider.parseChatResponse([choices: [[finish_reason: 'length', message: [role: 'assistant', content: '', tool_calls: calls]]]])
+
+		then: 'only arguments that are a JSON object survive the cut'
+		cut.finishReason == 'tool_calls'
+		cut.metadata.tool_calls*.id == ['c1', 'c5']
+		cut.metadata.tool_calls*.function*.arguments == ['{}', '{"name":"web"}']
+
+		when: 'the same calls in a turn that was not cut off'
+		LlmChatResponse whole = provider.parseChatResponse([choices: [[finish_reason: 'tool_calls', message: [role: 'assistant', content: '', tool_calls: calls]]]])
+
+		then: 'a tool without arguments still runs with {}, as before'
+		whole.metadata.tool_calls*.id == ['c1', 'c2', 'c3', 'c4', 'c5']
+		whole.metadata.tool_calls*.function*.arguments == ['{}', '{}', '{}', '[]', '{"name":"web"}']
 	}
 
 	def "a U+FFFD in a tool result of the running question adds no note, so its cost key stays"() {

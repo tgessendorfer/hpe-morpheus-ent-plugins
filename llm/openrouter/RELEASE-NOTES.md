@@ -20,10 +20,47 @@ catalog no longer empties the integration.** Built against plugin API 1.4.2. No 
   now bound to **the integration and the system messages the conversation starts with**, which
   Morpheus' chat memory never evicts, and a question is restored only within that scope. When a
   known tool call belongs to another scope, the log says *Not restoring a dropped question: its tool
-  calls were remembered for another integration or system prompt*. This narrows the leak; it does
-  not close it. Two users of the same agent on the same integration share one scope, because
-  Morpheus hands the plugin no user, so with such fixed-pattern tool call ids one of them can still
-  get the other's question restored.
+  calls were remembered for another integration or system prompt*.
+- **Two tool loops that share a tool call id get no question back.** Morpheus hands the plugin no
+  user, so two users of the same agent on the same integration share one scope, and a backend that
+  names its tool calls in a fixed pattern (`tool_0_list_servers`) gives two tool loops running at
+  the same time the same id. Up to 0.2.4 the question stored last on that id came back in both
+  conversations. The rule now:
+  - **A different question stored on a tool call id that was written less than 10 minutes before
+    is a clash and marks the id ambiguous.** The mark holds short hashes of the questions that
+    clashed and the time of the last clash, never a question text.
+  - **While an id is marked, a request that carries it gets no question back**, not even through
+    another tool call of the same loop. The same goes for a request whose tool calls hold
+    different questions. The log says *Not restoring a dropped question: its tool calls belong to
+    more than one question, so it could be another conversation's*, without any question text.
+  - **A mark ends 10 minutes after the last clash.** A question that is already part of the clash,
+    stored again by a loop that keeps running, does not renew it; only another different question
+    does. After the mark the id no longer stops a request, but it holds no question until nothing
+    has been stored on it for 10 minutes, since either loop may still be running; then the next
+    question stored on it takes it over.
+  - The same question stored again on an id that is not marked only refreshes its time; the id
+    keeps the cost key it was first stored with. An id not written for 10 minutes takes a new
+    question, as before.
+  - **A loop that has no question left and gets none back marks the tool calls it makes next**,
+    whether it was refused or nothing was known of its earlier tool calls (after a plugin reload,
+    say). Each id it marks stays marked for 10 minutes from that call, so the loop gets nothing
+    back for the rest of its run, and a question another loop stores on those ids later does not
+    come back into it.
+  - When it cannot tell which question a request's tool calls belong to, the plugin restores
+    nothing: the worst case there is the lost question of Morpheus 9.1, never another user's
+    question.
+
+  In this plugin the key carries the integration and the system messages the conversation starts
+  with, so only loops of the same integration and agent can clash. Tool call ids that look random
+  never repeat, so only backends with fixed-pattern ids are affected.
+
+  Two known limits: a backend that repeats its ids from one question to the next also marks a
+  user's own follow-up question asked within 10 minutes, which then gets no restore through those
+  ids; and since an id not written for 10 minutes takes the next question, a loop whose latest tool
+  call is more than 10 minutes old (one tool that runs that long), or whose earlier tool calls the
+  plugin no longer knows (after a plugin reload), can still get back the question of another loop
+  that stored on the same id in the meantime. One long tool loop on Morpheus 9.1 was measured at
+  137 s. The size and age limits of the map (10,000 entries, one hour) are unchanged.
 - **The cost footer counts per integration.** The key of a question's running cost now includes
   the integration. Morpheus hands the plugin no user, so two users asking the same first question
   through the same agent at the same moment can still share one tally.
@@ -35,8 +72,10 @@ catalog no longer empties the integration.** Built against plugin API 1.4.2. No 
 - **A tool call the output token limit cut off is no longer passed on.** With `finish_reason:
   length` the plugin still made the turn a tool-call turn, so half-written JSON arguments reached
   Morpheus. Calls whose arguments are not a complete JSON object are now dropped and logged; the
-  complete ones still run. With none left, the answer carries the truncation note, like a text
-  answer that was cut off.
+  complete ones still run. **Empty arguments count as incomplete**: a call cut off before its first
+  argument character would otherwise have run as `{}`. In a turn that was not cut off, a tool call
+  without arguments still runs with `{}`. With none left, the answer carries the truncation note,
+  like a text answer that was cut off.
 - **An empty catalog no longer removes every model.** A model list that came back empty, or with
   no entry that passes the filter (after a field rename, say), was synced as "nothing listed": every
   model was removed, and the ones agents use were disabled. The sync now keeps the stored models and
@@ -55,25 +94,52 @@ catalog no longer empties the integration.** Built against plugin API 1.4.2. No 
 
 - A dropped question is restored only for a request from the same integration that starts with the
   same system messages as the request whose tool calls worked on it.
+- A dropped question is not restored while a tool call of the request is marked (a different
+  question was stored on it less than 10 minutes after it was last written; the mark ends 10 minutes
+  after the last clash), or when its tool calls hold different questions; 0.2.4 restored the
+  question stored last. An id that was marked brings no question back until nothing has been stored
+  on it for 10 minutes, and a loop that gets no question back marks the tool calls it makes next.
 - Required arguments, and `false` where the tool defaults to `true`, reach the tool even when empty.
-- Incomplete tool calls in an answer cut off by the token limit are not run.
+- Incomplete tool calls, empty arguments included, in an answer cut off by the token limit are not
+  run.
 - A catalog without a usable model leaves the integration's models as they are.
 - A stream cut off without `[DONE]` or a finish reason ends as an error answer (with *Show
   OpenRouter Errors in Chat* unticked: as an error) instead of as a partial answer.
 
 ### Verified
 
-- Unit tests (Spock), ten of them new: a remembered question is not restored for another
-  integration or another system prompt, and is for its own conversation, also with the plugin's
-  U+FFFD note among the system messages; the cost key differs per integration and stays the same
-  through a tool round; a required `offset: 0` and a `false` over a `true` default are kept while
-  other empty arguments go; an incomplete tool call under `finish_reason: length` is dropped and the
-  complete one runs, and with none left the answer is the truncation note; a U+FFFD in a tool result
-  of the running question adds no note and keeps the cost key; the key is trimmed; a catalog without
-  a usable model leaves the stored models alone; a stream without `[DONE]` and finish reason fails,
-  one with a finish reason but no `[DONE]` completes. The restore tests now send the agent's system
-  prompt with the first request, as Morpheus does.
-- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar`, 161 tests, 0 failures.
+- Unit tests (Spock), 27 more test cases than in 0.2.4: a remembered question is not restored for
+  another integration or another system prompt, and is for its own conversation, also with the
+  plugin's U+FFFD note among the system messages; two tool loops that store different questions on
+  one tool call id at once restore neither, not even through an id only one of them used, and the id
+  holds no question text; both loops storing their own questions again refresh the id without
+  renewing the mark, while a third question renews it; 10 minutes after the last clash the loop gets
+  its question back through its own id, while the shared id, still stored on, gives no question back
+  until nothing has been stored on it for 10 minutes and then takes the next question; once the mark
+  has ended, a loop that stores its question on the shared id again hands the other loop nothing,
+  and a question that was not part of the clash marks the id again; the same question again on an id
+  that is not marked only refreshes it, keeps its cost key and is still restored; a different
+  question on an id not written for 10 minutes, whether it held an old question or an ended mark,
+  replaces it and is restored; a request whose tool calls hold different questions, or a marked one,
+  restores nothing, and a restored request counts on its tool calls' cost key only while they name
+  one question; a loop refused its question marks its next tool calls from the time of its own call,
+  and the other loop's question stored on them later neither lifts nor renews that mark; a loop that
+  lost its question while nothing was known of its tool calls marks them too, so another loop's
+  question stored on them does not come back into it; the cost key differs per integration and stays
+  the same through a tool round; a required `offset: 0` and a `false` over a `true` default are kept
+  while other empty arguments go; an incomplete tool call under `finish_reason: length` is dropped
+  and the complete one runs, and with none left the answer is the truncation note; under
+  `finish_reason: length` a call with empty or missing arguments, or arguments that are no JSON
+  object, is dropped too, while the same calls in a turn that was not cut off still run; a U+FFFD in
+  a tool result of the running question adds no note and keeps the cost key; the key is trimmed; a
+  catalog without a usable model leaves the stored models alone; a stream without `[DONE]` and
+  finish reason fails, one with a finish reason but no `[DONE]` completes; against a local stream
+  endpoint, a stream that closes early before any text is asked again once and the second answer is
+  used, and one that closes after its first words is not asked again and ends with the error under
+  those words. The restore tests now send the agent's system prompt with the first request, as
+  Morpheus does.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 178 tests,
+  0 failures.
 
 ### Not yet verified
 
@@ -82,6 +148,13 @@ catalog no longer empties the integration.** Built against plugin API 1.4.2. No 
   message the same through a tool loop.
 - That Morpheus sends the `required` lists of its MCP tools in the tool definitions it hands to the
   plugin.
+- Whether the tool definitions Morpheus hands to the plugin mark any boolean parameter
+  `default: true` at all, and, where one does, that keeping a model's `false` for it does not bring
+  back the empty `list_servers` answer that *Drop Empty Tool Arguments* was made for.
+- Two users chatting with the same agent at the same time, each with a tool loop: with random tool
+  call ids each still gets their own dropped question back; with a backend whose tool call ids
+  repeat, the log shows *Not restoring a dropped question: its tool calls belong to more than one
+  question ...* instead of one user getting the other's question.
 - A chat and a model refresh with this jar.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.2.4...openrouter-v0.2.5
