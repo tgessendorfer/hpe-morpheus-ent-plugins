@@ -8,8 +8,9 @@ shaded `-all.jar` is attached.
 
 ## 0.1.5
 
-**Fix release from a code review: the output limit, parameters an API rejects, tool arguments and
-streams.** Built against plugin API 1.4.2. No new setting; plugin code unchanged.
+**Fix release from a code review: the output limit, parameters an API rejects, tool arguments,
+streams and the question map.** Built against plugin API 1.4.2. No new setting; plugin code
+unchanged.
 
 - **Default Max Output Tokens is now a floor.** Morpheus asks for 1000 output tokens on every chat
   request, so up to 0.1.4 the integration's value was never used in chat. The plugin now sends the
@@ -25,8 +26,10 @@ streams.** Built against plugin API 1.4.2. No new setting; plugin code unchanged
   `stream_options: {"include_usage": true}`; api.openai.com and vLLM report no usage in a stream
   otherwise, so a streamed answer had no usage footer and the log no usage line. An API that rejects
   `stream_options` with a `400` naming it is asked again without it, the same way. The stream reader
-  also keeps `reasoning_content` (LiteLLM, DeepSeek) out of the answer and turns a streamed
-  `refusal` into the answer, as it already did for a response that was not streamed.
+  now also collects `reasoning_content` (LiteLLM, DeepSeek) into the response metadata, as it
+  already did for a response that was not streamed; it was ignored before and never reached the
+  answer. A streamed `refusal` now becomes the answer, as it already did for a response that was not
+  streamed.
 - **Drop Empty Tool Arguments reads the tool definition.** **An argument the tool marks as
   required is kept**: `get_result_excerpt` with `offset: 0` lost its offset. **So is `false` where
   the tool's default is `true`**, which leaving it out turned into `true`. Every other empty
@@ -42,6 +45,46 @@ streams.** Built against plugin API 1.4.2. No new setting; plugin code unchanged
   conversations share can only bring back a question of the same integration and agent prompt.
   The cost key of a question carries the integration too, and no longer changes when the plugin's
   U+FFFD note joins a later round of the same question.
+- **Two tool loops that share a tool call id get no question back.** Morpheus hands the plugin no
+  user, so two users of the same agent on the same integration share one scope, and a backend that
+  names its tool calls in a fixed pattern (`tool_0_list_servers`) gives two tool loops running at
+  the same time the same id. Up to 0.1.4 the question stored last on that id came back in both
+  conversations. The rule now:
+  - **A different question stored on a tool call id that was written less than 10 minutes before
+    is a clash and marks the id ambiguous.** The mark holds short hashes of the questions that
+    clashed and the time of the last clash, never a question text.
+  - **While an id is marked, a request that carries it gets no question back**, not even through
+    another tool call of the same loop. The same goes for a request whose tool calls hold
+    different questions. The log says *Not restoring a dropped question: its tool calls belong to
+    more than one question, so it could be another conversation's*, without any question text.
+  - **A mark ends 10 minutes after the last clash.** A question that is already part of the clash,
+    stored again by a loop that keeps running, does not renew it; only another different question
+    does. After the mark the id no longer stops a request, but it holds no question until nothing
+    has been stored on it for 10 minutes, since either loop may still be running; then the next
+    question stored on it takes it over.
+  - The same question stored again on an id that is not marked only refreshes its time; the id
+    keeps the cost key it was first stored with. An id not written for 10 minutes takes a new
+    question, as before.
+  - **A loop that has no question left and gets none back marks the tool calls it makes next**,
+    whether it was refused or nothing was known of its earlier tool calls (after a plugin reload,
+    say). Each id it marks stays marked for 10 minutes from that call, so the loop gets nothing
+    back for the rest of its run, and a question another loop stores on those ids later does not
+    come back into it.
+  - When it cannot tell which question a request's tool calls belong to, the plugin restores
+    nothing: the worst case there is the lost question of Morpheus 9.1, never another user's
+    question.
+
+  In this plugin the key carries the integration and a hash of the agent's system messages, so only
+  loops of the same integration and agent can clash. Random tool call ids, as api.openai.com issues
+  them, do not clash, so nothing changes for them.
+
+  Two known limits: a backend that repeats its ids from one question to the next also marks a
+  user's own follow-up question asked within 10 minutes, which then gets no restore through those
+  ids; and since an id not written for 10 minutes takes the next question, a loop whose latest tool
+  call is more than 10 minutes old (one tool that runs that long), or whose earlier tool calls the
+  plugin no longer knows (after a plugin reload), can still get back the question of another loop
+  that stored on the same id in the meantime. One long tool loop on Morpheus 9.1 was measured at
+  137 s. The size and age limits of the map (10,000 entries, one hour) are unchanged.
 - **An empty catalog no longer removes every model.** An endpoint that answered `/models` with an
   empty list, or with entries the filters leave nothing of, made the sync remove every model and
   disable those that agents use. **The stored models now stay**, with a warning in the log, until
@@ -64,24 +107,45 @@ streams.** Built against plugin API 1.4.2. No new setting; plugin code unchanged
   them.
 - A tool call cut off by the output limit is not run.
 - An endpoint that lists no chat model keeps the integration's stored models.
+- A dropped question is restored only within the same integration and agent prompt.
+- A dropped question is not restored while a tool call of the request is marked (a different
+  question was stored on it less than 10 minutes after it was last written; the mark ends 10 minutes
+  after the last clash), or when its tool calls hold different questions; 0.1.4 restored the
+  question stored last. An id that was marked brings no question back until nothing has been stored
+  on it for 10 minutes, and a loop that gets no question back marks the tool calls it makes next.
 
 ### Verified
 
-- Unit tests (Spock), new or changed: the configured limit as a floor (4096 over a request of
-  1000, a request of 8192 kept, the request's 1000 without a configured value) and for a reasoning
-  model (a request of 5000 over a configured 2000); a `400` naming `reasoning_effort` answered by a
-  second request without it, and the next request of that model sent without it while a reasoning
-  model at the same endpoint still gets it; a `400` that names no such parameter sent once only;
+- Unit tests (Spock), new or changed: the configured limit as a floor (4096 over a request of 1000,
+  a request of 8192 kept, the request's 1000 without a configured value) and for a reasoning model
+  (a request of 5000 over a configured 2000); a `400` naming `reasoning_effort` answered by a second
+  request without it, and the next request of that model sent without it while a reasoning model at
+  the same endpoint still gets it; a `400` that names no such parameter sent once only;
   `stream_options` on stream requests only, and a stream whose `400` names it asked again without
   it; a streamed `reasoning_content`, a streamed refusal and a usage chunk without choices; a
-  required `offset: 0` and a `false` over a default of `true` kept while other empty arguments go;
-  a cut-off tool call dropped with the complete one kept, and with none left the truncation note;
-  the same tool call id from another integration or another system prompt never restoring the
-  question; a cost key that differs per integration and ignores the U+FFFD note; an empty catalog
-  leaving the stored models alone; "Can I see my VMs?" English and "Ile serwerów i instancji?"
-  Polish. The question-map tests now send the agent's system message on every request, as Morpheus
-  does.
-- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 177 tests,
+  required `offset: 0` and a `false` over a default of `true` kept while other empty arguments go; a
+  cut-off tool call dropped with the complete one kept, and with none left the truncation note; the
+  same tool call id from another integration or another system prompt never restoring the question;
+  two tool loops that store different questions on one tool call id at once restore neither, not
+  even through an id only one of them used, and the id holds no question text; both loops storing
+  their own questions again refresh the id without renewing the mark, while a third question renews
+  it; 10 minutes after the last clash the loop gets its question back through its own id, while the
+  shared id, still stored on, gives no question back until nothing has been stored on it for 10
+  minutes and then takes the next question; once the mark has ended, a loop that stores its question
+  on the shared id again hands the other loop nothing, and a question that was not part of the clash
+  marks the id again; the same question again on an id that is not marked only refreshes it, keeps
+  its cost key and is still restored; a different question on an id not written for 10 minutes,
+  whether it held an old question or an ended mark, replaces it and is restored; a request whose
+  tool calls hold different questions, or a marked one, restores nothing, and a restored request
+  counts on its tool calls' cost key only while they name one question; a loop refused its question
+  marks its next tool calls from the time of its own call, and the other loop's question stored on
+  them later neither lifts nor renews that mark; a loop that lost its question while nothing was
+  known of its tool calls marks them too, so another loop's question stored on them does not come
+  back into it; a cost key that differs per integration and ignores the U+FFFD note; an empty
+  catalog leaving the stored models alone; "Can I see my VMs?" English and "Ile serwerów i
+  instancji?" Polish. The question-map tests now send the agent's system message on every request,
+  as Morpheus does.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 192 tests,
   0 failures.
 
 ### Not yet verified
@@ -91,6 +155,9 @@ streams.** Built against plugin API 1.4.2. No new setting; plugin code unchanged
   listed every parameter as required would keep its empty arguments: check that
   `Dropped empty arguments from list_servers` still appears with `openai/gpt-5.4-mini` through
   OpenRouter.
+- Whether any built-in Morpheus MCP tool gives a boolean parameter `default: true`, and whether
+  Morpheus passes that default to the tool when the argument is left out. A model's `false` for
+  such a parameter is now kept, so this decides what the tool does with it.
 - The exact `400` texts of api.openai.com for `reasoning_effort` on `gpt-4.1` and of LiteLLM
   without `drop_params`; the retry needs the parameter's name in the message.
 - The usage footer on a streamed answer; Morpheus has called `generateResponse` in every chat test
@@ -98,6 +165,10 @@ streams.** Built against plugin API 1.4.2. No new setting; plugin code unchanged
 - The restore of a dropped question with the scoped keys. It relies on Morpheus keeping the system
   message unchanged while it evicts the rest, as it does in 9.1.0; the restore itself is still
   unverified on an appliance for this plugin (see 0.1.3).
+- Two users chatting with the same agent at the same time, each with a tool loop: with random tool
+  call ids each still gets their own dropped question back; with a backend whose tool call ids
+  repeat, the log shows *Not restoring a dropped question: its tool calls belong to more than one
+  question ...* instead of one user getting the other's question.
 - A sync against an endpoint that lists no chat model.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.4...openai-v0.1.5

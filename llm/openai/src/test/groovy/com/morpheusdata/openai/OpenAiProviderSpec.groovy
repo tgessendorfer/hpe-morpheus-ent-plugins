@@ -1267,6 +1267,376 @@ class OpenAiProviderSpec extends Specification {
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
 	}
 
+	/** A request of the agent 'You are Murph.' whose question the chat memory dropped; only its tool loop is left. */
+	private static List<Map> evictedLoop(String id, String result) {
+		return [[role: 'system', content: 'You are Murph.'], [role: 'assistant', content: '', tool_calls: [[id: id]]],
+				[role: 'tool', tool_call_id: id, content: result]]
+	}
+
+	/** Remembers the question asked of the agent 'You are Murph.' for these tool call ids. */
+	private static void ask(String question, List<String> ids) {
+		OpenAiProvider.rememberQuestion([model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: question]]],
+			response(ids.collect { String id -> [id: id, type: 'function', function: [name: 'list_servers', arguments: '{}']] }))
+	}
+
+	/** The remembered entry of a tool call id of the agent 'You are Murph.'. */
+	private static Map remembered(String id) {
+		return OpenAiProvider.QUESTION_BY_TOOL_CALL.get(OpenAiProvider.toolCallKey(OpenAiProvider.questionScope(null, evictedLoop(id, 'x')), id))
+	}
+
+	def "two tool loops that give the same tool call id different questions at the same time restore neither"() {
+		given: 'a backend that names its tool calls in a fixed pattern, and two users of one agent asking at once'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		Map first = [model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: 'List the AWS servers']]]
+		Map second = [model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: 'Which instances are stopped?']]]
+		OpenAiProvider.rememberQuestion(first, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		OpenAiProvider.rememberQuestion(second, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		List<Map> firstLoop = evictedLoop(ID, '{"total":2}')
+		List<Map> secondLoop = evictedLoop(ID, '{"total":5}')
+
+		expect: 'the id is a marker: the time of the clash and two hashes, no question and no cost key'
+		OpenAiProvider.isAmbiguous(remembered(ID))
+		remembered(ID).keySet() == ['ambiguous', 'clashed', 'updated'] as Set
+		remembered(ID).clashed.size() == 2
+
+		and:
+		!OpenAiProvider.restoreLostQuestion(firstLoop)
+		firstLoop*.role == ['system', 'assistant', 'tool']
+		!OpenAiProvider.restoreLostQuestion(secondLoop)
+		secondLoop*.role == ['system', 'assistant', 'tool']
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "the same question for the same tool call id only refreshes the entry, and the restore still works"() {
+		given:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		Map first = [model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: 'List the AWS servers']]]
+		Map again = [model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: 'List the AWS servers'],
+											[role: 'assistant', content: 'Two servers.'], [role: 'user', content: 'List the AWS servers']]]
+		OpenAiProvider.rememberQuestion(first, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		OpenAiProvider.rememberQuestion(again, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		List<Map> loop = evictedLoop(ID, '{"total":2}')
+
+		when:
+		boolean restored = OpenAiProvider.restoreLostQuestion(loop)
+
+		then: 'the entry keeps the cost key of the request that stored the question first'
+		!OpenAiProvider.QUESTION_BY_TOOL_CALL.values().any { Map entry -> entry.ambiguous != null }
+		OpenAiProvider.questionKey(again) != OpenAiProvider.questionKey(first)
+		remembered(ID).costKey == OpenAiProvider.questionKey(first)
+		restored
+		loop[1].content == OpenAiProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a different question after the clash window replaces the entry, and the restore brings back the new one"() {
+		given: 'the id held an older question, or a mark, and nothing was stored on it for longer than the window'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		long before = System.currentTimeMillis() - OpenAiProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.put(OpenAiProvider.toolCallKey(OpenAiProvider.questionScope(null, evictedLoop(ID, 'x')), ID),
+			held + [updated: before])
+		Map later = [model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: 'Which instances are stopped?']]]
+		OpenAiProvider.rememberQuestion(later, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		List<Map> loop = evictedLoop(ID, '{"total":5}')
+
+		when:
+		boolean restored = OpenAiProvider.restoreLostQuestion(loop)
+
+		then:
+		remembered(ID).ambiguous == null
+		restored
+		loop[1].content == OpenAiProvider.RESTORED_QUESTION_NOTE + 'Which instances are stopped?'
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		where:
+		held << [[question: 'List the AWS servers', costKey: 'k'],
+			[ambiguous: System.currentTimeMillis() - OpenAiProvider.QUESTION_CLASH_WINDOW_MS - 1000L, clashed: ['a', 'b'] as Set]]
+	}
+
+	def "after the mark ends, a tool call id the loops still store on hands neither loop the other one's question"() {
+		given: 'loops A and B clashed on X more than 10 minutes ago and both kept storing their questions on it'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String X = 'tool_0_list_servers'
+		ask('List the AWS servers', [X])
+		ask('Which instances are stopped?', [X])
+		remembered(X).ambiguous = System.currentTimeMillis() - OpenAiProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		remembered(X).updated = System.currentTimeMillis() - 60000L
+
+		when: 'A stores its question on X again; B lost its question and has only X left'
+		ask('List the AWS servers', [X])
+		List<Map> lostB = evictedLoop(X, '{"total":5}')
+
+		then: "B does not get A's question"
+		remembered(X).question == null
+		!OpenAiProvider.restoreLostQuestion(lostB)
+		lostB*.role == ['system', 'assistant', 'tool']
+
+		when: 'a question that was not part of the clash is stored on X within the window'
+		ask('Which clouds are offline?', [X])
+
+		then: 'it is a new clash'
+		OpenAiProvider.isAmbiguous(remembered(X))
+		remembered(X).clashed.size() == 3
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a loop that lost its question marks its tool calls even when nothing was known of it, so another loop's question cannot come back"() {
+		given: 'the plugin knows nothing of loop B (it was reloaded), and B lost its question'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'tool_0_list_servers'
+		List<Map> lostB = evictedLoop('tool_7_list_clouds', '{"total":1}')
+
+		when: 'B calls Y, and loop A, with its own question, gets the same id a moment later'
+		boolean restoredBefore = OpenAiProvider.restoreLostQuestion(lostB)
+		OpenAiProvider.rememberQuestion([model: 'm', messages: lostB], response([[id: Y, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		Map marked = new LinkedHashMap(remembered(Y))
+		ask('List the AWS servers', [Y])
+		List<Map> nextB = evictedLoop(Y, '{"total":5}')
+
+		then: 'B left a marker without question on Y'
+		!restoredBefore
+		marked.question == null
+		OpenAiProvider.isAmbiguous(marked)
+
+		and: "A's question on Y is a clash, and B gets nothing back"
+		remembered(Y).question == null
+		OpenAiProvider.isAmbiguous(remembered(Y))
+		!OpenAiProvider.restoreLostQuestion(nextB)
+		nextB*.role == ['system', 'assistant', 'tool']
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a restored request counts on the cost key of its tool calls only while they name one question"() {
+		given: 'a restored request whose tool calls Y and Z are known'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'tool_0_list_servers'
+		String Z = 'tool_1_list_instances'
+		long now = System.currentTimeMillis()
+		List<Map> restored = [[role: 'system', content: 'You are Murph.'],
+							  [role: 'user', content: OpenAiProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'],
+							  [role: 'assistant', content: '', tool_calls: [[id: Y]]], [role: 'tool', tool_call_id: Y, content: '{"total":2}'],
+							  [role: 'assistant', content: '', tool_calls: [[id: Z]]], [role: 'tool', tool_call_id: Z, content: '{"total":3}']]
+		String scope = OpenAiProvider.questionScope(null, restored)
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.put(OpenAiProvider.toolCallKey(scope, Y), [question: 'List the AWS servers', costKey: 'kA', updated: now])
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.put(OpenAiProvider.toolCallKey(scope, Z), z + [updated: now])
+
+		expect: 'with Z marked or holding another question, neither cost key is used'
+		!(OpenAiProvider.questionKey([model: 'm', messages: restored]) in ['kA', 'kB'])
+
+		when: 'Z is no longer known'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.remove(OpenAiProvider.toolCallKey(scope, Z))
+
+		then: "Y's cost key is used"
+		OpenAiProvider.questionKey([model: 'm', messages: restored]) == 'kA'
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		where:
+		z << [[ambiguous: System.currentTimeMillis(), clashed: ['a', 'b'] as Set], [question: 'Which instances are stopped?', costKey: 'kB']]
+	}
+
+	def "the loops that clashed storing their own questions again do not renew the mark, which ends 10 minutes after the last clash"() {
+		given: 'a clash on the shared id nine minutes ago; the first loop also called a tool of its own'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		String OWN = 'tool_1_get_result_excerpt'
+		ask('List the AWS servers', [ID])
+		ask('Which instances are stopped?', [ID])
+		long clash = System.currentTimeMillis() - OpenAiProvider.QUESTION_CLASH_WINDOW_MS + 60000L
+		remembered(ID).ambiguous = clash
+		remembered(ID).updated = clash
+		Closure<List<Map>> lostLoop = {
+			[[role: 'system', content: 'You are Murph.'],
+			 [role: 'assistant', content: '', tool_calls: [[id: OWN]]], [role: 'tool', tool_call_id: OWN, content: '{"total":2}'],
+			 [role: 'assistant', content: '', tool_calls: [[id: ID]]], [role: 'tool', tool_call_id: ID, content: '{"total":2}']]
+		}
+
+		when: 'both loops call the tool again within the window, each with its own question'
+		ask('Which instances are stopped?', [ID])
+		ask('List the AWS servers', [ID])
+		ask('List the AWS servers', [OWN])
+
+		then: 'the entry is refreshed, but the mark keeps the time of the clash and still holds'
+		(remembered(ID).updated as long) > clash
+		remembered(ID).ambiguous == clash
+		remembered(ID).clashed.size() == 2
+		!OpenAiProvider.restoreLostQuestion(lostLoop())
+
+		when: 'the window passes since the clash'
+		remembered(ID).ambiguous = System.currentTimeMillis() - OpenAiProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		List<Map> lost = lostLoop()
+
+		then: 'the mark is over: the loop gets its question back through its own id'
+		!OpenAiProvider.isAmbiguous(remembered(ID))
+		OpenAiProvider.restoreLostQuestion(lost)
+		lost[1].content == OpenAiProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+
+		when: 'one loop stores its question on the shared id again, while the id is still stored on within the window'
+		ask('List the AWS servers', [ID])
+		List<Map> shared = evictedLoop(ID, '{"total":2}')
+
+		then: 'the id holds no question, so a loop with only that id left gets nothing back'
+		remembered(ID).question == null
+		!OpenAiProvider.isAmbiguous(remembered(ID))
+		!OpenAiProvider.restoreLostQuestion(shared)
+		shared*.role == ['system', 'assistant', 'tool']
+
+		when: 'nothing is stored on it for the window, and then a question is'
+		remembered(ID).updated = System.currentTimeMillis() - OpenAiProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		ask('List the AWS servers', [ID])
+		shared = evictedLoop(ID, '{"total":2}')
+
+		then: 'that question takes it over'
+		remembered(ID).question == 'List the AWS servers'
+		OpenAiProvider.restoreLostQuestion(shared)
+		shared[1].content == OpenAiProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a third question on a marked tool call id is a new clash and renews the mark"() {
+		given:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		ask('List the AWS servers', [ID])
+		ask('Which instances are stopped?', [ID])
+		long earlier = System.currentTimeMillis() - 60000L
+		remembered(ID).ambiguous = earlier
+
+		when:
+		ask('Which clouds are offline?', [ID])
+
+		then:
+		(remembered(ID).ambiguous as long) > earlier
+		remembered(ID).clashed.size() == 3
+		!OpenAiProvider.restoreLostQuestion(evictedLoop(ID, '{"total":5}'))
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "the next round of a loop that clashed keeps the mark, so the other loop's question does not come back"() {
+		given: 'loop B wrote the tool call id last, after loop A, and writes it again with its own question'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String ID = 'tool_0_list_servers'
+		Map first = [model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: 'List the AWS servers']]]
+		Map second = [model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: 'Which instances are stopped?']]]
+		OpenAiProvider.rememberQuestion(first, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		OpenAiProvider.rememberQuestion(second, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		OpenAiProvider.rememberQuestion(second, response([[id: ID, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		List<Map> firstLoop = evictedLoop(ID, '{"total":2}')
+
+		expect:
+		OpenAiProvider.isAmbiguous(OpenAiProvider.QUESTION_BY_TOOL_CALL.get(OpenAiProvider.toolCallKey(OpenAiProvider.questionScope(null, firstLoop), ID)))
+		!OpenAiProvider.restoreLostQuestion(firstLoop)
+		firstLoop*.role == ['system', 'assistant', 'tool']
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a loop refused its question for a clash marks its next tool calls, so the other loop's question cannot come back through them"() {
+		given: 'loops A and B clashed on Y, then A called Z with its question still in memory'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'tool_0_list_servers'
+		String Z = 'tool_1_list_instances'
+		String W = 'tool_2_get_instance'
+		Map a = [model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: 'List the AWS servers']]]
+		Map b = [model: 'm', messages: [[role: 'system', content: 'You are Murph.'], [role: 'user', content: 'Which instances are stopped?']]]
+		OpenAiProvider.rememberQuestion(a, response([[id: Y, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		OpenAiProvider.rememberQuestion(b, response([[id: Y, type: 'function', function: [name: 'list_servers', arguments: '{}']]]))
+		OpenAiProvider.rememberQuestion(a, response([[id: Z, type: 'function', function: [name: 'list_instances', arguments: '{}']]]))
+		String scope = OpenAiProvider.questionScope(null, evictedLoop(Y, 'x'))
+		Closure<Map> entryOf = { String id -> OpenAiProvider.QUESTION_BY_TOOL_CALL.get(OpenAiProvider.toolCallKey(scope, id)) }
+		long clash = System.currentTimeMillis() - 300000L
+		entryOf(Y).ambiguous = clash
+
+		when: 'B lost its question, is refused it through Y and calls Z without it'
+		List<Map> refused = evictedLoop(Y, '{"total":5}')
+		boolean restoredThroughY = OpenAiProvider.restoreLostQuestion(refused)
+		long refusedAt = System.currentTimeMillis()
+		OpenAiProvider.rememberQuestion([model: 'm', messages: refused], response([[id: Z, type: 'function', function: [name: 'list_instances', arguments: '{}']]]))
+
+		and: 'the chat memory dropped the calls on Y, and B calls W before A does'
+		List<Map> later = evictedLoop(Z, '{"total":3}')
+		boolean restoredThroughZ = OpenAiProvider.restoreLostQuestion(later)
+		OpenAiProvider.rememberQuestion([model: 'm', messages: later], response([[id: W, type: 'function', function: [name: 'get_instance', arguments: '{}']]]))
+		long markedW = (entryOf(W).ambiguous as long) - 60000L
+		entryOf(W).ambiguous = markedW
+		OpenAiProvider.rememberQuestion(a, response([[id: W, type: 'function', function: [name: 'get_instance', arguments: '{}']]]))
+		List<Map> last = evictedLoop(W, '{"id":7}')
+
+		then:
+		!restoredThroughY
+		OpenAiProvider.isAmbiguous(entryOf(Z))
+		entryOf(Z).question == null
+		!restoredThroughZ
+		later*.role == ['system', 'assistant', 'tool']
+
+		and: 'the mark B passed on starts at its own call, not at the clash on Y'
+		(entryOf(Z).ambiguous as long) >= refusedAt
+		entryOf(Y).ambiguous == clash
+
+		and: "A's question on W is part of the clash, so it neither lifts nor renews the mark B left there"
+		OpenAiProvider.isAmbiguous(entryOf(W))
+		entryOf(W).ambiguous == markedW
+		entryOf(W).question == null
+		!OpenAiProvider.restoreLostQuestion(last)
+		last*.role == ['system', 'assistant', 'tool']
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a request whose known tool calls hold different questions, or any ambiguous one, gets no question back"() {
+		given: 'a loop with two tool calls left, the first of them clean'
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'tool_0_list_servers'
+		String Z = 'tool_1_list_instances'
+		long now = System.currentTimeMillis()
+		Closure<List<Map>> loop = {
+			[[role: 'system', content: 'You are Murph.'],
+			 [role: 'assistant', content: '', tool_calls: [[id: Y]]], [role: 'tool', tool_call_id: Y, content: '{"total":5}'],
+			 [role: 'assistant', content: '', tool_calls: [[id: Z]]], [role: 'tool', tool_call_id: Z, content: '{"total":3}']]
+		}
+		String scope = OpenAiProvider.questionScope(null, loop())
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.put(OpenAiProvider.toolCallKey(scope, Y), [question: 'Which instances are stopped?', costKey: 'k', updated: now])
+
+		when:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.put(OpenAiProvider.toolCallKey(scope, Z),
+			zMarked ? [ambiguous: now, clashed: ['a'] as Set, updated: now] : [question: zQuestion, costKey: 'k', updated: now])
+		List<Map> messages = loop()
+		boolean restored = OpenAiProvider.restoreLostQuestion(messages)
+
+		then:
+		restored == expected
+		messages*.role == (expected ? ['system', 'user'] : ['system']) + ['assistant', 'tool', 'assistant', 'tool']
+
+		cleanup:
+		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		where:
+		zQuestion                      | zMarked || expected
+		'List the AWS servers'         | false   || false
+		null                           | true    || false
+		'Which instances are stopped?' | false   || true
+	}
+
 	def "generateResponse remembers the question and restores it on a later request that lost it"() {
 		given:
 		OpenAiProvider.QUESTION_BY_TOOL_CALL.clear()
