@@ -33,11 +33,19 @@ appliance 9.0.2 are unchanged; no new options.
   known sockets. The query itself runs only on an appliance; no test runs it against a database.
 - Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon --warning-mode all`,
   116 tests, 0 failures.
+- **On HPE Morpheus Enterprise 9.1.0-1** with a release candidate built from this source
+  (`1.2.1-rc.1`), uploaded in place of 1.2.0 (status `loaded`): the report ended *ready*, and
+  **its total matches the license count**: its host sockets, 25, equal `hypervisorSocketCount`
+  of `GET /api/license`, and its total of 27.334 sockets (master tenant and sub-tenants) matches
+  the license's 27.333 within rounding (0.001).
 
 ### Not yet verified
 
+- On an appliance: the release jar loads in place of 1.2.0 (the release candidate above was a
+  separate build).
 - On an appliance: the report total against `GET /api/license` with a hypervisor host whose
-  `max_sockets` is 0 (no such host in the test setup), and that the jar replaces 1.2.0 in place.
+  `max_sockets` is 0. The totals above match, but the test did not check whether such a host was
+  among them.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/socket-report-v1.2.0...socket-report-v1.2.1
 
