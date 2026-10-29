@@ -16,6 +16,7 @@ reason in the request (Morpheus 9.0.2 offers no manual decision for such request
 | Monthly price above the threshold | `rejected`, reason in the request name |
 | Request currency differs from the threshold currency, or references in mixed currencies | `rejected`; prices in different currencies are never added |
 | Request carries no price at all, or one of its references has none (since 1.2.3) | `rejected` |
+| The threshold or threshold currency that applies is set but cannot be read (since 1.2.4) | `rejected`; a looser level or the default is never used instead |
 
 No request is ever left `requested`: on 9.0.2 nobody could approve or deny it by hand, and it would
 stay pending until the instance is deleted.
@@ -29,6 +30,7 @@ threshold of 50, 50.005 does not. The request name shown in Morpheus explains th
 | Above the threshold | *Above cost threshold of 20.00 EUR/month (requested 32.00 EUR). Please contact your provider for approval.* |
 | Currency differs | *Currency differs from the cost threshold (requested 16.00 USD, threshold 20.00 EUR/month). Please contact your provider for approval.* |
 | No price | *No monthly price for this request (threshold 20.00 EUR/month). Please contact your provider for approval.* |
+| Threshold misconfigured | *Cost threshold misconfigured: the field "Monthly Cost Threshold" of the policy has an invalid value. An administrator must correct it. Please contact your provider for approval.* |
 
 The German texts are in `messages_de.properties`, e.g. *Über der Kostenschwelle von 20,00 EUR/Monat
 (angefragt 32,00 EUR). Bitte wenden Sie sich für eine Freigabe an Ihren Provider.* External request
@@ -64,6 +66,10 @@ Policy (per *Approve Provision* policy that uses the integration):
 | `cost-threshold-approval-policy-currency` | Threshold Currency | Overrides the integration's currency |
 
 Order of precedence: policy, then options passed with the call, then integration, then the default.
+The first level that sets a value (anything but empty) decides, for the threshold and for the
+currency each; the levels below it are not read. A policy that sets only its threshold therefore
+takes the currency from the call options or the integration, and an unreadable currency there
+rejects the request (see below).
 
 **Which requests are checked** (since 1.2.2): provisioning of an instance, app or cluster (or a
 server added to a cluster) and reconfigure of an instance, server or app. Every other request type
@@ -74,12 +80,23 @@ type cannot be read is checked.
 
 **Threshold format:** a plain non-negative number such as `50` or `50.00`. A single decimal comma
 with one or two digits after it is accepted too (`50,00` is 50.00). Forms that mix comma and dot
-or look like a thousands separator (`1.000,50`, `1,000`) are not guessed: such a value, like any
-other value that does not parse, is skipped and the next level applies. So is a value with more
-than 12 integer digits, more than 32 decimal places or more than 32 characters (`1e999999999`,
-`1000000000000`). Each skipped value writes one warning to the Morpheus log that names the level
-and the raw value (cut after 40 characters), for example
-`Cost threshold approval: policy threshold '1.000,50' is not a non-negative amount of at most 12 integer digits, ignored`.
+or look like a thousands separator (`1.000,50`, `1,000`) are not guessed, and neither is a value
+with more than 12 integer digits, more than 32 decimal places or more than 32 characters
+(`1e999999999`, `1000000000000`). **Threshold currency format:** three letters (`EUR`, `eur`);
+`euro` or `E1R` cannot be read.
+
+**A value that cannot be read is a misconfiguration** (since 1.2.4). When the first level that
+sets the threshold or the currency holds such a value, the request is rejected with *Cost
+threshold misconfigured* and the field and level in the request name (see the table above):
+using a looser level or the default instead could approve what the stricter level was set to
+stop. Each such value
+writes one warning to the Morpheus log that names the level and the raw value (cut after 40
+characters), for example
+`Cost threshold approval: policy threshold '1.000,50' is not a non-negative amount of at most 12 integer digits, request rejected (threshold misconfigured)`
+or
+`Cost threshold approval: policy threshold currency 'euro' is not a three-letter ISO 4217 code, request rejected (threshold misconfigured)`.
+Up to 1.2.3 such a value was skipped and the next level applied. Requests that are not checked
+(delete, extension, workflow) are approved as before; they never read the threshold.
 
 **Currency of a request:** `Request.currency`, else the one currency all references share, else
 the currency of the integration's tenant, else of the master tenant, else `USD`.

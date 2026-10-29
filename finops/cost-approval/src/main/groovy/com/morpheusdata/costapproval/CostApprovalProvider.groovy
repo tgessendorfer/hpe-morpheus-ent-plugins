@@ -35,13 +35,15 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Cost threshold approval. Morpheus calls createApprovalRequest when an approval policy
  * uses an integration of this type. A request whose monthly price is at or below the
  * threshold, in the same currency, is approved in the response; anything else (above the
- * threshold, another or mixed currency, no price) is rejected at once, with the reason in
- * the request name. Morpheus 9.0.2 lets nobody approve or deny an item owned by an approval
- * integration by hand, so a "requested" answer would leave the request stuck for good.
+ * threshold, another or mixed currency, no price, a misconfigured threshold) is rejected at
+ * once, with the reason in the request name. Morpheus 9.0.2 lets nobody approve or deny an item
+ * owned by an approval integration by hand, so a "requested" answer would leave the request
+ * stuck for good.
  * Prices in different currencies are never added.
  *
  * Threshold: policy option, else call option, else integration option, else 100.
- * Threshold currency: the same order, else the currency of the request.
+ * Threshold currency: the same order, else the currency of the request. The first level that
+ * sets a value decides; a value there that does not parse rejects the request as misconfigured.
  * Request currency: Request.currency, else the one currency of all references, else the
  * currency of the integration's tenant, else of the master tenant, else USD.
  *
@@ -150,9 +152,9 @@ class CostApprovalProvider implements ApprovalProvider {
 		if (CostApprovalLogic.isCostChecked(requestType)) {
 			String reqCur = CostApprovalLogic.requestCurrency(request?.currency, refs, { fallbackCurrency(integration) })
 			BigDecimal price = CostApprovalLogic.requestPrice(request?.pricePerMonth, refs, reqCur)
-			BigDecimal limit = CostApprovalLogic.threshold(policyCfg, opts, integrationCfg)
-			String limitCur = CostApprovalLogic.configuredThresholdCurrency(policyCfg, opts, integrationCfg) ?: reqCur
-			decision = CostApprovalLogic.decide(price, reqCur, CostApprovalLogic.refCurrencies(refs), limit, limitCur)
+			decision = CostApprovalLogic.decideConfigured(price, reqCur, CostApprovalLogic.refCurrencies(refs),
+				CostApprovalLogic.thresholdSetting(policyCfg, opts, integrationCfg),
+				CostApprovalLogic.currencySetting(policyCfg, opts, integrationCfg))
 		} else {
 			// A delete, an extension or a workflow run adds no monthly cost: approved without a check.
 			decision = CostApprovalLogic.notChecked(requestType)
@@ -186,14 +188,29 @@ class CostApprovalProvider implements ApprovalProvider {
 			target.put(reqId, report)
 			target
 		}
-		if (decision.outcome == CostApprovalLogic.Outcome.NOT_CHECKED) {
-			log.info("Cost threshold approval ${reqId}: request type '${requestType}' is not cost-checked -> ${decision.outcome} (${status})")
-		} else {
-			log.info("Cost threshold approval ${reqId}: ${CostApprovalLogic.money(decision.price, decision.shownPriceCurrency, Locale.ENGLISH)} per month, " +
-				"threshold ${CostApprovalLogic.money(decision.threshold, decision.thresholdCurrency, Locale.ENGLISH)} -> ${decision.outcome} (${status})")
-		}
+		log.info(decisionLogLine(reqId, requestType, decision, status))
 		return new RequestResponse(success: true, externalRequestId: reqId, externalRequestName: name,
 			references: outRefs, msg: CostApprovalLogic.responseMessage(decision, locale))
+	}
+
+	/**
+	 * The info line of a decision. A misconfigured threshold or currency names the level and the
+	 * field that caused it instead of the threshold, which is unknown then (its raw value is in the
+	 * warning logged before).
+	 */
+	static String decisionLogLine(String reqId, String requestType, CostApprovalLogic.Decision decision, Object status) {
+		String head = "Cost threshold approval ${reqId}: "
+		String tail = " -> ${decision.outcome} (${status})"
+		if (decision.outcome == CostApprovalLogic.Outcome.NOT_CHECKED) {
+			return "${head}request type '${requestType}' is not cost-checked${tail}".toString()
+		}
+		String price = "${CostApprovalLogic.money(decision.price, decision.shownPriceCurrency, Locale.ENGLISH)} per month"
+		if (decision.outcome == CostApprovalLogic.Outcome.THRESHOLD_MISCONFIGURED) {
+			String level = CostApprovalLogic.LEVELS[decision.misconfiguredLevel] ?: decision.misconfiguredLevel
+			String field = decision.misconfiguredField == 'currency' ? 'threshold currency' : 'threshold'
+			return "${head}${price}, ${level} ${field} cannot be read${tail}".toString()
+		}
+		return "${head}${price}, threshold ${CostApprovalLogic.money(decision.threshold, decision.thresholdCurrency, Locale.ENGLISH)}${tail}".toString()
 	}
 
 	/**

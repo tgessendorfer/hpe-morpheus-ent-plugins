@@ -8,9 +8,50 @@ shaded `-all.jar` is attached.
 
 ## 1.2.4
 
-**Fix release: an extreme threshold such as `1e999999999` is skipped at once instead of hanging
-the approval.** Plugin code, provider code, option codes, plugin API 1.4.2 and minimum appliance
-9.0.2 are unchanged; no new options.
+**A threshold or threshold currency that is set but cannot be read now rejects the request as
+*threshold misconfigured* instead of falling through to a looser level, and an extreme threshold
+such as `1e999999999` no longer hangs the approval.** Plugin code, provider code, option codes,
+plugin API 1.4.2 and minimum appliance 9.0.2 are unchanged; no new options.
+
+### Changed
+
+- **What went wrong.** The threshold and its currency are read from the policy, then the options
+  passed with the approval call, then the integration. A value that was set but could not be read
+  (`1.000,50`, `abc`, `-5`; `euro` as currency) was skipped, and the next, looser level or the
+  default of 100 decided. A typo in a strict policy threshold therefore let requests through under
+  the integration's higher threshold, and an invalid policy currency fell back to the integration
+  currency or to the request's own currency. A skipped threshold left one warning in the log, a
+  skipped currency none.
+- **What the plugin does now.** For the threshold and for the currency, each on its own, the
+  **first level that sets a value (anything but empty) decides**. If that value cannot be read, the
+  request is **rejected with the new outcome *threshold misconfigured***, at once, like a request
+  without a complete price (1.2.3). The request name names the field and the level, not the
+  raw value: *Cost threshold misconfigured: the field "Monthly Cost Threshold" of the policy has
+  an invalid value. An administrator must correct it. Please contact your provider for approval.*
+  (German: *Kostenschwelle falsch konfiguriert: Das Feld „Kostenschwelle pro Monat“ der Policy hat
+  einen ungültigen Wert. Ein Administrator muss ihn korrigieren. Bitte wenden Sie sich für eine
+  Freigabe an Ihren Provider.*); the response message is *Rejected: cost threshold misconfigured*
+  (*Abgelehnt: Kostenschwelle falsch konfiguriert*). The levels are named *policy*, *approval call
+  options* and *integration* (*Policy*, *Optionen des Freigabeaufrufs*, *Integration*); the field
+  is named with the label of that level's form (the call options, which have no form, with the
+  integration's labels). **Levels below the first set value are no longer read.** In 1.2.3 a level
+  below a readable value was not read either, but a level below an unreadable one was: that was
+  the skip described above.
+- **Threshold and currency are looked up separately.** A policy that sets its own threshold but
+  leaves *Threshold Currency* empty takes the currency from the call options, else from the
+  integration. If that currency cannot be read, the request is rejected as *threshold
+  misconfigured* although the policy's threshold is readable; the request name then names the
+  field *Threshold Currency* of the integration.
+- **One warning per unreadable value**, with the level, the raw value (cut after 40 characters)
+  and the consequence: *Cost threshold approval: policy threshold '1.000,50' is not a non-negative
+  amount of at most 12 integer digits, request rejected (threshold misconfigured)*, or for the
+  currency *Cost threshold approval: policy threshold currency 'euro' is not a three-letter ISO
+  4217 code, request rejected (threshold misconfigured)*. When both settings are unreadable, both
+  are logged and the request name names the threshold. The info line of the decision names the
+  level and the field instead of a threshold: *Cost threshold approval ca-...: 10.00 EUR per
+  month, policy threshold cannot be read -> THRESHOLD_MISCONFIGURED (rejected)*.
+- Requests that are not cost-checked (delete, extension, workflow) are approved as in 1.2.3 and do
+  not read the settings. Which level comes first is unchanged.
 
 ### Fixed
 
@@ -20,36 +61,59 @@ the approval.** Plugin code, provider code, option codes, plugin API 1.4.2 and m
   digits, which hangs the thread that decides the approval or exhausts its memory. A smaller one
   such as `1e300` was used as a threshold and wrote a request name of more than 300 characters.
 - **What the plugin does now.** A threshold with **more than 12 integer digits, more than 32
-  decimal places or more than 32 characters** is malformed. Like any other malformed value it is
-  skipped with one warning, and the next level (policy, call options, integration, default 100)
-  applies. The size is checked from the digit counts, so the value is never expanded. Exponent
-  notation within these bounds still works: `1.0E7` reads as 10,000,000.
-- **The warning names the bound and cuts the raw value after 40 characters:** *Cost threshold
-  approval: policy threshold '1e999999999' is not a non-negative amount of at most 12 integer
-  digits, ignored*.
+  decimal places or more than 32 characters** cannot be read. The size is checked from the digit
+  counts, so the value is never expanded, and like any other unreadable value it makes the request
+  *threshold misconfigured* at once (see above). Exponent notation within these bounds still works:
+  `1.0E7` reads as 10,000,000.
 
 ### Behaviour changes from 1.2.3
 
-- A threshold of 1,000,000,000,000 or more is skipped and the next level applies. In 1.2.3 it was
+- **A threshold or threshold currency that is set but cannot be read rejects every cost-checked
+  request** of that policy or integration until an administrator corrects it. In 1.2.3 it was
+  skipped and the next level or the default decided. Before upgrading, search the Morpheus log for
+  *is not a non-negative amount, ignored* (the 1.2.3 warning) and check every *Threshold Currency*
+  field for anything other than three letters; 1.2.3 logged nothing for those.
+- A threshold of 1,000,000,000,000 or more is unreadable and rejects the request. In 1.2.3 it was
   used, or, written with a large exponent, hung the approval.
-- The warning text for a skipped threshold is longer (see above); a log filter that matches the
-  old text *is not a non-negative amount, ignored* needs the new one.
-- Thresholds within the bounds, prices, currencies and request types are decided as in 1.2.3.
+- The warning text changed (see above); a log filter that matches the old text *is not a
+  non-negative amount, ignored* needs the new one.
+- Readable thresholds and currencies, prices and request types are decided as in 1.2.3; an empty
+  field still counts as not set.
 
 ### Verified
 
-- New unit tests (Spock): `1e999999999`, `1E+2147483647` (whose digit count overflows an `int`),
-  `1e-999999999`, `1e300`, `1000000000000` and over-long texts give no amount, each under a
-  10-second timeout; `999999999999.99`, `1.0E7` and `5e-3` still parse; an exponent policy
-  threshold is skipped with the short warning and the integration threshold rejects 60 EUR
-  against 50 EUR. The three tests that check the warning text are changed to the new text.
-- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon --warning-mode all`,
-  142 tests, 0 failures.
+- Unit tests (Spock), extreme values: `1e999999999`, `1E+2147483647` (whose digit count overflows
+  an `int`), `1e-999999999`, `1e300`, `1000000000000` and over-long texts give no amount, each
+  under a 10-second timeout; `999999999999.99`, `1.0E7` and `5e-3` still parse.
+- Unit tests (Spock), misconfiguration: unreadable thresholds (`abc`, `1.000,50`, `-5`,
+  `1e999999999`, a 100-digit value) at the policy, call options and integration level and
+  unreadable currencies (`euro`, `E1R`, `EU`) are misconfigured with the level named, also when a
+  looser level would approve; a readable value leaves an unreadable one below it unread and
+  silent; empty values count as not set; without any setting 100 in the request currency still
+  applies, and a threshold of 0 still applies; two unreadable settings log two warnings; the
+  request name and message for each field and level in English and German, all within 255
+  characters. Provider: an exponent policy threshold and an invalid policy currency reject a
+  10 EUR request that the integration (50 EUR) would approve, an unreadable call options threshold
+  rejects, an empty policy field leaves the decision to the integration, a policy with a readable
+  threshold and an empty currency under an integration whose currency is `euro` is rejected
+  naming the integration's *Threshold Currency*, and a delete request with an unreadable
+  integration threshold is approved without a check. The field label comes from the form of the
+  level that failed; the info line names the level and the field.
+- The 1.2.3 tests that pinned the skip (threshold and currency precedence, the two warning tests)
+  now expect the rejection and the new warning text.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 168 tests
+  (132 in 1.2.3), 0 failures.
 
 ### Not yet verified
 
-- On an appliance: a policy with the threshold `1e999999999` (set through the API) logs the
-  warning and the integration threshold decides; the jar replaces 1.2.3 in place.
+- On an appliance: one approval run with an unreadable threshold, for example a policy with the
+  threshold `abc` or `1e999999999` (set through the API): the request is rejected with *Cost
+  threshold misconfigured*, the warning is in the log and the monitor run reports the rejection.
+- On an appliance: an empty threshold field saved through the policy and integration forms counts
+  as not set (no false *threshold misconfigured*); the jar replaces 1.2.3 in place. In particular,
+  whether Morpheus stores an emptied *Monthly Cost Threshold*, a number field, as empty and not as
+  the text `null`: the plugin would read `null` as an unreadable value and reject every
+  cost-checked request of that policy or integration.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.2.3...cost-approval-v1.2.4
 

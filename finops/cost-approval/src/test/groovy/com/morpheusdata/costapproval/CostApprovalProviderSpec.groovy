@@ -44,9 +44,9 @@ class CostApprovalProviderSpec extends Specification {
 	def "every option label and help key exists in both bundles"() {
 		given:
 		List<String> keys = (provider.integrationOptionTypes() + provider.policyOptionTypes()).collectMany { [it.fieldCode, it.helpTextI18nCode] }
-		List<String> runtime = ['approved', 'overThreshold', 'currencyMismatch', 'noPrice', 'notChecked'].collectMany {
+		List<String> runtime = CostApprovalLogic.Outcome.values().collect { CostApprovalLogic.outcomeKey(it) }.collectMany {
 			["cost-threshold-approval.request.${it}".toString(), "cost-threshold-approval.msg.${it}".toString()]
-		}
+		} + CostApprovalLogic.LEVELS.keySet().collect { "cost-threshold-approval.level.${it}".toString() }
 
 		expect:
 		['i18n/messages.properties', 'i18n/messages_de.properties'].every { String path ->
@@ -245,17 +245,114 @@ class CostApprovalProviderSpec extends Specification {
 	}
 
 	@Timeout(10)
-	def "an exponent policy threshold is ignored at once, so the integration threshold decides"() {
+	def "an exponent policy threshold rejects at once as misconfigured; the integration threshold that would approve is not used"() {
 		given:
 		Policy policy = new Policy()
 		policy.config = JsonOutput.toJson([cm: [plugin: [costThreshold: '1e999999999']]])
 
 		when:
-		def rsp = provider.createApprovalRequest([], request(60G, 'EUR'), integration(7, [costThreshold: '50']), policy, [:])
+		def rsp = provider.createApprovalRequest([], request(10G, 'EUR'), integration(7, [costThreshold: '50']), policy, [:])
+
+		then:
+		rsp.success
+		rsp.references*.status == [RequestReference.ApprovalStatus.rejected]
+		rsp.externalRequestId.endsWith('-r')
+		rsp.msg == 'Rejected: cost threshold misconfigured'
+		rsp.externalRequestName == 'Cost threshold misconfigured: the field "Monthly Cost Threshold" of the policy has an invalid value. An administrator must correct it. Please contact your provider for approval.'
+		rsp.references*.externalName == [rsp.externalRequestName]
+	}
+
+	def "an invalid policy currency rejects as misconfigured; the integration currency that would match is not used"() {
+		given:
+		Policy policy = new Policy()
+		policy.config = JsonOutput.toJson([cm: [plugin: [thresholdCurrency: 'euro']]])
+
+		when:
+		def rsp = provider.createApprovalRequest([], request(10G, 'EUR'),
+			integration(7, [costThreshold: '50', thresholdCurrency: 'EUR']), policy, [:])
 
 		then:
 		rsp.references*.status == [RequestReference.ApprovalStatus.rejected]
-		rsp.externalRequestName == 'Above cost threshold of 50.00 EUR/month (requested 60.00 EUR). Please contact your provider for approval.'
+		rsp.msg == 'Rejected: cost threshold misconfigured'
+		rsp.externalRequestName == 'Cost threshold misconfigured: the field "Threshold Currency" of the policy has an invalid value. An administrator must correct it. Please contact your provider for approval.'
+	}
+
+	def "an unparsable threshold in the call options rejects as misconfigured"() {
+		when:
+		def rsp = provider.createApprovalRequest([], request(10G, 'EUR'), integration(7, [costThreshold: '50']), null,
+			[costThreshold: 'abc'])
+
+		then:
+		rsp.references*.status == [RequestReference.ApprovalStatus.rejected]
+		rsp.externalRequestName == 'Cost threshold misconfigured: the field "Monthly Cost Threshold" of the approval call options has an invalid value. An administrator must correct it. Please contact your provider for approval.'
+	}
+
+	def "an empty policy threshold is not set: the integration threshold decides"() {
+		given:
+		Policy policy = new Policy()
+		policy.config = JsonOutput.toJson([cm: [plugin: [costThreshold: '', thresholdCurrency: ' ']]])
+
+		when:
+		def rsp = provider.createApprovalRequest([], request(10G, 'EUR'), integration(7, [costThreshold: '50']), policy, [:])
+
+		then:
+		rsp.references*.status == [RequestReference.ApprovalStatus.approved]
+		rsp.externalRequestName == 'Approved automatically (10.00 EUR <= 50.00 EUR per month)'
+	}
+
+	def "a policy with its own threshold but no currency takes the integration's currency, and an unreadable one there rejects"() {
+		given: 'the policy sets a readable threshold and leaves its currency empty'
+		Policy policy = new Policy()
+		policy.config = JsonOutput.toJson([cm: [plugin: [costThreshold: '50', thresholdCurrency: '']]])
+
+		when: 'the integration it falls back to for the currency has an unreadable one'
+		def rsp = provider.createApprovalRequest([], request(10G, 'EUR'),
+			integration(7, [costThreshold: '100', thresholdCurrency: 'euro']), policy, [:])
+
+		then: 'threshold and currency are looked up each on their own: the request is rejected as misconfigured'
+		rsp.references*.status == [RequestReference.ApprovalStatus.rejected]
+		rsp.msg == 'Rejected: cost threshold misconfigured'
+		rsp.externalRequestName == 'Cost threshold misconfigured: the field "Threshold Currency" of the integration has an invalid value. An administrator must correct it. Please contact your provider for approval.'
+	}
+
+	def "the info line of a misconfigured decision names the level and the field, not an unknown threshold"() {
+		given:
+		def d = new CostApprovalLogic.Decision(outcome: CostApprovalLogic.Outcome.THRESHOLD_MISCONFIGURED, price: 10G,
+			priceCurrency: 'EUR', threshold: threshold, thresholdCurrency: null, misconfiguredLevel: level, misconfiguredField: field)
+
+		expect:
+		CostApprovalProvider.decisionLogLine('ca-1-r', 'provision', d, RequestReference.ApprovalStatus.rejected) ==
+			"Cost threshold approval ca-1-r: 10.00 EUR per month, ${shown} cannot be read -> THRESHOLD_MISCONFIGURED (rejected)".toString()
+
+		where:
+		level         | field       | threshold || shown
+		'policy'      | 'threshold' | null      || 'policy threshold'
+		'callOptions' | 'threshold' | null      || 'call options threshold'
+		'integration' | 'currency'  | 50G       || 'integration threshold currency'
+	}
+
+	def "the info lines of the other decisions are unchanged"() {
+		expect:
+		CostApprovalProvider.decisionLogLine('ca-2-a', 'provision', CostApprovalLogic.decide(10G, 'EUR', [], 50G, 'EUR'),
+			RequestReference.ApprovalStatus.approved) ==
+			'Cost threshold approval ca-2-a: 10.00 EUR per month, threshold 50.00 EUR -> APPROVED (approved)'
+		CostApprovalProvider.decisionLogLine('ca-3-a', 'Instance Delete Approval', CostApprovalLogic.notChecked('Instance Delete Approval'),
+			RequestReference.ApprovalStatus.approved) ==
+			"Cost threshold approval ca-3-a: request type 'Instance Delete Approval' is not cost-checked -> NOT_CHECKED (approved)"
+	}
+
+	def "a misconfigured field is named with the label of the form of its level"() {
+		expect: 'the policy form has labels of its own; the call options take the integration field names'
+		CostApprovalLogic.fieldLabelKey('policy', 'threshold') == 'cost-threshold-approval.policyThreshold.label'
+		CostApprovalLogic.fieldLabelKey('policy', 'currency') == 'cost-threshold-approval.policyCurrency.label'
+		CostApprovalLogic.fieldLabelKey('integration', 'threshold') == 'cost-threshold-approval.threshold.label'
+		CostApprovalLogic.fieldLabelKey('callOptions', 'currency') == 'cost-threshold-approval.currency.label'
+
+		and: 'each key is the label of that form'
+		['threshold', 'currency'].every { String field ->
+			CostApprovalLogic.fieldLabelKey('policy', field) in provider.policyOptionTypes()*.fieldCode &&
+				CostApprovalLogic.fieldLabelKey('integration', field) in provider.integrationOptionTypes()*.fieldCode
+		}
 	}
 
 	/** Holds the first put of a decision until the test releases it. */
@@ -479,6 +576,19 @@ class CostApprovalProviderSpec extends Specification {
 		Request.ApprovalRequestType.APP_DELETE_APPROVAL_TYPE         || 'App Delete Approval'
 		Request.ApprovalRequestType.EXTENSION_APPROVAL_TYPE          || 'Extension Approval'
 		Request.ApprovalRequestType.SHUTDOWN_EXTENSION_APPROVAL_TYPE || 'Shutdown Extension Approval'
+	}
+
+	def "a delete request is approved without reading the threshold, even a misconfigured one"() {
+		given:
+		Request req = request(500G, 'EUR')
+		req.requestType = Request.ApprovalRequestType.INSTANCE_DELETE_APPROVAL_TYPE
+
+		when:
+		def rsp = provider.createApprovalRequest([], req, integration(7, [costThreshold: 'abc', thresholdCurrency: 'euro']), null, [:])
+
+		then:
+		rsp.references*.status == [RequestReference.ApprovalStatus.approved]
+		rsp.msg == 'Approved automatically: no cost check for this request type'
 	}
 
 	def "provisioning, app and reconfigure requests are still checked against the threshold"() {

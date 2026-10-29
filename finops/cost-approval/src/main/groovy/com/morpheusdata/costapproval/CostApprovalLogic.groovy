@@ -43,6 +43,12 @@ class CostApprovalLogic {
 	/** Longest threshold text that is parsed at all, and the most decimal places it may have. */
 	static final int MAX_AMOUNT_LENGTH = 32
 
+	/**
+	 * The levels that can set the threshold and its currency, strictest first: the key names the
+	 * level in the i18n bundles (cost-threshold-approval.level.<key>), the value in the log.
+	 */
+	static final Map<String, String> LEVELS = [policy: 'policy', callOptions: 'call options', integration: 'integration'].asImmutable()
+
 	enum Outcome {
 		/** Same currency, monthly price at or below the threshold. */
 		APPROVED,
@@ -52,8 +58,27 @@ class CostApprovalLogic {
 		CURRENCY_MISMATCH,
 		/** The request carries no price at all. */
 		NO_PRICE,
+		/** The first level that sets the threshold or its currency holds a value that does not parse. */
+		THRESHOLD_MISCONFIGURED,
 		/** Not a provisioning, app or reconfigure request (delete, extension, workflow): approved without a price check. */
 		NOT_CHECKED
+	}
+
+	/**
+	 * The threshold or the threshold currency as read from the first level that sets it. A value
+	 * that is set but does not parse is kept as {@link #invalid}, never replaced by a looser level.
+	 */
+	static class Setting {
+		/** Which option: 'threshold' or 'currency', as in the bundle keys of the form labels. */
+		String field
+		/** The level the value was read from (a key of {@link CostApprovalLogic#LEVELS}); null when no level sets one. */
+		String level
+		/** The threshold amount or the ISO currency code; null when no level sets one or it does not parse. */
+		Object value
+		/** The raw text of a set value that does not parse; null otherwise. */
+		String invalid
+
+		boolean isMisconfigured() { invalid != null }
 	}
 
 	/**
@@ -76,6 +101,10 @@ class CostApprovalLogic {
 
 		/** The request type as Morpheus named it; set for NOT_CHECKED only. */
 		String requestType
+
+		/** The level and field ('threshold' or 'currency') of the value that does not parse; set for THRESHOLD_MISCONFIGURED only. */
+		String misconfiguredLevel
+		String misconfiguredField
 
 		boolean isApproved() { outcome == Outcome.APPROVED || outcome == Outcome.NOT_CHECKED }
 
@@ -179,35 +208,43 @@ class CostApprovalLogic {
 	}
 
 	/**
-	 * First threshold that parses: policy, call options, integration, else the default. A value
-	 * that is set but does not parse is skipped as before, with one warning naming the level and
-	 * the raw value, so a typo no longer falls back to the next level unnoticed.
+	 * The threshold of the first level that sets one (a non-blank value): policy, call options,
+	 * integration. Levels below it are not read. When that value does not parse, the setting is
+	 * misconfigured; no value at all means the default (see {@link #decideConfigured}).
 	 */
-	static BigDecimal threshold(Map policyCfg, Map opts, Map integrationCfg,
-	                            Closure warn = { String msg -> log.warn(msg) }) {
-		// No Elvis chain: a threshold of 0 is valid and Groovy treats 0 as false.
-		Map<String, Map> levels = [policy: policyCfg, 'call options': opts, integration: integrationCfg]
-		for (Map.Entry<String, Map> level : levels.entrySet()) {
-			Object raw = configValue(level.value, FIELD_THRESHOLD)
-			BigDecimal amount = toAmount(raw)
-			if (amount != null) {
-				return amount
-			}
-			if (!blank(raw)) {
-				String shown = raw.toString().trim()
-				shown = shown.length() > 40 ? shown.take(40) + '...' : shown
-				warn?.call(("Cost threshold approval: ${level.key} threshold '${shown}' is not a non-negative amount " +
-					"of at most ${MAX_INTEGER_DIGITS} integer digits, ignored").toString())
-			}
-		}
-		return DEFAULT_THRESHOLD
+	static Setting thresholdSetting(Map policyCfg, Map opts, Map integrationCfg) {
+		return firstSet('threshold', FIELD_THRESHOLD, [policyCfg, opts, integrationCfg]) { Object raw -> toAmount(raw) }
 	}
 
-	/** First configured threshold currency: policy, call options, integration; null when none is set. */
-	static String configuredThresholdCurrency(Map policyCfg, Map opts, Map integrationCfg) {
-		return isoCurrency(configValue(policyCfg, FIELD_CURRENCY)) ?:
-			isoCurrency(configValue(opts, FIELD_CURRENCY)) ?:
-			isoCurrency(configValue(integrationCfg, FIELD_CURRENCY))
+	/**
+	 * The threshold currency of the first level that sets one, read like {@link #thresholdSetting}.
+	 * No value at all means the currency of the request.
+	 */
+	static Setting currencySetting(Map policyCfg, Map opts, Map integrationCfg) {
+		return firstSet('currency', FIELD_CURRENCY, [policyCfg, opts, integrationCfg]) { Object raw -> isoCurrency(raw) }
+	}
+
+	private static Setting firstSet(String field, String fieldName, List<Map> configs, Closure parse) {
+		List<String> levels = new ArrayList<String>(LEVELS.keySet())
+		for (int i = 0; i < levels.size(); i++) {
+			Object raw = configValue(configs[i], fieldName)
+			if (!blank(raw)) {
+				Object value = parse(raw)
+				// No Elvis: a threshold of 0 is valid and Groovy treats 0 as false.
+				return value != null ? new Setting(field: field, level: levels[i], value: value) :
+					new Setting(field: field, level: levels[i], invalid: raw.toString().trim())
+			}
+		}
+		return new Setting(field: field)
+	}
+
+	/** The log line for a misconfigured setting: level, field and the raw value, cut after 40 characters. */
+	static String misconfiguredWarning(Setting setting) {
+		String shown = setting.invalid.length() > 40 ? setting.invalid.take(40) + '...' : setting.invalid
+		String problem = setting.field == 'currency' ?
+			"threshold currency '${shown}' is not a three-letter ISO 4217 code" :
+			"threshold '${shown}' is not a non-negative amount of at most ${MAX_INTEGER_DIGITS} integer digits"
+		return "Cost threshold approval: ${LEVELS[setting.level]} ${problem}, request rejected (threshold misconfigured)".toString()
 	}
 
 	// ------------------------------------------------------------------
@@ -365,6 +402,26 @@ class CostApprovalLogic {
 		return d
 	}
 
+	/**
+	 * The decision for a cost-checked request from the configured settings. A threshold or currency
+	 * that is set but does not parse rejects the request as THRESHOLD_MISCONFIGURED, with one warning
+	 * per bad value: a looser level or the default would approve what the stricter one was set to
+	 * stop. The threshold is reported before the currency. Otherwise the threshold (else
+	 * {@link #DEFAULT_THRESHOLD}) and its currency (else the request currency) decide.
+	 */
+	static Decision decideConfigured(BigDecimal price, String priceCurrency, List<String> refCurrencies,
+	                                 Setting threshold, Setting currency, Closure warn = { String msg -> log.warn(msg) }) {
+		List<Setting> broken = [threshold, currency].findAll { it?.misconfigured }
+		if (broken) {
+			broken.each { Setting s -> warn?.call(misconfiguredWarning(s)) }
+			return new Decision(outcome: Outcome.THRESHOLD_MISCONFIGURED, price: round(price), priceCurrency: priceCurrency,
+				threshold: round((BigDecimal) threshold?.value), thresholdCurrency: (String) currency?.value,
+				refCurrencies: refCurrencies ?: [], misconfiguredLevel: broken[0].level, misconfiguredField: broken[0].field)
+		}
+		BigDecimal limit = threshold?.value != null ? (BigDecimal) threshold.value : DEFAULT_THRESHOLD
+		return decide(price, priceCurrency, refCurrencies, limit, (String) currency?.value ?: priceCurrency)
+	}
+
 	// ------------------------------------------------------------------
 	// Text
 	// ------------------------------------------------------------------
@@ -382,11 +439,28 @@ class CostApprovalLogic {
 		return "${format.format(amount)} ${code}".toString()
 	}
 
-	/** The external name Morpheus shows for the request, in the given locale. */
+	/**
+	 * The external name Morpheus shows for the request, in the given locale. A misconfigured setting
+	 * is named by its form label and level, never by its raw value (that one is in the log).
+	 */
 	static String requestName(Decision d, Locale locale) {
 		String price = money(d.price, d.shownPriceCurrency, locale)
 		String limit = money(d.threshold, d.thresholdCurrency, locale)
-		return Messages.text("cost-threshold-approval.request.${outcomeKey(d.outcome)}", locale, price, limit, d.requestType ?: '?')
+		String field = d.misconfiguredField ? Messages.text(fieldLabelKey(d.misconfiguredLevel, d.misconfiguredField), locale) : '?'
+		String level = d.misconfiguredLevel ? Messages.text("cost-threshold-approval.level.${d.misconfiguredLevel}", locale) : '?'
+		return Messages.text("cost-threshold-approval.request.${outcomeKey(d.outcome)}", locale, price, limit, d.requestType ?: '?',
+			field, level)
+	}
+
+	/**
+	 * The bundle key of the form label of a field ('threshold' or 'currency') at a level: the policy
+	 * form's own labels (policyThreshold, policyCurrency) for the policy, the integration form's for
+	 * the integration. The call options have no form; they take the integration's field names, so
+	 * they are named with its labels.
+	 */
+	static String fieldLabelKey(String level, String field) {
+		String key = level == 'policy' ? "policy${field.capitalize()}" : field
+		return "cost-threshold-approval.${key}.label".toString()
 	}
 
 	/** The short status message of the response, in the given locale. */
@@ -399,6 +473,7 @@ class CostApprovalLogic {
 			case Outcome.APPROVED: return 'approved'
 			case Outcome.OVER_THRESHOLD: return 'overThreshold'
 			case Outcome.CURRENCY_MISMATCH: return 'currencyMismatch'
+			case Outcome.THRESHOLD_MISCONFIGURED: return 'thresholdMisconfigured'
 			case Outcome.NOT_CHECKED: return 'notChecked'
 			default: return 'noPrice'
 		}
