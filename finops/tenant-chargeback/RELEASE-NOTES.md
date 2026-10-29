@@ -31,6 +31,20 @@ plugin code, provider code and options are unchanged.
   A tenant whose only invoices were in such a currency was still counted on the *Tenants* card
   but listed in no table. The card now counts the tenants the tables list whenever a currency is
   hidden; the stored rows and the CSV export keep the full count.
+- **README: why MSP Tenant Overview can show other amounts.** A new section,
+  [Comparing with MSP Tenant Overview](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/finops/tenant-chargeback#comparing-with-msp-tenant-overview),
+  lists every known reason the two pages differ: **cents** (this report rounds each tenant, group
+  and currency row so the rows add up, MSP Tenant Overview once per tenant, currency and month),
+  **which tenants count** (this report also lists inactive tenants with invoices and, when
+  ticked, the master tenant; MSP Tenant Overview lists active sub-tenants only), list price
+  against invoice amount, a stored report result against a live page, the current month as a
+  projection that moves with every costing run, tenants without any amount, and counts that
+  measure different things. **Rounding is unchanged** (owner decision): aligning it would change
+  one of the two pages by cents. Documentation only; no amount changes.
+- **Invoice query pinned against the test model.** The aggregation tests run on a hand-written
+  model of `INVOICE_SQL`'s result. A new test pins the fragments that model copies: the currency
+  expression `NULLIF(TRIM(i.currency), '')`, the whole `GROUP BY` and the count and sums. A change
+  to the query now fails a test until the model is changed with it. Tests only.
 
 ### Behaviour changes from 1.2.2
 
@@ -43,10 +57,10 @@ plugin code, provider code and options are unchanged.
 
 ### Verified
 
-- Unit tests (Spock), 183 in total: `process()` with a mocked report service and database
+- Unit tests (Spock), 184 in total: `process()` with a mocked report service and database
   (column aliases mapped, master tenant left out, rows, tenant totals and currency totals as
-  stored), the master check for creator and account, the month check, and the tenant count with a
-  hidden currency.
+  stored), the master check for creator and account, the month check, the tenant count with a
+  hidden currency, and the key fragments of the invoice query.
 
 ### Not yet verified
 
@@ -56,6 +70,10 @@ plugin code, provider code and options are unchanged.
   appliance log.
 - Whether Morpheus ever passes `process()` a report result without a creator (for example from a
   scheduled report job), and whether it then carries its account, is not known.
+- The README comparison was checked against the code of both plugins, not against the lab. Open
+  check: a new report for the current month (markup 0, master tenant not included) next to a
+  freshly loaded MSP Tenant Overview page: the same amounts per active sub-tenant, apart from the
+  reasons the README lists.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.2.2...tenant-chargeback-v1.2.3
 

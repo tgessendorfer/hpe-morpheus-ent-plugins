@@ -166,6 +166,20 @@ class TenantChargebackReportProviderSpec extends Specification {
 		!q.contains(' JOIN compute_site cs ON cs.name')
 	}
 
+	def "the invoice query keys, counts and sums its rows as queryRows() in ChargebackCalculatorSpec models them"() {
+		given:
+		String q = TenantChargebackReportProvider.INVOICE_SQL.replaceAll(/\s+/, ' ')
+		String groupBy = q.find(/GROUP BY (.*?) ORDER BY/) { all, g -> g }
+
+		expect: 'the model keys a row by tenant id, group id and trimmed currency (empty = none); a.name and a.master_account follow from a.id'
+		groupBy == "a.id, a.name, a.master_account, i.site_id, NULLIF(TRIM(i.currency), '')"
+		q.contains("NULLIF(TRIM(i.currency), '') AS currency,")
+
+		and: 'the model counts the invoices of a row and sums their cost and price'
+		q.contains('COUNT(*) AS resources,')
+		q.contains('SUM(COALESCE(i.total_cost, 0)) AS cost, SUM(COALESCE(i.total_price, 0)) AS price FROM ')
+	}
+
 	def "the language setting query is parameterised"() {
 		expect:
 		TenantChargebackReportProvider.USER_LOCALE_SQL == 'SELECT locale FROM user WHERE id = ?'

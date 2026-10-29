@@ -45,9 +45,11 @@ the same resources twice.
 | Margin % | margin / list price |
 | Invoice amount | list price × (1 + additional markup %) |
 
-Every invoice line is rounded to cents (half up) before anything is added, so the rows shown
-always add up to the totals. For the current month Morpheus projects the amounts to the end of
-the month; the heading says so.
+Every row of the group table (tenant, group and currency) is rounded to cents (half up) before
+anything is added, so the rows shown always add up to the totals. MSP Tenant Overview rounds once
+per tenant instead, so its amounts can differ by cents (see
+[Comparing with MSP Tenant Overview](#comparing-with-msp-tenant-overview)). For the current month
+Morpheus projects the amounts to the end of the month; the heading says so.
 
 ## Who sees it
 
@@ -120,6 +122,45 @@ language; the page is never broken by it.
 Validation messages of the report form (a wrong month or markup) follow the browser's language,
 since that call carries no user. The option labels and help texts of the form are looked up by
 Morpheus itself through their i18n codes, not by the plugin.
+
+## Comparing with MSP Tenant Overview
+
+[MSP Tenant Overview](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/finops/msp-tenant-overview)
+reads the same invoices (monthly invoices of instances and of servers that belong to no
+instance), the same columns (`total_cost`, `total_price`) and resolves currencies by the same
+rule. Its amounts can still differ from this report's, for these reasons:
+
+- **Cents.** This report rounds each row of the group table (tenant, group and currency) to cents
+  and adds up the rounded rows, so the rows add up to the tenant and currency totals. MSP Tenant
+  Overview adds up all of a tenant's invoices per currency and month and rounds once. A tenant's
+  amount can therefore differ by up to half a cent per group row, and a currency total by the sum
+  of those: three groups of 0.004 EUR each are 0.00 EUR here (each row rounds to 0.00) and
+  0.01 EUR there (0.012 rounds to 0.01). Margins and margin % come from the rounded amounts and
+  move with them. Both rules stay as they are; aligning them would change the amounts of one of
+  the two pages by cents.
+- **Which tenants count.** MSP Tenant Overview lists the active sub-tenants only
+  (`account.master_account = 0` and `active = 1`), with or without invoices. This report lists
+  every tenant that has invoices in the month, inactive tenants included, and the master tenant
+  when *Include Master Tenant Resources* is ticked. Their amounts are in this report's totals but
+  not in MSP Tenant Overview's, and the two *Tenants* cards count different tenants.
+- **List price, not invoice amount.** MSP Tenant Overview's *Revenue* is the list price. Compare
+  it with *List Price* here; *Invoice Amount* adds the additional markup and equals the list price
+  only at 0 %.
+- **Stored result, live page.** A report result keeps the amounts of the moment it ran; MSP Tenant
+  Overview reads the invoices at every page view. Every Morpheus costing run updates the invoices,
+  so compare a new report run with a freshly loaded page.
+- **Current month.** Both show the current month as Morpheus' projection to the end of the month
+  (`total_price`), not the month to date, and the projection moves with every costing run. An
+  empty month here is the month the report ran in; MSP Tenant Overview shows the month of the page
+  view and the month before it (both in the appliance JVM time zone), and no other month.
+- **Tenants without any amount, zero rows.** MSP Tenant Overview lists a tenant without any amount
+  (no invoices, or only zero amounts) with one zero row in the master tenant's currency, else USD,
+  and leaves out a tenant's currency whose amounts in both months are zero. This report lists a
+  tenant only with its invoices, in their own currency, and hides a currency only when its totals
+  are zero. Only zero rows differ.
+- **Counts measure different things.** *Resources* here counts invoices; MSP Tenant Overview's
+  *Instances* and *Servers* count the tenant's instances and servers, priced or not, and its
+  *Groups* every group of the tenant.
 
 ## Known limits
 

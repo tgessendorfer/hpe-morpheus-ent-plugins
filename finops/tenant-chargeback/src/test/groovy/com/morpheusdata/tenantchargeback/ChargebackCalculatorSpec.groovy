@@ -489,7 +489,9 @@ class ChargebackCalculatorSpec extends Specification {
 	 *
 	 * Limit: this is a hand-written model of the query, not the query run against a database. The
 	 * SQL text itself is covered only by the string checks in TenantChargebackReportProviderSpec and
-	 * by the lab appliance, so a change to INVOICE_SQL has to be made here as well.
+	 * by the lab appliance, so a change to INVOICE_SQL has to be made here as well. One of those
+	 * checks pins what this model copies (the GROUP BY, the currency expression, the count and the
+	 * sums), so such a change fails it until both are changed.
 	 */
 	private static List<Map> queryRows(List<Map> invoices, Map<Long, String> sites, boolean join = true) {
 		Map<List, Map> out = new LinkedHashMap<List, Map>()
