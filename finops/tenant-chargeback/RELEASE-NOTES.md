@@ -6,7 +6,7 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
-## 1.2.3
+## 1.3.0
 
 **The report checks for itself that it runs for the master tenant, rejects a malformed month
 instead of showing an empty report, and tags the rows of deactivated tenants.** Built against
@@ -46,7 +46,7 @@ plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and option
   and currency row so the rows add up, MSP Tenant Overview once per tenant, currency and month),
   **which tenants count** (this report also lists deactivated tenants with invoices, now tagged,
   and, when ticked, the master tenant; MSP Tenant Overview lists active sub-tenants only and, since
-  its 1.2.3, names the deactivated ones with invoices in a line under its totals), list price
+  its 1.3.0, names the deactivated ones with invoices in a line under its totals), list price
   against invoice amount, a stored report result against a live page, the current month as a
   projection that moves with every costing run, tenants without any amount, and counts that
   measure different things. **Rounding is unchanged** (owner decision): aligning it would change
@@ -106,7 +106,7 @@ plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and option
 - The *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an
   appliance with container hosts.
 
-**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.2.2...tenant-chargeback-v1.2.3
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.2.2...tenant-chargeback-v1.3.0
 
 ## 1.2.2
 

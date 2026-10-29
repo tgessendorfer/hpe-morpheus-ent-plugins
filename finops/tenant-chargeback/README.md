@@ -30,9 +30,9 @@ For one month (`account_invoice` with `period_interval = 'month'`):
 On the report page (since 1.2.2) a currency whose total cost, list price and invoice amount are
 all zero is left out of the cards and the three tables, as long as another currency has an amount;
 the CSV export keeps every row. The *Tenants* card then counts only the tenants the tables list
-(since 1.2.3). Numbers are right-aligned and never broken inside.
+(since 1.3.0). Numbers are right-aligned and never broken inside.
 
-**Deactivated tenants (since 1.2.3).** A tenant whose account is deactivated in Morpheus
+**Deactivated tenants (since 1.3.0).** A tenant whose account is deactivated in Morpheus
 (`account.active` = 0) is listed with its invoices like any other tenant; its rows in *Per tenant*
 and *Per tenant and group* carry a *Deactivated* tag next to the tenant name. Its amounts are in
 every total and the *Tenants* card counts it, as before. Report results stored by an earlier
@@ -63,7 +63,7 @@ The report is **master tenant only** (`masterOnly = true`): it reads the invoice
 tenants. Which roles may run it follows the Morpheus report permissions. Without
 *Include Master Tenant Resources* only the sub-tenants are listed.
 
-Since 1.2.3 the report also checks this itself before it reads any invoice: the user who ran it
+Since 1.3.0 the report also checks this itself before it reads any invoice: the user who ran it
 must belong to the master tenant (a report result without a creator: its own account must be the
 master tenant). Otherwise, and for a month that is not `YYYY-MM` (possible through the API), the
 report ends as *failed* with a warning in the appliance log.
@@ -94,7 +94,7 @@ carries its ISO currency code.
 The report result export contains the plain values, independent of the viewer's language:
 amounts with two decimals and a dot, no grouping. Main rows: `tenant`, `group` (empty for servers
 without a group), `noGroup`, `resources`, `currency`, `cost`, `price`, `margin`, `markupPercent`,
-`invoice`, `deactivated` (since 1.2.3; `true` for a deactivated tenant). `markupPercent` carries
+`invoice`, `deactivated` (since 1.3.0; `true` for a deactivated tenant). `markupPercent` carries
 the markup as entered, up to four decimals; the page shows it with the same precision. Header rows
 (per tenant) add `marginPct` and carry `deactivated` as well; footer rows carry the per-currency totals
 (`kind = total`) and the report metadata (`kind = meta`: `month`, `current`, `markupPercent`,
@@ -148,8 +148,8 @@ rule. Its amounts can still differ from this report's, for these reasons:
 - **Which tenants count.** MSP Tenant Overview lists the active sub-tenants only
   (`account.master_account = 0` and `active = 1`), with or without invoices. This report lists
   every tenant that has invoices in the month, deactivated tenants included (tagged *Deactivated*
-  since 1.2.3), and the master tenant when *Include Master Tenant Resources* is ticked. The amounts
-  of deactivated tenants are in this report's totals but not in MSP Tenant Overview's; since 1.2.3
+  since 1.3.0), and the master tenant when *Include Master Tenant Resources* is ticked. The amounts
+  of deactivated tenants are in this report's totals but not in MSP Tenant Overview's; since 1.3.0
   that page names them in one line per currency under its totals (their number, and their amounts
   in the columns of its totals: revenue, cost and margin of the current month, revenue and margin
   of the previous month). MSP Tenant Overview never shows the master

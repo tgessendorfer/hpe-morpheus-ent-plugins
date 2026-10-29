@@ -296,7 +296,7 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 	 * in USD) is left out of every section of the page, as long as another currency has an amount.
 	 * The stored rows, and so the CSV export, keep it. The tenant count then counts only the
 	 * tenants the tables still list. Rows of a deactivated tenant carry the tag text next to the
-	 * tenant name (deactivatedText); result rows stored before 1.2.3 have no flag and no tag.
+	 * tenant name (deactivatedText); result rows stored before 1.3.0 have no flag and no tag.
 	 */
 	static Map pageModel(Map<String, List<ReportResultRow>> reportRowsBySection, Locale locale) {
 		Map<String, String> t = texts(locale)
