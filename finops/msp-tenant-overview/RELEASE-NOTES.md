@@ -8,10 +8,10 @@ One section per version, newest first. The same text is the body of the matching
 
 ## 1.2.3
 
-**No zero total next to a priced currency, the plugin's own texts even when another jar ships a
-bundle of the same name, and a failed connection release no longer breaks the page.** Built
-against plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and options are
-unchanged.
+**No zero total next to a priced currency, a line under the totals for deactivated
+sub-tenants with invoices, the plugin's own texts even when another jar ships a bundle of the same
+name, and a failed connection release no longer breaks the page.** Built against plugin API
+1.4.2, minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
 
 ### What changed
 
@@ -22,6 +22,21 @@ unchanged.
   totals (revenue and cost of both months) are all zero is now left out of the totals and cards
   as long as another currency has an amount. The tenant's own zero row stays. When no currency
   has any amount, the zero totals are shown as before.
+- **Deactivated sub-tenants named under the totals.** The page lists active sub-tenants only and
+  keeps doing so; **its tenant rows, cards and totals are unchanged**. Up to 1.2.2 nothing showed
+  that deactivated sub-tenants (`account.active = 0`) with invoices were left out. When there are
+  such tenants with an amount in the current or the previous month, a muted line per currency now
+  follows the totals: *Not shown: 2 deactivated tenants* (German *Nicht gezeigt: 2 deaktivierte
+  Tenants*; *1 deactivated tenant* in the singular) with their revenue, cost and margin in the
+  same columns. It follows the page's own rules: the same invoice filter and months, the same
+  currency rule, rounded per tenant, currency and month. A deactivated tenant whose amounts are
+  all zero does not count; without such tenants there is no line. Each page view first asks
+  whether a deactivated sub-tenant exists at all (`SELECT 1 ... FROM account a WHERE
+  a.master_account = 0 AND a.active = 0 LIMIT 1`); only when one does are their invoices read, in
+  one grouped query (`... account_id IN (SELECT a.id FROM account a WHERE a.master_account = 0 AND
+  a.active = 0) GROUP BY account_id, currency, period`). If either query fails, the appliance log
+  gets one warning and the page is shown without the line. The table footer is now rendered even
+  without totals, so the line also appears when no active sub-tenant is left.
 - **Own bundle, found by a marker key.** The page texts were read from the first
   `i18n/messages*.properties` the class loader returned. A class loader that asks its parent first
   can return another jar's file of the same name, and the page then showed bundle keys instead of
@@ -36,12 +51,20 @@ unchanged.
   [Comparing with Tenant Chargeback](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/finops/msp-tenant-overview#comparing-with-tenant-chargeback),
   lists every known reason the two pages differ: **cents** (this page rounds once per tenant,
   currency and month, Tenant Chargeback each of its tenant, group and currency rows), **which
-  tenants count** (this page lists active sub-tenants only; Tenant Chargeback also lists inactive
-  tenants with invoices and, when ticked, the master tenant), revenue against list price and
-  invoice amount, a live page against a stored report result, the current month as a projection
-  that moves with every costing run, tenants without any amount, and counts that measure different
-  things. **Rounding is unchanged** (owner decision): aligning it would change one of the two pages
-  by cents. Documentation only; no amount changes.
+  tenants count** (this page lists active sub-tenants only and names the deactivated ones with
+  invoices in the new line under its totals; Tenant Chargeback also lists deactivated tenants with
+  invoices, tagged since its 1.2.3, and, when ticked, the master tenant), revenue against list
+  price and invoice amount, a live page against a stored report result, the current month as a
+  projection that moves with every costing run, tenants without any amount, and counts that
+  measure different things. **Rounding is unchanged** (owner decision): aligning it would change
+  one of the two pages by cents. Documentation only; no amount changes.
+- **README: Docker hosts and Kubernetes nodes.** A new entry under *Known limits* says what the
+  invoice filter does with container hosts: a server invoice is not counted when a `container` row
+  links the server to an instance, so the own server invoice of a Docker host or Kubernetes node
+  that runs Morpheus-managed container instances is not counted either; only the instance
+  invoices of its containers are. The page does not check whether those carry the host's cost,
+  and it reads the `container` table as it is when the page is loaded. Documentation only; the
+  filter is the one 1.2.1 introduced.
 
 ### Behaviour changes from 1.2.2
 
@@ -50,13 +73,24 @@ unchanged.
   amount in that currency, its zero total (*Total USD 0.00*, for example) and its cards are gone;
   the tenant's own zero row stays. That also happens with a master currency set, for example USD
   or CHF over tenants invoiced in EUR.
+- When deactivated sub-tenants have invoices with an amount in the two months shown, a line per
+  currency follows the totals. Every page view runs one more small query (whether a deactivated
+  sub-tenant exists), and a second one for their invoices only when one does.
 
 ### Verified
 
-- Unit tests (Spock), 79 in total: zero totals dropped next to a priced currency and kept when
+- Unit tests (Spock), 90 in total: zero totals dropped next to a priced currency and kept when
   every currency is zero, `loadData` with two tenants of which one has no invoices, the rendered
   page without a USD total, a failing connection release, and the bundle lookup with a foreign
   bundle of the same name ahead of the plugin's own.
+- Unit tests for deactivated sub-tenants: the queries (the page's invoice filter, the two months,
+  the deactivated sub-tenants only; the invoice query not run when the check finds no deactivated
+  sub-tenant, and a failing check leaves the page unchanged); the summary (only tenants with an amount count, per tenant
+  rounding, currencies in code order); `loadData` with two deactivated tenants in two currencies
+  (the query gets the current and the previous month, the tenant rows, count and totals equal those
+  without deactivated tenants, one row per currency with the label on the first, rendered after the
+  totals); the singular in English and German; no line for tenants without an amount; a failing
+  query (page unchanged, no line); the line with no active sub-tenant left.
 
 ### Not yet verified
 
@@ -69,6 +103,12 @@ unchanged.
   check: this page next to a new Tenant Chargeback report for the same month (markup 0, master
   tenant not included): the same amounts per active sub-tenant, apart from the reasons the README
   lists.
+- The line for deactivated sub-tenants was not seen on an appliance: it needs a deactivated
+  sub-tenant with invoices. Open checks: both queries on 9.0.2 and 9.1.0, the amounts against that
+  tenant's invoices, the line in light and dark mode, and no line (and an unchanged page) without
+  deactivated sub-tenants.
+- The *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an
+  appliance with container hosts.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.2.2...msp-tenant-overview-v1.2.3
 

@@ -13,6 +13,7 @@
     .finops-msp-tenant-overview .finops-table > thead > tr > th.finops-group { text-align: center; border-bottom: 1px solid rgba(128, 128, 128, .35); }
     .finops-msp-tenant-overview .finops-table .num { text-align: right; }
     .finops-msp-tenant-overview .finops-sub { display: block; font-size: 11px; line-height: 1.35; opacity: .75; }
+    .finops-msp-tenant-overview .finops-table > tfoot > tr.finops-deactivated > td { font-style: italic; opacity: .75; }
   </style>
   <h2>{{t.title}} {{month}}</h2>
   <div class="finops-kpis">
@@ -47,13 +48,14 @@
       <tr><td colspan="13">{{t.noTenants}}</td></tr>
     {{/each}}
     </tbody>
-    {{#if totals}}
     <tfoot>
     {{#each totals}}
       <tr><td colspan="7"><strong>{{../t.total}} {{currency}}</strong></td><td>{{currency}}</td><td class="num"><strong>{{revText}}</strong></td><td class="num">{{costText}}</td><td class="num">{{marginText}}{{#if marginPctLabel}}<span class="finops-sub">{{marginPctLabel}}</span>{{/if}}</td><td class="num">{{lrevText}}</td><td class="num">{{lmarginText}}{{#if lmarginPctLabel}}<span class="finops-sub">{{lmarginPctLabel}}</span>{{/if}}</td></tr>
     {{/each}}
+    {{#each deactivated}}
+      <tr class="finops-deactivated"><td colspan="7">{{#if first}}{{label}}{{/if}}</td><td>{{currency}}</td><td class="num">{{revText}}</td><td class="num">{{costText}}</td><td class="num">{{marginText}}{{#if marginPctLabel}}<span class="finops-sub">{{marginPctLabel}}</span>{{/if}}</td><td class="num">{{lrevText}}</td><td class="num">{{lmarginText}}{{#if lmarginPctLabel}}<span class="finops-sub">{{lmarginPctLabel}}</span>{{/if}}</td></tr>
+    {{/each}}
     </tfoot>
-    {{/if}}
   </table>
   </div>
   <p class="text-muted">{{t.footnote}}</p>

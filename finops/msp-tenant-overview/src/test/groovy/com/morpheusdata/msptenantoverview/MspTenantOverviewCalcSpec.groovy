@@ -233,4 +233,42 @@ class MspTenantOverviewCalcSpec extends Specification {
 		t.lmarginPctLabel == ''
 		!t.values().any { it.contains('%') }
 	}
+
+	def "deactivated tenants: only tenants with an amount count, amounts are added per currency by the page's rules"() {
+		given: 'tenant 5 in EUR in both months, tenant 6 with zero amounts only, tenant 7 in USD and without a currency (master EUR)'
+		List<Map> rows = [
+			[id: 5L, cur: 'EUR', period: '202610', rev: 100G, cost: 80G],
+			[id: 5L, cur: 'EUR', period: '202609', rev: 50G, cost: 40G],
+			[id: 6L, cur: 'USD', period: '202610', rev: 0G, cost: 0G],
+			[id: 7L, cur: 'usd', period: '202610', rev: 10G, cost: 8G],
+			[id: 7L, cur: null, period: '202609', rev: 1.5G, cost: 1G]]
+
+		when:
+		Map d = MspTenantOverviewCalc.deactivated(rows, '202610', 'EUR')
+
+		then: 'tenant 6 neither counts nor adds a zero entry; currencies sorted by code'
+		d.count == 2
+		d.totals.keySet() as List == ['EUR', 'USD']
+		d.totals.EUR == [rev: 100.00G, cost: 80.00G, lrev: 51.50G, lcost: 41.00G]
+		d.totals.USD == [rev: 10.00G, cost: 8.00G, lrev: 0.00G, lcost: 0.00G]
+	}
+
+	def "deactivated tenants are rounded per tenant, currency and month before they are added, as the page's own totals"() {
+		when:
+		Map d = MspTenantOverviewCalc.deactivated([
+			[id: 8L, cur: 'EUR', period: '202610', rev: 0.006G, cost: 0G],
+			[id: 9L, cur: 'EUR', period: '202610', rev: 0.006G, cost: 0G],
+			[id: 10L, cur: 'EUR', period: '202610', rev: 0.004G, cost: 0G]], '202610', 'EUR')
+
+		then: 'tenant 10 rounds to zero and does not count; 0.01 + 0.01, not round(0.016)'
+		d.count == 2
+		d.totals.EUR.rev == 0.02G
+	}
+
+	def "no rows, or rows without any amount, give no deactivated tenant"() {
+		expect:
+		MspTenantOverviewCalc.deactivated([], '202610', 'EUR') == [count: 0, totals: [:]]
+		MspTenantOverviewCalc.deactivated(null, '202610', 'EUR').count == 0
+		MspTenantOverviewCalc.deactivated([[id: 6L, cur: 'EUR', period: '202610', rev: 0G, cost: 0G]], '202610', 'EUR').count == 0
+	}
 }

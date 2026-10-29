@@ -105,6 +105,32 @@ class MspTenantOverviewCalc {
 	}
 
 	/**
+	 * Summary of the deactivated sub-tenants the page does not list, from their invoice rows (keys
+	 * id = tenant id, cur, period, rev, cost; the same filter and months as the page's own rows).
+	 * Each tenant's rows are grouped by the page's own rule ({@link #groupByCurrency}): currency
+	 * fallback, current month against the previous one, rounded to cents per tenant, currency and
+	 * month, currencies whose four amounts are zero left out. A tenant counts when at least one
+	 * currency is left; a tenant without any amount neither counts nor gets a zero entry. The
+	 * amounts of the counted tenants are added per currency, sorted by code.
+	 *
+	 * @return [count: number of counted tenants, totals: currency -> rev, cost, lrev, lcost]
+	 */
+	static Map deactivated(List<Map> rows, String curPeriod, def masterCurrency) {
+		Map<Object, List<Map>> byTenant = (rows ?: []).groupBy { Map r -> r.id }
+		Map<String, Map<String, BigDecimal>> totals = new TreeMap<String, Map<String, BigDecimal>>()
+		int count = 0
+		byTenant.each { Object id, List<Map> tenantRows ->
+			Map<String, Map<String, BigDecimal>> byCur = groupByCurrency(tenantRows, curPeriod, masterCurrency)
+				.findAll { String ccy, Map<String, BigDecimal> x -> x.values().any { it.signum() != 0 } }
+			if(byCur) {
+				count++
+				addTo(totals, byCur)
+			}
+		}
+		[count: count, totals: totals]
+	}
+
+	/**
 	 * Removes the currencies whose four amounts are all zero from the totals, as long as another
 	 * currency has an amount. A tenant without any amount adds a zero entry in the fallback
 	 * currency (see groupByCurrency), which would otherwise show as a zero total (e.g. USD 0.00)

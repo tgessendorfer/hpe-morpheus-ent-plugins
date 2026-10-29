@@ -33,6 +33,9 @@ import java.time.YearMonth
  * cost and margin for the previous month and the current month (forecast). Visible in the master
  * tenant only (masterTenantOnly); loadData also checks that the user belongs to the master account.
  *
+ * Deactivated sub-tenants (account.active = 0) are not listed and not in the totals; when they have
+ * invoices in the months shown, one line per currency under the totals names their number and amounts.
+ *
  * Reads Morpheus' internal tables (user, account, compute_site, instance, compute_server,
  * container, account_invoice) through the read-only report connection. Tested on Morpheus 9.0.2 only.
  *
@@ -49,6 +52,19 @@ class MspTenantOverviewAnalyticsProvider extends AbstractAnalyticsProvider {
 	// link is the container table (container.server_id, container.instance_id).
 	static final String INVOICE_FILTER = "period_interval = 'month' AND (ref_type = 'Instance' OR (ref_type = 'ComputeServer' AND instance_id IS NULL" +
 		" AND NOT EXISTS (SELECT 1 FROM container ct WHERE ct.server_id = account_invoice.ref_id AND ct.instance_id IS NOT NULL)))"
+
+	// Invoices of the deactivated sub-tenants (active = 0), which the page does not list, for the
+	// two months the page shows: one row per tenant, raw currency and month. Same filter as the
+	// page's own invoice query; the account table is only read in the subquery, so every column of
+	// the outer query is account_invoice's.
+	static final String DEACTIVATED_SQL = ("SELECT account_id AS id, currency AS cur, period," +
+		" SUM(COALESCE(total_price,0)) AS rev, SUM(COALESCE(total_cost,0)) AS cost" +
+		" FROM account_invoice WHERE ${INVOICE_FILTER} AND period IN (?, ?)" +
+		" AND account_id IN (SELECT a.id FROM account a WHERE a.master_account = 0 AND a.active = 0)" +
+		" GROUP BY account_id, currency, period").toString()
+
+	// Asked first: without any deactivated sub-tenant the invoice query above is not run at all.
+	static final String DEACTIVATED_EXISTS_SQL = 'SELECT 1 AS found FROM account a WHERE a.master_account = 0 AND a.active = 0 LIMIT 1'
 
 	Plugin plugin
 	MorpheusContext morpheus
@@ -172,6 +188,34 @@ class MspTenantOverviewAnalyticsProvider extends AbstractAnalyticsProvider {
 		new Sql(c)
 	}
 
+	/**
+	 * The footer rows for the deactivated sub-tenants with invoices in the two months shown: one
+	 * row per currency with the same amount columns as the totals, the first carrying the label
+	 * ('Not shown: 2 deactivated tenants'). Empty when there are none. The page's totals do not
+	 * include them. The invoices are read only when a deactivated sub-tenant exists at all. A
+	 * failing query or calculation logs one warning and returns no rows, so the page itself is
+	 * never affected.
+	 */
+	List<Map> deactivatedRows(Sql sql, Map<String, String> months, String masterCurrency, Locale locale) {
+		try {
+			if(sql.firstRow(DEACTIVATED_EXISTS_SQL) == null) return []
+			List<Map> rows = sql.rows(DEACTIVATED_SQL, [months.cur, months.last]) ?: []
+			Map d = MspTenantOverviewCalc.deactivated(rows, months.cur, masterCurrency)
+			int count = d.count as int
+			if(count == 0) return []
+			String label = count == 1 ? message('deactivated.one', 'Not shown: 1 deactivated tenant', locale) :
+				message('deactivated.other', 'Not shown: {0} deactivated tenants', locale).replace('{0}', count.toString())
+			List<Map> out = []
+			(d.totals as Map<String, Map<String, BigDecimal>>).each { String ccy, Map<String, BigDecimal> x ->
+				out << ([first: out.isEmpty(), label: label, currency: ccy] + MspTenantOverviewCalc.texts(x, locale))
+			}
+			return out
+		} catch(Exception e) {
+			log.warn("MSP tenant overview: deactivated tenants not read, the page shows no line for them: ${e.message}")
+			return []
+		}
+	}
+
 	@Override
 	ServiceResponse<Map<String, Object>> loadData(User user, Map<String, Object> opts) {
 		Locale locale = viewerLocale()
@@ -219,7 +263,9 @@ class MspTenantOverviewAnalyticsProvider extends AbstractAnalyticsProvider {
 			}
 			MspTenantOverviewCalc.dropZeroCurrencies(totals)
 			List totalRows = totals.collect { String ccy, Map<String, BigDecimal> x -> [currency: ccy] + MspTenantOverviewCalc.texts(x, locale) }
-			return ServiceResponse.success([items: items, count: tenants.size(), totals: totalRows,
+			// Deactivated sub-tenants are not listed and not in the totals; one line under the totals says what is left out.
+			List<Map> deactivated = deactivatedRows(sql, m, masterCurrency, locale)
+			return ServiceResponse.success([items: items, count: tenants.size(), totals: totalRows, deactivated: deactivated,
 				month: m.curShown, lastMonth: m.lastShown, instances: instTotal, cores: coresTotal, t: labels(locale)])
 		} catch(Exception e) {
 			log.error("MSP tenant overview: loading tenant data failed: ${e.message}", e)

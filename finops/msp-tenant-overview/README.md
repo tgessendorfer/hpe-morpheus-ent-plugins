@@ -28,6 +28,16 @@ One row per active sub-tenant (`account.master_account = 0`, `active = 1`), orde
 
 - **Invoices counted:** monthly invoices (`period_interval = 'month'`) of instances, plus those of
   servers that belong to no instance, so a VM is never counted twice. Since 1.2.1 a server belongs to an instance when a `container` row links them (`container.server_id` = the invoice's `ref_id`, `container.instance_id` set); Morpheus leaves `instance_id` empty on the server invoice of an instance's own VM.
+- **Deactivated sub-tenants (since 1.2.3).** A sub-tenant whose account is deactivated
+  (`account.active = 0`) is not listed and not in the totals, as before. When such tenants have
+  invoices with an amount in one of the two months, a muted line per currency under the totals
+  says how many there are (*Not shown: 2 deactivated tenants*) and shows their revenue, cost and
+  margin in the same columns. It follows the page's own rules: the same invoices and months, the
+  same currency rule, rounded per tenant, currency and month. A deactivated tenant whose amounts
+  are all zero does not count; without such tenants there is no line. Each page view first asks
+  whether a deactivated sub-tenant exists at all (one small query on `account`); only then are
+  their invoices read, in one grouped query. If either query fails, the page is shown without the
+  line and the appliance log gets one warning.
 - **Zero currencies are hidden (since 1.2.1).** A currency whose revenue and cost are 0.00 in both
   months gets no tenant row and no total; a tenant with nothing but zero amounts keeps one zero row
   in the master currency. Since 1.2.3 that zero row adds no zero total (and no zero cards) next to a
@@ -95,9 +105,13 @@ rule. Its report can still show other amounts than this page, for these reasons:
   cents.
 - **Which tenants count.** This page lists the active sub-tenants only
   (`account.master_account = 0` and `active = 1`), with or without invoices. Tenant Chargeback
-  lists every tenant that has invoices in the month, inactive tenants included, and the master
-  tenant when its option *Include Master Tenant Resources* is ticked. Their amounts are in its
-  totals but not in this page's, and the two *Tenants* cards count different tenants.
+  lists every tenant that has invoices in the month, deactivated tenants included (tagged
+  *Deactivated* since 1.2.3), and the master tenant when its option *Include Master Tenant
+  Resources* is ticked. The amounts of deactivated tenants are in its totals but not in this
+  page's; since 1.2.3 the line under this page's totals gives their number and their amounts per
+  currency for both months, the figures to add when comparing with Tenant Chargeback. This page
+  never shows the master tenant's own amounts. The two *Tenants* cards therefore count different
+  tenants.
 - **Revenue is the list price.** Compare *Revenue* with Tenant Chargeback's *List Price*. Its
   *Invoice Amount* adds an optional additional markup and equals the list price only at 0 %.
 - **Live page, stored result.** This page reads the invoices at every page view; a Tenant
@@ -131,6 +145,15 @@ rule. Its report can still show other amounts than this page, for these reasons:
   language, so the page reads `user.locale` itself (one parameterised query on the read-only
   connection). If that fails, the page still loads, in the browser language. Since 1.2.0 the page
   texts no longer use the template's `i18n` helper, which follows the browser.
+- **Docker hosts and Kubernetes nodes.** A server invoice is not counted when a `container` row
+  links that server to an instance (`container.server_id` = the invoice's `ref_id`,
+  `container.instance_id` set); that keeps an instance's own VM from being counted twice. A Docker
+  host or Kubernetes node on which Morpheus-managed container instances run has such rows as well,
+  so its own server invoice is not counted either; the instance invoices of its container
+  instances are. The rule assumes that those instance invoices carry the host's cost. The page
+  does not check this: a host cost that is not priced into its container instances is missing
+  from the figures. The `container` table is read as it is when the page is loaded, not as it was
+  in the invoiced month.
 - **Internal tables** (`user`, `account`, `compute_site`, `instance`, `compute_server`,
   `account_invoice`) may change with a Morpheus upgrade. A failing query shows *Tenant data could
   not be loaded* and logs the cause instead of a stack trace on the page.
@@ -168,8 +191,8 @@ Requires JDK 17 (Groovy 3.0.9) and the bundled Gradle wrapper (Gradle 9.8.0, che
 
 The Spock tests cover the plugin identity (code, repo link, provider, message bundles), the
 currency fallback, grouping per currency, rounding, percentages, locale-aware number formats, the
-choice of language (user setting over browser, with its fallbacks) and the rendered template (no
-`- %` for tenants without revenue).
+choice of language (user setting over browser, with its fallbacks), the line for deactivated
+sub-tenants and the rendered template (no `- %` for tenants without revenue).
 
 ## Translations
 
