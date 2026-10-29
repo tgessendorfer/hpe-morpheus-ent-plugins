@@ -6,7 +6,7 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
-## 1.2.3
+## 1.3.0
 
 **No zero total next to a priced currency, a line under the totals for deactivated
 sub-tenants with invoices, the plugin's own texts even when another jar ships a bundle of the same
@@ -53,7 +53,7 @@ name, and a failed connection release no longer breaks the page.** Built against
   currency and month, Tenant Chargeback each of its tenant, group and currency rows), **which
   tenants count** (this page lists active sub-tenants only and names the deactivated ones with
   invoices in the new line under its totals; Tenant Chargeback also lists deactivated tenants with
-  invoices, tagged since its 1.2.3, and, when ticked, the master tenant), revenue against list
+  invoices, tagged since its 1.3.0, and, when ticked, the master tenant), revenue against list
   price and invoice amount, a live page against a stored report result, the current month as a
   projection that moves with every costing run, tenants without any amount, and counts that
   measure different things. **Rounding is unchanged** (owner decision): aligning it would change
@@ -110,7 +110,7 @@ name, and a failed connection release no longer breaks the page.** Built against
 - The *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an
   appliance with container hosts.
 
-**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.2.2...msp-tenant-overview-v1.2.3
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.2.2...msp-tenant-overview-v1.3.0
 
 ## 1.2.2
 

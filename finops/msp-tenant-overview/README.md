@@ -28,7 +28,7 @@ One row per active sub-tenant (`account.master_account = 0`, `active = 1`), orde
 
 - **Invoices counted:** monthly invoices (`period_interval = 'month'`) of instances, plus those of
   servers that belong to no instance, so a VM is never counted twice. Since 1.2.1 a server belongs to an instance when a `container` row links them (`container.server_id` = the invoice's `ref_id`, `container.instance_id` set); Morpheus leaves `instance_id` empty on the server invoice of an instance's own VM.
-- **Deactivated sub-tenants (since 1.2.3).** A sub-tenant whose account is deactivated
+- **Deactivated sub-tenants (since 1.3.0).** A sub-tenant whose account is deactivated
   (`account.active = 0`) is not listed and not in the totals, as before. When such tenants have
   invoices with an amount in one of the two months, a muted line per currency under the totals
   says how many there are (*Not shown: 2 deactivated tenants*) and shows their revenue, cost and
@@ -40,7 +40,7 @@ One row per active sub-tenant (`account.master_account = 0`, `active = 1`), orde
   line and the appliance log gets one warning.
 - **Zero currencies are hidden (since 1.2.1).** A currency whose revenue and cost are 0.00 in both
   months gets no tenant row and no total; a tenant with nothing but zero amounts keeps one zero row
-  in the master currency. Since 1.2.3 that zero row adds no zero total (and no zero cards) next to a
+  in the master currency. Since 1.3.0 that zero row adds no zero total (and no zero cards) next to a
   currency with an amount: whenever no other tenant has an amount in that currency, for example
   USD (or CHF) as the master currency over tenants invoiced in EUR, or USD as the fallback when the
   master account has no currency.
@@ -106,9 +106,9 @@ rule. Its report can still show other amounts than this page, for these reasons:
 - **Which tenants count.** This page lists the active sub-tenants only
   (`account.master_account = 0` and `active = 1`), with or without invoices. Tenant Chargeback
   lists every tenant that has invoices in the month, deactivated tenants included (tagged
-  *Deactivated* since 1.2.3), and the master tenant when its option *Include Master Tenant
+  *Deactivated* since 1.3.0), and the master tenant when its option *Include Master Tenant
   Resources* is ticked. The amounts of deactivated tenants are in its totals but not in this
-  page's; since 1.2.3 the line under this page's totals gives their number and their amounts per
+  page's; since 1.3.0 the line under this page's totals gives their number and their amounts per
   currency for both months, the figures to add when comparing with Tenant Chargeback. This page
   never shows the master tenant's own amounts. The two *Tenants* cards therefore count different
   tenants.
