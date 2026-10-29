@@ -6,13 +6,13 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
-## 1.2.3
+## 1.3.0
 
 **The FinOps widgets are never shown without their permission, a failed connection release no
 longer breaks a widget, and the KPI strip names the deactivated sub-tenants its figures leave
-out.** Built against plugin API 1.4.2, minimum appliance 9.0.2. Fix release from a code review;
-apart from the new line about deactivated sub-tenants, nothing changes on an appliance where the
-permissions load and the database answers.
+out.** Built against plugin API 1.4.2, minimum appliance 9.0.2. A minor release for the new line
+about deactivated sub-tenants, with fixes from a code review; apart from that line, nothing changes
+on an appliance where the permissions load and the database answers.
 
 ### What changes
 
@@ -21,7 +21,7 @@ permissions load and the database answers.
   its *Logs* permission could not be loaded; if *Operations > Costing > Budgets*
   (`operations-budgets`) could not be loaded when the plugin started, the KPI strip, the trend and
   the split were shown to every user, and a master tenant user without that permission saw the
-  provider's revenue, cost and margin. Since 1.2.3 **every plugin widget whose permission is missing
+  provider's revenue, cost and margin. Since 1.3.0 **every plugin widget whose permission is missing
   is left out of the layout** and an error is logged. Rows that end up empty take no row number, so
   the rows below move up without a gap. Reload the plugin once the permission is there.
 - **A failed release of the database connection is logged and goes no further.** The invoice load
@@ -99,7 +99,7 @@ permissions load and the database answers.
 - The *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an
   appliance with container hosts.
 
-**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/finops-insights-v1.2.2...finops-insights-v1.2.3
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/finops-insights-v1.2.2...finops-insights-v1.3.0
 
 ---
 

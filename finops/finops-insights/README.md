@@ -25,7 +25,7 @@ entries of the tenant's servers with a log history page.
   sub-tenants (`account.master_account = 0`, `active = 1`): the provider view with revenue, cost
   and margin. A user of a sub-tenant sees only that tenant's spend: no cost, no margin, no tenant
   split.
-- **Deactivated sub-tenants (since 1.2.3)** (`active = 0`) are left out of every figure, as
+- **Deactivated sub-tenants (since 1.3.0)** (`active = 0`) are left out of every figure, as
   before. In the provider view, when they have invoices with an amount in the current month, one
   line under the KPI cards says how many there are and gives their revenue and cost per currency,
   the widgets' main currency first: *Not shown: 2 deactivated tenants with invoices in 2026-10:
@@ -60,7 +60,7 @@ entries of the tenant's servers with a log history page.
 Users see the widgets when their role grants **Operations > Costing > Budgets** (`operations-budgets`,
 read or full); since 1.1.1 the invoice permission is not required. If the plugin cannot load that
 permission when it starts, the three FinOps widgets are left out of the dashboard instead of being
-shown to everyone (since 1.2.3); reload the plugin once the permission is there.
+shown to everyone (since 1.3.0); reload the plugin once the permission is there.
 
 ## Latest log entries and log history
 
