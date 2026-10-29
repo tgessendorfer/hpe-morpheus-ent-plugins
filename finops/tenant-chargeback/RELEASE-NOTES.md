@@ -87,22 +87,32 @@ plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and option
   `NULL` as not deactivated); the rendered page in English and German (the tag next to the tenant
   name in both tenant tables, none for the active tenant, unchanged totals); a result row stored
   without the flag (no tag).
+- **On HPE Morpheus Enterprise 9.1.0-1** with a release candidate built from this source
+  (`1.3.0-rc.1`), uploaded in place of 1.2.2 (status `loaded`): a report started by a master
+  tenant user through `POST /api/reports` ended *ready* with 32 rows. The invoice query with
+  `account.active` ran, and **every main row stored `deactivated: false`**, as no tenant was
+  deactivated. In the UI, a new result (*Run Now*, current month, no markup) and a result stored
+  by an earlier version both opened without error, the older one without a tag. The new result's
+  total was 5,157.19 EUR where MSP Tenant Overview showed 5,157.18 EUR for the same month: the
+  cent difference the README section describes.
 
 ### Not yet verified
 
-- Not run on an appliance. Open checks: a report run by a master-tenant user still ends *ready*
-  with the same amounts as 1.2.2; a sub-tenant user who starts the report through the API (if
-  Morpheus accepts the request) gets a *failed* result and no rows; the warning lines in the
-  appliance log.
+- On an appliance: the release jar loads in place of 1.2.2 (the release candidate above was a
+  separate build).
+- On an appliance: the amounts of a new report against 1.2.2 for the same month; a sub-tenant
+  user who starts the report through the API (if Morpheus accepts the request) gets a *failed*
+  result and no rows; the warning lines in the appliance log.
 - Whether Morpheus ever passes `process()` a report result without a creator (for example from a
   scheduled report job), and whether it then carries its account, is not known.
 - The README comparison was checked against the code of both plugins, not against the lab. Open
   check: a new report for the current month (markup 0, master tenant not included) next to a
   freshly loaded MSP Tenant Overview page: the same amounts per active sub-tenant, apart from the
   reasons the README lists.
-- The *Deactivated* tag was not seen on an appliance: it needs a deactivated tenant with invoices.
-  Open checks: the query with `account.active` on 9.0.2 and 9.1.0, the tag in light and dark mode,
-  and the `deactivated` column in the CSV export.
+- **The *Deactivated* tag was not seen on an appliance**: it needs a deactivated tenant with
+  invoices. Open checks: the tag in light and dark mode, `true` on that tenant's rows, the
+  `deactivated` column in the CSV export, and the query with `account.active` on 9.0.2 (it ran
+  on 9.1.0-1, above).
 - The *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an
   appliance with container hosts.
 
