@@ -171,13 +171,23 @@ class TenantChargebackReportProviderSpec extends Specification {
 		String q = TenantChargebackReportProvider.INVOICE_SQL.replaceAll(/\s+/, ' ')
 		String groupBy = q.find(/GROUP BY (.*?) ORDER BY/) { all, g -> g }
 
-		expect: 'the model keys a row by tenant id, group id and trimmed currency (empty = none); a.name and a.master_account follow from a.id'
-		groupBy == "a.id, a.name, a.master_account, i.site_id, NULLIF(TRIM(i.currency), '')"
+		expect: 'the model keys a row by tenant id, group id and trimmed currency (empty = none); a.name, a.master_account and a.active follow from a.id'
+		groupBy == "a.id, a.name, a.master_account, a.active, i.site_id, NULLIF(TRIM(i.currency), '')"
 		q.contains("NULLIF(TRIM(i.currency), '') AS currency,")
 
 		and: 'the model counts the invoices of a row and sums their cost and price'
 		q.contains('COUNT(*) AS resources,')
 		q.contains('SUM(COALESCE(i.total_cost, 0)) AS cost, SUM(COALESCE(i.total_price, 0)) AS price FROM ')
+	}
+
+	def "the invoice query reads the tenant's active flag and filters nothing on it"() {
+		given:
+		String q = TenantChargebackReportProvider.INVOICE_SQL.replaceAll(/\s+/, ' ')
+		String where = q.find(/WHERE (.*?) GROUP BY/) { all, w -> w }
+
+		expect: 'deactivated tenants are tagged, not left out'
+		q.contains('CAST(a.active AS UNSIGNED) AS is_active,')
+		!where.contains('active')
 	}
 
 	def "the language setting query is parameterised"() {
@@ -373,17 +383,17 @@ class TenantChargebackReportProviderSpec extends Specification {
 
 		then:
 		1 * env.sql.rows(TenantChargebackReportProvider.INVOICE_SQL, ['202609']) >> [
-			dbRow(tenant_id: 2L, tenant: 'Tenant A', is_master: 0G, grp_id: 5L, grp: 'Group 5', currency: 'EUR', resources: 3L, cost: 10.004G, price: 12.5G),
-			dbRow(tenant_id: 3L, tenant: 'Tenant B', is_master: 0G, grp_id: null, grp: null, currency: null, resources: 1L, cost: 1.0G, price: 2.0G),
-			dbRow(tenant_id: 1L, tenant: 'Provider', is_master: 1G, grp_id: 9L, grp: 'Own', currency: 'EUR', resources: 4L, cost: 50.0G, price: 60.0G)]
+			dbRow(tenant_id: 2L, tenant: 'Tenant A', is_master: 0G, is_active: 1G, grp_id: 5L, grp: 'Group 5', currency: 'EUR', resources: 3L, cost: 10.004G, price: 12.5G),
+			dbRow(tenant_id: 3L, tenant: 'Tenant B', is_master: 0G, is_active: 1G, grp_id: null, grp: null, currency: null, resources: 1L, cost: 1.0G, price: 2.0G),
+			dbRow(tenant_id: 1L, tenant: 'Provider', is_master: 1G, is_active: 1G, grp_id: 9L, grp: 'Own', currency: 'EUR', resources: 4L, cost: 50.0G, price: 60.0G)]
 		env.statuses == [ReportResult.Status.generating, ReportResult.Status.ready]
 
 		and: 'one row per tenant and group, the master tenant left out'
 		section(env.appended, ReportResultRow.SECTION_MAIN) == [
 			[tenant: 'Tenant A', group: 'Group 5', noGroup: false, resources: '3', currency: 'EUR', cost: '10.00', price: '12.50',
-			 margin: '2.50', markupPercent: '10', invoice: '13.75'],
+			 margin: '2.50', markupPercent: '10', invoice: '13.75', deactivated: false],
 			[tenant: 'Tenant B', group: '', noGroup: true, resources: '1', currency: 'EUR', cost: '1.00', price: '2.00',
-			 margin: '1.00', markupPercent: '10', invoice: '2.20']]
+			 margin: '1.00', markupPercent: '10', invoice: '2.20', deactivated: false]]
 		section(env.appended, ReportResultRow.SECTION_HEADER)*.marginPct == ['20.0', '50.0']
 
 		and:
@@ -391,6 +401,80 @@ class TenantChargebackReportProviderSpec extends Specification {
 		footer[0].subMap(['kind', 'month', 'markupPercent', 'tenants', 'currencies']) ==
 			[kind: 'meta', month: '2026-09', markupPercent: '10', tenants: '2', currencies: 'EUR']
 		footer[1] == [kind: 'total', currency: 'EUR', resources: '4', cost: '11.00', price: '14.50', margin: '3.50', marginPct: '24.1', invoice: '15.95']
+	}
+
+	def "process() marks the rows of a deactivated tenant and stores the same amounts and totals"() {
+		given: 'Tenant A deactivated (account.active 0), Tenant B active, both with invoices'
+		Map env = processEnv()
+		ReportResult rr = new ReportResult(createdBy: new User(id: 7L))
+		rr.configMap = [chargebackMonth: '2026-09']
+		env.sql.firstRow(TenantChargebackReportProvider.USER_MASTER_SQL, [7L]) >> dbRow(is_master: 1G)
+		env.sql.firstRow(TenantChargebackReportProvider.MASTER_CURRENCY_SQL) >> dbRow(currency: 'EUR')
+		env.sql.rows(TenantChargebackReportProvider.INVOICE_SQL, ['202609']) >> [
+			dbRow(tenant_id: 2L, tenant: 'Tenant A', is_master: 0G, is_active: 0G, grp_id: 5L, grp: 'Group 5', currency: 'EUR', resources: 3L, cost: 10.0G, price: 12.5G),
+			dbRow(tenant_id: 2L, tenant: 'Tenant A', is_master: 0G, is_active: 0G, grp_id: null, grp: null, currency: 'EUR', resources: 1L, cost: 1.0G, price: 2.0G),
+			dbRow(tenant_id: 3L, tenant: 'Tenant B', is_master: 0G, is_active: 1G, grp_id: 6L, grp: 'Group 6', currency: 'EUR', resources: 2L, cost: 4.0G, price: 5.0G)]
+
+		when:
+		env.p.process(rr)
+
+		then: 'every row of Tenant A carries the flag, Tenant B none'
+		env.statuses.last() == ReportResult.Status.ready
+		section(env.appended, ReportResultRow.SECTION_MAIN).collect { [it.tenant, it.deactivated] } ==
+			[['Tenant A', true], ['Tenant A', true], ['Tenant B', false]]
+		section(env.appended, ReportResultRow.SECTION_HEADER).collect { [it.tenant, it.deactivated] } ==
+			[['Tenant A', true], ['Tenant B', false]]
+
+		and: 'amounts, tenant count and totals include the deactivated tenant as before'
+		section(env.appended, ReportResultRow.SECTION_MAIN)*.price == ['12.50', '2.00', '5.00']
+		List<Map> footer = section(env.appended, ReportResultRow.SECTION_FOOTER)
+		footer[0].tenants == '2'
+		footer[1].subMap(['currency', 'resources', 'cost', 'price', 'invoice']) ==
+			[currency: 'EUR', resources: '6', cost: '15.00', price: '19.50', invoice: '19.50']
+	}
+
+	def "the page tags a deactivated tenant next to its name in both tenant tables, in the viewer's language"() {
+		given:
+		Map<String, List<ReportResultRow>> rows = [
+			main  : [row(tenant: 'Tenant A', group: 'Group 5', noGroup: false, currency: 'EUR', resources: '3', cost: '10.00', price: '12.50', margin: '2.50', invoice: '12.50', deactivated: true),
+				row(tenant: 'Tenant B', group: 'Group 6', noGroup: false, currency: 'EUR', resources: '2', cost: '4.00', price: '5.00', margin: '1.00', invoice: '5.00', deactivated: false)],
+			header: [row(tenant: 'Tenant A', currency: 'EUR', resources: '3', cost: '10.00', price: '12.50', margin: '2.50', marginPct: '20.0', invoice: '12.50', deactivated: true),
+				row(tenant: 'Tenant B', currency: 'EUR', resources: '2', cost: '4.00', price: '5.00', margin: '1.00', marginPct: '20.0', invoice: '5.00', deactivated: false)],
+			footer: [row(kind: 'meta', month: '2026-09', current: false, markupPercent: '0', tenants: '2', currencies: 'EUR'),
+				row(kind: 'total', currency: 'EUR', resources: '5', cost: '14.00', price: '17.50', margin: '3.50', marginPct: '20.0', invoice: '17.50')]
+		]
+
+		when:
+		String en = render(TenantChargebackReportProvider.pageModel(rows, Locale.ENGLISH))
+		String de = render(TenantChargebackReportProvider.pageModel(rows, Locale.GERMANY))
+
+		then: 'the tag follows the tenant name in the per-tenant table and in the per-group table'
+		en.findAll('<td>Tenant A<span class="finops-tag">Deactivated</span></td>').size() == 2
+		en.contains('<td>Tenant B</td>')
+		!en.contains('Tenant B<span')
+		de.findAll('<td>Tenant A<span class="finops-tag">Deaktiviert</span></td>').size() == 2
+
+		and: 'the totals and the tenant count are unchanged'
+		en.contains('<td class="num"><strong>17.50</strong></td>')
+		TenantChargebackReportProvider.pageModel(rows, Locale.ENGLISH).footer.tenants == '2'
+	}
+
+	def "result rows stored before the flag existed show no tag"() {
+		given:
+		Map<String, List<ReportResultRow>> rows = [
+			main  : [row(tenant: 'Tenant A', group: 'Group 5', noGroup: false, currency: 'EUR', resources: '3', cost: '10.00', price: '12.50', margin: '2.50', invoice: '12.50')],
+			header: [row(tenant: 'Tenant A', currency: 'EUR', resources: '3', cost: '10.00', price: '12.50', margin: '2.50', marginPct: '20.0', invoice: '12.50')],
+			footer: [row(kind: 'meta', month: '2026-09', current: false, markupPercent: '0', tenants: '1', currencies: 'EUR'),
+				row(kind: 'total', currency: 'EUR', resources: '3', cost: '10.00', price: '12.50', margin: '2.50', marginPct: '20.0', invoice: '12.50')]
+		]
+
+		when:
+		Map m = TenantChargebackReportProvider.pageModel(rows, Locale.ENGLISH)
+
+		then:
+		!m.rows[0].deactivated
+		!m.tenants[0].deactivated
+		!render(m).contains('finops-tag">')
 	}
 
 	def "process() fails without reading any invoice when the creator does not belong to the master tenant"() {
@@ -558,6 +642,11 @@ class TenantChargebackReportProviderSpec extends Specification {
 
 	private static ReportResult result(Long userId) {
 		new ReportResult(createdBy: userId != null ? new User(id: userId) : null)
+	}
+
+	private static String render(Map model) {
+		String hbs = TenantChargebackReportProviderSpec.classLoader.getResourceAsStream('renderer/hbs/tenantChargeback.hbs').getText('UTF-8')
+		new com.github.jknack.handlebars.Handlebars().compileInline(hbs).apply(model)
 	}
 
 	private static Properties load(String path) {

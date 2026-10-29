@@ -10,6 +10,7 @@
   .finops-chargeback .finops-table > tbody > tr > td { padding: 5px 6px; }
   .finops-chargeback .finops-table .num { text-align: right; }
   .finops-chargeback .finops-table > tbody > tr > td.num { white-space: nowrap; }
+  .finops-chargeback .finops-tag { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid rgba(128, 128, 128, .6); border-radius: 3px; font-size: 11px; line-height: 16px; font-weight: 600; white-space: nowrap; vertical-align: 1px; }
 </style>
 <h2>{{t.title}} {{footer.month}}{{#if footer.isCurrent}} ({{t.currentMonth}}){{/if}}</h2>
 <div class="finops-kpis">
@@ -37,7 +38,7 @@
   <thead><tr><th>{{t.col_tenant}}</th><th>{{t.col_currency}}</th><th class="num">{{t.col_resources}}</th><th class="num">{{t.col_cost}}</th><th class="num">{{t.col_price}}</th><th class="num">{{t.col_margin}}</th><th class="num">{{t.col_marginPct}}</th><th class="num">{{t.col_invoice}}</th></tr></thead>
   <tbody>
   {{#each tenants}}
-    <tr><td>{{tenant}}</td><td>{{currency}}</td><td class="num">{{resources}}</td><td class="num">{{costText}}</td><td class="num">{{priceText}}</td><td class="num">{{marginText}}</td><td class="num">{{marginPctText}}</td><td class="num"><strong>{{invoiceText}}</strong></td></tr>
+    <tr><td>{{tenant}}{{#if deactivated}}<span class="finops-tag">{{deactivatedText}}</span>{{/if}}</td><td>{{currency}}</td><td class="num">{{resources}}</td><td class="num">{{costText}}</td><td class="num">{{priceText}}</td><td class="num">{{marginText}}</td><td class="num">{{marginPctText}}</td><td class="num"><strong>{{invoiceText}}</strong></td></tr>
   {{else}}
     <tr><td colspan="8">{{t.empty}}</td></tr>
   {{/each}}
@@ -50,7 +51,7 @@
   <thead><tr><th>{{t.col_tenant}}</th><th>{{t.col_group}}</th><th>{{t.col_currency}}</th><th class="num">{{t.col_resources}}</th><th class="num">{{t.col_cost}}</th><th class="num">{{t.col_price}}</th><th class="num">{{t.col_margin}}</th><th class="num">{{t.col_invoice}}</th></tr></thead>
   <tbody>
   {{#each rows}}
-    <tr><td>{{tenant}}</td><td>{{#if noGroup}}<em>{{noGroupText}}</em>{{else}}{{group}}{{/if}}</td><td>{{currency}}</td><td class="num">{{resources}}</td><td class="num">{{costText}}</td><td class="num">{{priceText}}</td><td class="num">{{marginText}}</td><td class="num">{{invoiceText}}</td></tr>
+    <tr><td>{{tenant}}{{#if deactivated}}<span class="finops-tag">{{deactivatedText}}</span>{{/if}}</td><td>{{#if noGroup}}<em>{{noGroupText}}</em>{{else}}{{group}}{{/if}}</td><td>{{currency}}</td><td class="num">{{resources}}</td><td class="num">{{costText}}</td><td class="num">{{priceText}}</td><td class="num">{{marginText}}</td><td class="num">{{invoiceText}}</td></tr>
   {{/each}}
   </tbody>
 </table>

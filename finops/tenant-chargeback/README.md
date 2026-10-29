@@ -32,6 +32,12 @@ all zero is left out of the cards and the three tables, as long as another curre
 the CSV export keeps every row. The *Tenants* card then counts only the tenants the tables list
 (since 1.2.3). Numbers are right-aligned and never broken inside.
 
+**Deactivated tenants (since 1.2.3).** A tenant whose account is deactivated in Morpheus
+(`account.active` = 0) is listed with its invoices like any other tenant; its rows in *Per tenant*
+and *Per tenant and group* carry a *Deactivated* tag next to the tenant name. Its amounts are in
+every total and the *Tenants* card counts it, as before. Report results stored by an earlier
+version carry no flag and show no tag.
+
 Counted are the invoices of **instances** and of **servers that belong to no instance** (since
 1.2.1 a server belongs to an instance when a `container` row links them (`container.server_id` = the invoice's `ref_id`, `container.instance_id` set); Morpheus leaves `instance_id` empty on the server invoice of an instance's own VM). The
 summary invoices Morpheus keeps per tenant, group, cloud and user are left out; they would count
@@ -88,8 +94,9 @@ carries its ISO currency code.
 The report result export contains the plain values, independent of the viewer's language:
 amounts with two decimals and a dot, no grouping. Main rows: `tenant`, `group` (empty for servers
 without a group), `noGroup`, `resources`, `currency`, `cost`, `price`, `margin`, `markupPercent`,
-`invoice`. `markupPercent` carries the markup as entered, up to four decimals; the page shows it
-with the same precision. Header rows (per tenant) add `marginPct`; footer rows carry the per-currency totals
+`invoice`, `deactivated` (since 1.2.3; `true` for a deactivated tenant). `markupPercent` carries
+the markup as entered, up to four decimals; the page shows it with the same precision. Header rows
+(per tenant) add `marginPct` and carry `deactivated` as well; footer rows carry the per-currency totals
 (`kind = total`) and the report metadata (`kind = meta`: `month`, `current`, `markupPercent`,
 `tenants`, `currencies`).
 
@@ -140,9 +147,13 @@ rule. Its amounts can still differ from this report's, for these reasons:
   the two pages by cents.
 - **Which tenants count.** MSP Tenant Overview lists the active sub-tenants only
   (`account.master_account = 0` and `active = 1`), with or without invoices. This report lists
-  every tenant that has invoices in the month, inactive tenants included, and the master tenant
-  when *Include Master Tenant Resources* is ticked. Their amounts are in this report's totals but
-  not in MSP Tenant Overview's, and the two *Tenants* cards count different tenants.
+  every tenant that has invoices in the month, deactivated tenants included (tagged *Deactivated*
+  since 1.2.3), and the master tenant when *Include Master Tenant Resources* is ticked. The amounts
+  of deactivated tenants are in this report's totals but not in MSP Tenant Overview's; since 1.2.3
+  that page names them in one line per currency under its totals (their number, and their amounts
+  in the columns of its totals: revenue, cost and margin of the current month, revenue and margin
+  of the previous month). MSP Tenant Overview never shows the master
+  tenant's own amounts. The two *Tenants* cards therefore count different tenants.
 - **List price, not invoice amount.** MSP Tenant Overview's *Revenue* is the list price. Compare
   it with *List Price* here; *Invoice Amount* adds the additional markup and equals the list price
   only at 0 %.
@@ -178,6 +189,15 @@ rule. Its amounts can still differ from this report's, for these reasons:
   browser's language.
 - The tenant currency is not used for the currency rule; an invoice line without a currency
   falls back to the master tenant's currency.
+- **Docker hosts and Kubernetes nodes.** A server invoice is not counted when a `container` row
+  links that server to an instance (`container.server_id` = the invoice's `ref_id`,
+  `container.instance_id` set); that keeps an instance's own VM from being counted twice. A Docker
+  host or Kubernetes node on which Morpheus-managed container instances run has such rows as well,
+  so its own server invoice is not counted either; the instance invoices of its container
+  instances are. The rule assumes that those instance invoices carry the host's cost. The report
+  does not check this: a host cost that is not priced into its container instances is missing
+  from the figures. The `container` table is read as it is when the report runs, not as it was in
+  the invoiced month.
 - **Reads internal database tables** (see the matrix below) through the read-only report
   connection. They are not a public API: the plugin is tested on Morpheus 9.0.2 only and may
   break on an upgrade. A failed query marks the report result as failed and writes a one-line

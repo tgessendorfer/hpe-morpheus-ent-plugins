@@ -63,10 +63,12 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 	 * Server invoices can carry a group id with an empty name; the name is then looked up in the
 	 * group table (compute_site) by that id, so they count towards their group. Lines without a
 	 * group id, or whose group no longer exists, keep an empty name; aggregate() merges those into
-	 * the one line for servers without a group.
+	 * the one line for servers without a group. is_active is the tenant's account.active (0 = the
+	 * tenant is deactivated); it only tags the rows, every invoice is counted whatever its value.
 	 */
 	static final String INVOICE_SQL = '''
 		SELECT a.id AS tenant_id, a.name AS tenant, CAST(a.master_account AS UNSIGNED) AS is_master,
+		       CAST(a.active AS UNSIGNED) AS is_active,
 		       i.site_id AS grp_id, MAX(COALESCE(NULLIF(TRIM(i.site_name), ''), cs.name)) AS grp,
 		       NULLIF(TRIM(i.currency), '') AS currency,
 		       COUNT(*) AS resources,
@@ -76,7 +78,7 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 		WHERE i.period_interval = 'month' AND i.period = ?
 		  AND (i.ref_type = 'Instance' OR (i.ref_type = 'ComputeServer' AND i.instance_id IS NULL
 		    AND NOT EXISTS (SELECT 1 FROM container ct WHERE ct.server_id = i.ref_id AND ct.instance_id IS NOT NULL)))
-		GROUP BY a.id, a.name, a.master_account, i.site_id, NULLIF(TRIM(i.currency), '')
+		GROUP BY a.id, a.name, a.master_account, a.active, i.site_id, NULLIF(TRIM(i.currency), '')
 		ORDER BY a.master_account, a.name, grp, grp_id, currency'''
 
 	/** Currency of the master tenant, the second step of the currency rule. */
@@ -104,7 +106,7 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 		'section.currency', 'section.tenant', 'section.group',
 		'col.tenant', 'col.group', 'col.currency', 'col.resources', 'col.cost', 'col.price',
 		'col.margin', 'col.marginPct', 'col.invoice',
-		'empty', 'noGroup', 'footnote'
+		'empty', 'noGroup', 'deactivated', 'footnote'
 	]
 
 	Plugin plugin
@@ -202,8 +204,8 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 				return
 			}
 			List<Map> raw = rows.collect { GroovyRowResult r ->
-				[tenantId: r.tenant_id, tenant: r.tenant, isMaster: (r.is_master as Integer) == 1, grpId: r.grp_id, grp: r.grp,
-				 currency: r.currency, resources: r.resources, cost: r.cost, price: r.price]
+				[tenantId: r.tenant_id, tenant: r.tenant, isMaster: (r.is_master as Integer) == 1, active: r.is_active,
+				 grpId: r.grp_id, grp: r.grp, currency: r.currency, resources: r.resources, cost: r.cost, price: r.price]
 			}
 			Map result = aggregate(raw, masterCurrency, markup, includeProvider)
 			String markupText = markup.stripTrailingZeros().toPlainString()
@@ -214,13 +216,13 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 				out << new ReportResultRow(section: ReportResultRow.SECTION_MAIN, displayOrder: order++, dataMap: [
 					tenant: l.tenant, group: l.group ?: '', noGroup: l.group == null, resources: l.resources.toString(),
 					currency: l.currency, cost: plain(l.cost), price: plain(l.price), margin: plain(l.margin),
-					markupPercent: markupText, invoice: plain(l.invoice)])
+					markupPercent: markupText, invoice: plain(l.invoice), deactivated: l.deactivated])
 			}
 			result.tenants.each { Map t ->
 				out << new ReportResultRow(section: ReportResultRow.SECTION_HEADER, displayOrder: order++, dataMap: [
 					tenant: t.tenant, currency: t.currency, resources: t.resources.toString(),
 					cost: plain(t.cost), price: plain(t.price), margin: plain(t.margin),
-					marginPct: pctText(t.margin, t.price), invoice: plain(t.invoice)])
+					marginPct: pctText(t.margin, t.price), invoice: plain(t.invoice), deactivated: t.deactivated])
 			}
 			out << new ReportResultRow(section: ReportResultRow.SECTION_FOOTER, displayOrder: order++, dataMap: [
 				kind: 'meta', month: monthLabel(per), current: per == period(null), markupPercent: markupText,
@@ -293,7 +295,8 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 	 * A currency whose total cost, list price and invoice amount are all zero (e.g. unpriced servers
 	 * in USD) is left out of every section of the page, as long as another currency has an amount.
 	 * The stored rows, and so the CSV export, keep it. The tenant count then counts only the
-	 * tenants the tables still list.
+	 * tenants the tables still list. Rows of a deactivated tenant carry the tag text next to the
+	 * tenant name (deactivatedText); result rows stored before 1.2.3 have no flag and no tag.
 	 */
 	static Map pageModel(Map<String, List<ReportResultRow>> reportRowsBySection, Locale locale) {
 		Map<String, String> t = texts(locale)
@@ -306,8 +309,8 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 		// The stored rows carry the tenant name, not its id, so two tenants of the same name count once here.
 		def tenantCount = hidden ? tenants.collect { it.tenant }.unique().size().toString() : meta.tenants
 		[
-			rows   : (reportRowsBySection.main?.collect { it.dataMap } ?: []).findAll(shown).collect { withTexts(it, locale) + [noGroupText: t.noGroup] },
-			tenants: tenants.collect { withTexts(it, locale) },
+			rows   : (reportRowsBySection.main?.collect { it.dataMap } ?: []).findAll(shown).collect { withTexts(it, locale) + [noGroupText: t.noGroup, deactivatedText: t.deactivated] },
+			tenants: tenants.collect { withTexts(it, locale) + [deactivatedText: t.deactivated] },
 			footer : meta + [isCurrent: isTrue(meta.current), markupPercentText: decimalShort(meta.markupPercent ?: '0', locale), tenants: tenantCount],
 			totals : totals.findAll(shown).collect { withTexts(it, locale) },
 			t      : t
@@ -337,6 +340,7 @@ class TenantChargebackReportProvider extends AbstractReportProvider {
 		}
 		if(row.containsKey('marginPct')) m.marginPctText = decimal1(row.marginPct, locale)
 		m.noGroup = isTrue(row.noGroup)
+		m.deactivated = isTrue(row.deactivated)
 		m
 	}
 

@@ -467,6 +467,48 @@ class ChargebackCalculatorSpec extends Specification {
 		tenantCount(r.lines) == 2
 	}
 
+	def "a deactivated tenant's lines and tenant totals are marked, and no amount or total changes"() {
+		given: 'Tenant A deactivated (active 0) in two groups and two currencies, Tenant B active, Tenant C without the flag'
+		List<Map> raw = [
+			[tenantId: 2, tenant: 'Tenant A', isMaster: false, active: 0G, grpId: 1, grp: 'G1', currency: 'EUR', resources: 2, cost: '10', price: '12'],
+			[tenantId: 2, tenant: 'Tenant A', isMaster: false, active: 0G, grpId: 2, grp: 'G2', currency: 'USD', resources: 1, cost: '3', price: '4'],
+			[tenantId: 3, tenant: 'Tenant B', isMaster: false, active: 1G, grpId: 3, grp: 'G3', currency: 'EUR', resources: 1, cost: '5', price: '6'],
+			[tenantId: 4, tenant: 'Tenant C', isMaster: false, grpId: 4, grp: 'G4', currency: 'EUR', resources: 1, cost: '1', price: '1']
+		]
+
+		when:
+		Map r = aggregate(raw, 'EUR', 10G, false)
+		Map allActive = aggregate(raw.collect { it + [active: 1G] }, 'EUR', 10G, false)
+
+		then:
+		r.lines.collect { [it.tenant, it.currency, it.deactivated] } ==
+			[['Tenant A', 'EUR', true], ['Tenant A', 'USD', true], ['Tenant B', 'EUR', false], ['Tenant C', 'EUR', false]]
+		r.tenants.collect { [it.tenant, it.currency, it.deactivated] } ==
+			[['Tenant A', 'EUR', true], ['Tenant A', 'USD', true], ['Tenant B', 'EUR', false], ['Tenant C', 'EUR', false]]
+
+		and: 'amounts and totals are the same as with every tenant active'
+		r.lines*.subMap(['cost', 'price', 'margin', 'invoice', 'resources']) == allActive.lines*.subMap(['cost', 'price', 'margin', 'invoice', 'resources'])
+		r.totals == allActive.totals
+		tenantCount(r.lines) == 3
+	}
+
+	@Unroll
+	def "isDeactivated(#v) == #expected"() {
+		expect:
+		isDeactivated(v) == expected
+
+		where:
+		v      || expected
+		0G     || true
+		0      || true
+		'0'    || true
+		false  || true
+		1G     || false
+		1      || false
+		true   || false
+		null   || false
+	}
+
 	def "an empty month gives empty lists"() {
 		when:
 		Map r = aggregate([], 'EUR', 0G, false)

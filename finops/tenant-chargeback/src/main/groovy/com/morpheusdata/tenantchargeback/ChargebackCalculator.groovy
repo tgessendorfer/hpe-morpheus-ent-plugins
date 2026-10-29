@@ -220,6 +220,9 @@ class ChargebackCalculator {
 	 * Rows whose raw currency is empty are resolved with {@link #resolveCurrency} and merged with
 	 * rows that already carry that currency, so a group never shows twice for one currency.
 	 *
+	 * An optional active (the tenant's account.active, 0 = deactivated) only marks the lines and
+	 * tenant totals of that tenant with deactivated = true; amounts and totals do not depend on it.
+	 *
 	 * @return [lines: [...], tenants: [...], totals: [...]], every amount a BigDecimal rounded to
 	 *         cents, in the order the rows came in.
 	 */
@@ -235,9 +238,11 @@ class ChargebackCalculator {
 			List key = [tenantKey, groupKey, cur]
 			Map line = lines.get(key)
 			if(line == null) {
-				line = [tenantKey: tenantKey, tenant: r.tenant?.toString(), group: grp, currency: cur, cost: 0G, price: 0G, resources: 0]
+				line = [tenantKey: tenantKey, tenant: r.tenant?.toString(), group: grp, currency: cur, cost: 0G, price: 0G, resources: 0,
+					deactivated: false]
 				lines.put(key, line)
 			}
+			if(isDeactivated(r.active)) line.deactivated = true
 			line.cost += num(r.cost)
 			line.price += num(r.price)
 			line.resources += (num(r.resources) as Integer)
@@ -250,10 +255,11 @@ class ChargebackCalculator {
 			BigDecimal margin = price - cost
 			BigDecimal invoice = r2(price * factor)
 			out << [tenantKey: l.tenantKey, tenant: l.tenant, group: l.group, currency: l.currency, resources: l.resources,
-				cost: cost, price: price, margin: margin, invoice: invoice]
+				cost: cost, price: price, margin: margin, invoice: invoice, deactivated: l.deactivated]
 			List tk = [l.tenantKey, l.currency]
 			Map t = perTenant.get(tk)
-			if(t == null) { t = newSum() + [tenant: l.tenant]; perTenant.put(tk, t) }
+			if(t == null) { t = newSum() + [tenant: l.tenant, deactivated: false]; perTenant.put(tk, t) }
+			if(l.deactivated) t.deactivated = true
 			Map c = totals.get(l.currency)
 			if(c == null) { c = newSum(); totals.put(l.currency as String, c) }
 			[t, c].each { Map s ->
@@ -265,6 +271,14 @@ class ChargebackCalculator {
 			tenants: perTenant.collect { k, v -> [tenant: v.tenant, currency: k[1]] + v },
 			totals : totals.collect { k, v -> [currency: k] + v }
 		]
+	}
+
+	/**
+	 * True for a tenant whose account is deactivated: the query's is_active (CAST(a.active AS
+	 * UNSIGNED)) is 0. A missing value (null) does not count as deactivated.
+	 */
+	static boolean isDeactivated(def active) {
+		active != null && active.toString().trim().toLowerCase() in ['0', 'false']
 	}
 
 	/** Number of distinct tenants among the aggregated lines. */

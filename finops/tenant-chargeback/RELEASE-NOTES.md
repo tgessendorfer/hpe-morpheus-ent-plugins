@@ -8,9 +8,9 @@ One section per version, newest first. The same text is the body of the matching
 
 ## 1.2.3
 
-**The report checks for itself that it runs for the master tenant, and rejects a malformed month
-instead of showing an empty report.** Built against plugin API 1.4.2, minimum appliance 9.0.2;
-plugin code, provider code and options are unchanged.
+**The report checks for itself that it runs for the master tenant, rejects a malformed month
+instead of showing an empty report, and tags the rows of deactivated tenants.** Built against
+plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
 
 ### What changed
 
@@ -27,6 +27,15 @@ plugin code, provider code and options are unchanged.
   started through the API can skip that validation; a month such as `2026-1` then gave a report
   that was *ready* but empty. Such a month now fails the report with a warning in the log, before
   a database connection is taken.
+- **Deactivated tenants are tagged.** The report has always counted the invoices of every tenant,
+  deactivated ones included, without saying which tenant is deactivated. The invoice query now
+  also reads the tenant's `account.active` (`CAST(a.active AS UNSIGNED) AS is_active`, `a.active`
+  added to the `GROUP BY`) and filters nothing on it. The rows of a tenant whose account is
+  deactivated (`active` = 0) show a ***Deactivated*** tag (German *Deaktiviert*) next to the
+  tenant name in *Per tenant* and *Per tenant and group*. **Amounts, totals and the tenant count
+  are unchanged.** The stored main and header rows carry a new value `deactivated` (`true` or
+  `false`), so the CSV export has one more column. Report results stored by 1.2.2 carry no such
+  value and show no tag.
 - **Tenant count matches the tables.** Since 1.2.2 the page hides a currency without any amount.
   A tenant whose only invoices were in such a currency was still counted on the *Tenants* card
   but listed in no table. The card now counts the tenants the tables list whenever a currency is
@@ -35,12 +44,20 @@ plugin code, provider code and options are unchanged.
   [Comparing with MSP Tenant Overview](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/finops/tenant-chargeback#comparing-with-msp-tenant-overview),
   lists every known reason the two pages differ: **cents** (this report rounds each tenant, group
   and currency row so the rows add up, MSP Tenant Overview once per tenant, currency and month),
-  **which tenants count** (this report also lists inactive tenants with invoices and, when
-  ticked, the master tenant; MSP Tenant Overview lists active sub-tenants only), list price
+  **which tenants count** (this report also lists deactivated tenants with invoices, now tagged,
+  and, when ticked, the master tenant; MSP Tenant Overview lists active sub-tenants only and, since
+  its 1.2.3, names the deactivated ones with invoices in a line under its totals), list price
   against invoice amount, a stored report result against a live page, the current month as a
   projection that moves with every costing run, tenants without any amount, and counts that
   measure different things. **Rounding is unchanged** (owner decision): aligning it would change
   one of the two pages by cents. Documentation only; no amount changes.
+- **README: Docker hosts and Kubernetes nodes.** A new entry under *Known limits* says what the
+  invoice filter does with container hosts: a server invoice is not counted when a `container` row
+  links the server to an instance, so the own server invoice of a Docker host or Kubernetes node
+  that runs Morpheus-managed container instances is not counted either; only the instance
+  invoices of its containers are. The report does not check whether those carry the host's cost,
+  and it reads the `container` table as it is when the report runs. Documentation only; the filter
+  is the one 1.2.1 introduced.
 - **Invoice query pinned against the test model.** The aggregation tests run on a hand-written
   model of `INVOICE_SQL`'s result. A new test pins the fragments that model copies: the currency
   expression `NULLIF(TRIM(i.currency), '')`, the whole `GROUP BY` and the count and sums. A change
@@ -54,13 +71,22 @@ plugin code, provider code and options are unchanged.
   without creator and account fails. Report results started from the UI carry their creator.
 - A malformed month via the API gives a *failed* report instead of an empty *ready* one.
 - The *Tenants* card can show a lower number than before when a currency is hidden.
+- Rows of a deactivated tenant carry a *Deactivated* tag on the page, and the CSV export of a new
+  report result has an additional `deactivated` column in its main and header rows.
 
 ### Verified
 
-- Unit tests (Spock), 184 in total: `process()` with a mocked report service and database
+- Unit tests (Spock), 197 in total: `process()` with a mocked report service and database
   (column aliases mapped, master tenant left out, rows, tenant totals and currency totals as
   stored), the master check for creator and account, the month check, the tenant count with a
   hidden currency, and the key fragments of the invoice query.
+- Unit tests for deactivated tenants: the query reads `account.active` and filters nothing on it;
+  `process()` with a deactivated and an active tenant (the flag on every row of the deactivated
+  tenant, the same amounts, tenant count and totals); the aggregation with and without the flag
+  (identical amounts and totals); the values the flag can take (`0`, `1`, `true`, `false`,
+  `NULL` as not deactivated); the rendered page in English and German (the tag next to the tenant
+  name in both tenant tables, none for the active tenant, unchanged totals); a result row stored
+  without the flag (no tag).
 
 ### Not yet verified
 
@@ -74,6 +100,11 @@ plugin code, provider code and options are unchanged.
   check: a new report for the current month (markup 0, master tenant not included) next to a
   freshly loaded MSP Tenant Overview page: the same amounts per active sub-tenant, apart from the
   reasons the README lists.
+- The *Deactivated* tag was not seen on an appliance: it needs a deactivated tenant with invoices.
+  Open checks: the query with `account.active` on 9.0.2 and 9.1.0, the tag in light and dark mode,
+  and the `deactivated` column in the CSV export.
+- The *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an
+  appliance with container hosts.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.2.2...tenant-chargeback-v1.2.3
 
