@@ -48,6 +48,18 @@ minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
   default locale writes numbers with non-ASCII digits (for example `th-TH-u-nu-thai`), the key
   matched no invoice and every budget showed no spend this month. It is now formatted with
   `Locale.ROOT`.
+- **README: two new entries under *Known limits*.** *Not the figure of Morpheus' own budget page*:
+  this page counts the price, markup included, of instance invoices and of server invoices
+  without an instance; Morpheus' own budget page shows the total cost of the invoice with the
+  budget's scope (for a cloud budget, the cloud's own invoice), as the
+  [Morpheus 9.1.0 documentation on budgets](https://support.hpe.com/hpesc/public/docDisplay?docId=sd00008772en_us&docLocale=en_US&page=GUID-33E060CF-9C8E-4AA3-971B-7C5E06954157.html)
+  describes, so the two figures can differ, and the cloud's own invoice is not added here because
+  it carries no price, only actual cost.
+  *Docker hosts and Kubernetes nodes*: a server invoice is not counted when a `container` row
+  links the server to an instance, so the own server invoice of a Docker host or Kubernetes node
+  that runs Morpheus-managed container instances is not counted either; only the instance
+  invoices of its containers are, and the page does not check whether those carry the host's
+  cost. Documentation only; the spend is calculated as in 1.2.2.
 - **Tests:** `loadData()` is now tested with invoices, as a master tenant user and as a
   sub-tenant user: the budget query per viewer, the scope and owner parameters in query order
   followed by the period, an invoice without a currency counted in the budget currency, and a USD
@@ -85,6 +97,10 @@ minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
 - Database schema on HPE Morpheus 9.1.0-1: `account_budget.enabled` and `account_budget.active`
   are both `bit(1) NOT NULL`, and a deleted budget is removed from the table rather than flagged.
   The REST API and the CLI expose `enabled`, so the page reads that flag; `active` is not used.
+- Invoices on HPE Morpheus 9.1.0-1 (read-only query): the cloud invoices (`ref_type =
+  'ComputeZone'`) carry `total_price` 0 and only the `actual_*` cost columns, the basis of the new
+  README note on Morpheus' own budget page. How that page computes its figure is taken from the
+  Morpheus 9.1.0 documentation linked there.
 - Local build with JDK 17 and Gradle 9.8.0, one jar `morpheus-budget-burn-plugin-1.2.3-all.jar`.
 
 ### Not yet verified
@@ -99,6 +115,10 @@ minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
   browser, on a light and on a dark page; checked in unit tests and by review only.
 - The new budget query on a 9.0.2 appliance (the minimum version). The `enabled` column is in the
   9.0.2 schema as well.
+- The README note on Morpheus' own budget page was not checked side by side on an appliance (a
+  cloud budget on this page next to the same budget on Morpheus' budget page). The
+  *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an appliance
+  with container hosts.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.2.2...budget-burn-v1.2.3
 

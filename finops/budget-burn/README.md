@@ -109,6 +109,25 @@ None. The page has no settings; budgets are managed in Morpheus under
   already show (or not yet show) the next month compared with the viewer's time zone.
 - The **burn rate** is a plain average over the elapsed days; it does not weight weekdays.
 - Spend is read from Morpheus invoices; it is as current as the last invoice / costing run.
+- **Not the figure of Morpheus' own budget page.** This page counts the price, markup included
+  (`running_price` to date, `total_price` for the forecast and the closed months), of the instance
+  invoices and of the server invoices without an instance in the budget's scope. Morpheus' own
+  budget page shows the cost: per the
+  [Morpheus 9.1.0 documentation on budgets](https://support.hpe.com/hpesc/public/docDisplay?docId=sd00008772en_us&docLocale=en_US&page=GUID-33E060CF-9C8E-4AA3-971B-7C5E06954157.html)
+  (*Budget Monitoring*), its actual amount for a month is the total cost of the invoice with the
+  same scope (for a cloud budget, the cloud's own invoice; the projected cost for the current
+  month). The two figures can therefore differ. The cloud's own invoice
+  (`ref_type = 'ComputeZone'`) is not added here: it carries no price, only actual cost (on
+  Morpheus 9.1.0 its `total_price` is 0 and only the `actual_*` cost columns are filled).
+- **Docker hosts and Kubernetes nodes.** A server invoice is not counted when a `container` row
+  links that server to an instance (`container.server_id` = the invoice's `ref_id`,
+  `container.instance_id` set); that keeps an instance's own VM from being counted twice. A Docker
+  host or Kubernetes node on which Morpheus-managed container instances run has such rows as well,
+  so its own server invoice is not counted either; the instance invoices of its container
+  instances are. The rule assumes that those instance invoices carry the host's cost. The page
+  does not check this: a host cost that is not priced into its container instances is missing
+  from the spend. The `container` table is read as it is when the page is loaded, not as it was
+  in the invoiced month.
 - **Language from the user record.** The language setting is read from the internal `user`
   table (column `locale`); if that read fails, the page falls back to the browser language
   instead of failing.
