@@ -41,7 +41,9 @@ import java.sql.Connection
  * so visibility relies on Morpheus' own access check for the instance detail page.
  *
  * Content language and number format follow the viewing user's Morpheus language setting
- * (see {@link ShowbackLocale}); when no user came through show(), the browser language.
+ * (see {@link ShowbackLocale}). The user comes from show(); without show() in the same
+ * request the tab uses the user of the last show() for the same instance left on that
+ * thread, if there is one, otherwise the browser language.
  */
 @Slf4j
 class InstanceShowbackTabProvider extends AbstractInstanceTabProvider {

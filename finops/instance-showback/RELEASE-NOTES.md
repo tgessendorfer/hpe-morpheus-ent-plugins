@@ -28,14 +28,22 @@ minimum appliance 9.0.2, the query and the figures are unchanged.
 - **The viewer's language is handed over only for the same instance.** `show()` keeps the
   instance id together with the viewing user's id, and `renderTemplate()` uses that user only
   when it renders the same instance. A value that a `show()` without a render left on a pooled
-  request thread can no longer give another instance's tab the language of another user. Without
-  a matching `show()` the tab uses the browser language, as before.
+  request thread can no longer give another instance's tab the language of another user. The fix
+  covers other instances only: **without `show()` in the same request the tab uses the user of the
+  last `show()` for the same instance left on that thread, if there is one, otherwise the browser
+  language.** Such a left-over value can still come from another user's earlier request for the
+  same instance; it sets only the language and number format, for one render.
+- **README corrected.** The 1.2.0 README's *Known limits* said that a render without `show()`
+  first on the same request thread had no user and always took the browser language. That was never
+  guaranteed, since a `show()` of an earlier request can leave its user on a pooled thread; the
+  limit now says what the tab does in that case.
 
 ### Behaviour changes from 1.2.0
 
 - None in the normal flow (`show()` and then `renderTemplate()` of the same instance in one
-  request). A render without a matching `show()` falls back to the browser language, where 1.2.0
-  could take the user of an earlier `show()` on the same thread.
+  request). A render without `show()` in the same request uses the user of the last `show()` for
+  the same instance left on that thread, if there is one, otherwise the browser language; 1.2.0
+  took the user of the last `show()` on that thread whatever its instance.
 - The *Costs* tab no longer turns into an error page when the connection release fails; that
   failure is logged at warning level.
 
@@ -56,8 +64,12 @@ minimum appliance 9.0.2, the query and the figures are unchanged.
   figures as 1.2.0.
 - On Morpheus 9.1.0: that `show()` and `renderTemplate()` still run on one thread for the same
   instance, so a user whose Morpheus setting is `en-US` sees the tab in English with a German
-  browser. The call order was read from the 9.0.2 bytecode only; if it differs, the tab falls back
-  to the browser language.
+  browser. The call order was read from the 9.0.2 bytecode only; if it differs, the tab uses the
+  user of the last `show()` for the same instance left on that thread, if there is one, otherwise
+  the browser language.
+- Whether Morpheus ever runs a tab's `show()` without its `renderTemplate()` on the same thread,
+  which is what leaves a value for a later request; only the normal call order was read from the
+  9.0.2 bytecode.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/instance-showback-v1.2.0...instance-showback-v1.2.1
 

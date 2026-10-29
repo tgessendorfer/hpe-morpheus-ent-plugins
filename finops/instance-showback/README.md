@@ -88,9 +88,12 @@ that there is no cost data yet.
   falls back to the browser language, logs one debug line and still renders.
 - **Viewer handed from `show()` to the content.** `renderTemplate()` gets no user in plugin API
   1.4.2. Morpheus 9.0.2 calls `show()` and then `renderTemplate()` for the tab in the same request,
-  so the plugin keeps the user id from `show()` for that render. If a Morpheus version renders the
-  tab without calling `show()` first on the same request thread, the tab has no user in context and
-  falls back to the browser language, as up to 1.1.1.
+  so the plugin keeps the user id from `show()`, together with the instance id, for the render of
+  that instance. Without `show()` in the same request, the tab uses the user of the last `show()`
+  for the same instance left on that thread, if there is one, otherwise the browser language. Such
+  a value is left by a `show()` whose render did not follow on that thread; request threads are
+  pooled, so it can come from another user's earlier request. It is used for one render at most and
+  sets only the language and number format, never the figures.
 - **Tab title in English.** `getName()` has no request context in plugin API 1.4.2, so the tab is
   titled *Costs* in every language; its content is translated.
 - **No conversion.** Mixed-currency instances show one row per currency; there is no total.
