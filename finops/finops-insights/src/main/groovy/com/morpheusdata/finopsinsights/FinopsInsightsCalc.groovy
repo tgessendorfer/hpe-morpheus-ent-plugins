@@ -122,9 +122,20 @@ class FinopsInsightsCalc {
 		BigDecimal largest = out.collect { it.rev }.max() ?: BigDecimal.ZERO
 		out.each { Map x ->
 			x.share = pctValue(x.rev, total)
-			x.bar = largest.signum() > 0 ? (num(x.rev) * 100G).divide(largest, 0, RoundingMode.HALF_UP).intValue() : 0
+			x.bar = barWidth(x.rev, largest)
 		}
 		out
+	}
+
+	/**
+	 * Width of one split bar in percent of the largest entry, clamped to 0-100. A negative entry
+	 * (credits larger than the charges) draws no bar, as in barHeight(): a negative CSS width is
+	 * invalid, the browser drops it, and the bar would fill the whole track.
+	 */
+	static int barWidth(def value, BigDecimal largest) {
+		if(largest == null || largest.signum() <= 0) return 0
+		int w = (num(value) * 100G).divide(largest, 0, RoundingMode.HALF_UP).intValue()
+		Math.max(0, Math.min(100, w))
 	}
 
 	/** a as a percentage of b, one decimal; null when b is not positive. */

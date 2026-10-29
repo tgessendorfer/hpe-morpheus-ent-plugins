@@ -30,15 +30,21 @@ code review; nothing changes on an appliance where the permissions load and the 
 - **A month with a negative total draws no bar.** A month whose credits are larger than its charges
   gave the trend chart a negative bar height, which is not valid SVG. The bar height is clamped to
   zero; the tooltip still shows the real figure.
+- **A cloud or tenant with a negative total draws no bar in the split widget either.** Its bar width
+  was negative, which the browser drops as invalid CSS, so the row could show a full bar (read from
+  the widget's template and CSS, not seen in a browser); the width is now clamped to 0-100 % by the
+  same rule. The amount and the share still show the real figures: the share of such a row is a
+  negative percentage, as in 1.2.2.
 - **Behaviour change from 1.2.2:** only when the Budgets permission cannot be loaded at plugin start:
   the three FinOps widgets are missing from the dashboard instead of being shown to everyone.
 
 ### Verified
 
-- 140 unit tests and 36 browser script tests (JDK 17, Gradle 9.8.0). New tests: the layout without
+- 141 unit tests and 36 browser script tests (JDK 17, Gradle 9.8.0). New tests: the layout without
   the Budgets permission (no FinOps widget, no row gap, the log row unchanged), a failing connection
   release after a successful load, an unknown user and a failed query (the result stays), no release
-  for a connection that was never opened, and the chart with a negative month.
+  for a connection that was never opened, the chart with a negative month and the split with a
+  negative cloud.
 
 ### Not yet verified
 

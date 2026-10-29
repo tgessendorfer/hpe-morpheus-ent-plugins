@@ -56,6 +56,25 @@ class FinopsInsightsCalcSpec extends Specification {
 		top.sum { it.share } == 100.0G
 	}
 
+	def "a negative entry in the split draws no bar instead of a negative width"() {
+		given:
+		def rows = [row(zone: 1, zoneName: 'cloud-a', rev: 100), row(zone: 2, zoneName: 'cloud-b', rev: 50),
+			row(zone: 3, zoneName: 'cloud-c', rev: -20)]
+
+		when:
+		def top = FinopsInsightsCalc.topBy(rows, '202610', 'zone', 'zoneName', 5, 'other')
+
+		then:
+		top*.name == ['cloud-a', 'cloud-b', 'cloud-c']
+		top*.bar == [100, 50, 0]
+		// the amount still tells the real figure
+		top[-1].rev == -20.00G
+		FinopsInsightsCalc.barWidth(-1, 100G) == 0
+		FinopsInsightsCalc.barWidth(null, 100G) == 0
+		FinopsInsightsCalc.barWidth(150, 100G) == 100
+		FinopsInsightsCalc.barWidth(5, 0G) == 0
+	}
+
 	def "percentages and deltas are null without a positive base"() {
 		expect:
 		FinopsInsightsCalc.pctValue(1, 0) == null
