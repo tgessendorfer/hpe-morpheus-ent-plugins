@@ -224,10 +224,24 @@ in *Only List These Models*, and GPT-6 handled as a reasoning model.** Built aga
   The test that expected `codex-mini-latest` in the api.openai.com list now expects it gone.
 - Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 253 tests,
   0 failures.
+- On HPE Morpheus Enterprise 9.1.0-1 with a release candidate built from this source
+  (`0.2.0-rc.1`), uploaded in place of 0.1.4 (status `loaded`):
+  - A refresh of an api.openai.com integration logged *not listing 16 models that api.openai.com
+    serves only through its Responses API: [...]*: eight gpt-5 pro ids (dated snapshots such as
+    `gpt-5-pro-2025-10-06` included), six codex ids, and `o1-pro` with its snapshot. **The model
+    tab went from 45 to 31 models**: the sync removed 14 and disabled none, since no agent used
+    one. The two ids not removed are the `o1-pro` ones: the integration's *Only List These Models*
+    was `gpt-5*, gpt-4.1*`, so 0.1.4 had never listed them, and the log line counts the
+    Responses-only ids before that field narrows the list.
+  - A LiteLLM integration kept its model list unchanged (4 models).
+  - **A chat with tool calls through LiteLLM**: an agent on a DeepSeek model behind LiteLLM, asked
+    for the names of the clouds with the tools, called the built-in Morpheus MCP tool and answered
+    with every cloud, the same names as the dashboard.
 
 ### Not yet verified
 
-- Nothing of this release on an appliance.
+- On an appliance: the release jar loads in place of 0.1.4 and its integrations stay `ok` (the
+  release candidate above was a separate build).
 - Whether the built-in Morpheus MCP tools mark only real requirements as `required`. A tool that
   listed every parameter as required would keep its empty arguments: check that
   `Dropped empty arguments from list_servers` still appears with `openai/gpt-5.4-mini` through
@@ -247,15 +261,15 @@ in *Only List These Models*, and GPT-6 handled as a reasoning model.** Built aga
   repeat, the log shows *Not restoring a dropped question: its tool calls belong to more than one
   question ...* instead of one user getting the other's question.
 - A sync against an endpoint that lists no chat model.
-- A refresh of an api.openai.com integration: which of the Responses-only ids the account's
-  `/models` actually lists (several are shut down), that they leave the model tab and the agent
-  form, that one an agent uses stays disabled, and the log line naming them. The list of
-  Responses-only models comes from OpenAI's model pages, not from a request the plugin made.
-- `!` entries on a LiteLLM integration, saved through the edit form: that the form keeps the `!`
-  and the refresh removes the matching models.
-- Any GPT-6 model in a Morpheus agent: the expected failure of its tool calls (see the GPT-6 entry
-  above) and the error api.openai.com answers with. The limit comes from OpenAI's latest-model
-  guide (checked 2026-10-29), not from a request the plugin made.
+- After the refresh of an api.openai.com integration (measured above): that the Responses-only
+  models also leave the agent form, and that one an agent uses stays disabled with its log line
+  (no agent used one in the test). The list of Responses-only models comes from OpenAI's model
+  pages, not from a request the plugin made.
+- **`!` entries on an appliance**, for example on a LiteLLM integration saved through the edit
+  form: that the form keeps the `!` and the refresh removes the matching models.
+- **Any GPT-6 model in a Morpheus agent**: the expected failure of its tool calls (see the GPT-6
+  entry above) and the error api.openai.com answers with. The limit comes from OpenAI's
+  latest-model guide (checked 2026-10-29), not from a request the plugin made.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.4...openai-v0.2.0
 
