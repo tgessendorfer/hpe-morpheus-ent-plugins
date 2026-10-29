@@ -98,7 +98,7 @@ in different languages (measured on 9.0.2: Morpheus UI in English, plugin conten
 ## Install
 
 1. Download `morpheus-instance-showback-plugin-<version>-all.jar` from the
-   [release instance-showback-v1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/instance-showback-v1.2.0) (tag
+   [release instance-showback-v1.3.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/instance-showback-v1.3.0) (tag
    `instance-showback-v<version>`) and check it against `SHA256SUMS`.
 2. *Administration > Integrations > Plugins > Add*, upload the jar.
 3. Open any instance: the tab **Costs** appears next to the built-in tabs.
@@ -110,8 +110,8 @@ that there is no cost data yet.
 
 - **Internal tables.** The plugin reads `account_invoice`, `account` and `user` over the plugin API's
   read-only database connection. These tables are internal to Morpheus, not a public API: the
-  plugin is tested on 9.0.2 only and may break on an upgrade. A failed query shows an error
-  message in the tab and logs the cause; it does not break the page.
+  plugin is tested on 9.0.2 and 9.1.0 only and may break on an upgrade. A failed query shows an
+  error message in the tab and logs the cause; it does not break the page.
 - **Current month = JVM time zone.** Which month counts as current, and the day counter, follow the
   time zone of the appliance JVM, not the viewer's. Morpheus 9.0.2 runs its JVM in UTC. The footer
   time of the last cost run is always shown in UTC (since 1.1.1).
@@ -135,10 +135,11 @@ that there is no cost data yet.
 
 ## Version compatibility
 
-Queries internal tables, tested on 9.0.2 only, may break on upgrade.
+Queries internal tables, tested on 9.0.2 and 9.1.0 only, may break on upgrade.
 
 | Plugin version | Plugin API | Min. appliance | Tested appliance | Internal tables read |
 |---|---|---|---|---|
+| 1.3.0 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | 9.1.0 (1.3.0-rc.1, master tenant and sub-tenant) | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`), `user` (`id`, `locale`) |
 | 1.2.0 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | 9.0.2 (1.2.0, master tenant) | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`), `user` (`id`, `locale`) |
 | 1.1.1 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | 9.0.2 (1.1.0; 1.1.1 as master) | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`) |
 | 1.1.0 | `morpheus-plugin-api` 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 | `account_invoice` (`ref_type`, `ref_id`, `period`, `period_interval`, `currency`, `*_price`, `plan_name`, `last_cost_date`), `account` (`currency`, `master_account`) |

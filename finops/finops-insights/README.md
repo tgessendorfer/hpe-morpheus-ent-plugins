@@ -9,8 +9,8 @@ entries of the tenant's servers with a log history page.
 > affiliated with Hewlett Packard Enterprise. See [Trademarks](#trademarks).
 
 > **Reads internal tables.** The widgets query Morpheus' internal database through the read-only
-> report connection of the plugin API. They are tested on Morpheus 9.0.2 only and may break on an
-> appliance upgrade. See [Version compatibility](#version-compatibility).
+> report connection of the plugin API. They are tested on Morpheus 9.0.2 and 9.1.0 only and may
+> break on an appliance upgrade. See [Version compatibility](#version-compatibility).
 
 ## What it shows
 
@@ -190,6 +190,7 @@ skipped where node is not installed.
 |---|---|---|---|
 | 1.0.x | 9.0.2 | 1.4.2 | Reads `user`, `account`, `account_invoice`, `compute_zone`, `container`, `instance` |
 | 1.2.x | 9.0.2 | 1.4.2 | Adds the widget settings, the latest log entries widget and the history page; also reads `compute_server` for the log sources; verified on 9.1.0 |
+| 1.3.x | 9.0.2 | 1.4.2 | Adds the line about deactivated sub-tenants (`account.active` = 0) with invoices under the KPI cards in the provider view; no new tables; release candidate tested on 9.1.0 (the new line not yet seen on an appliance) |
 
 ## Trademarks
 

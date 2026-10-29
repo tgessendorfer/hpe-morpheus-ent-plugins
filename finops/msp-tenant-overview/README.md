@@ -9,8 +9,8 @@ month, per currency.
 > affiliated with Hewlett Packard Enterprise. See [Trademarks](#trademarks).
 
 > **Reads internal tables.** The page queries Morpheus' internal database through the read-only
-> report connection of the plugin API. It is tested on Morpheus 9.0.2 only and may break on an
-> appliance upgrade. See [Version compatibility](#version-compatibility).
+> report connection of the plugin API. It is tested on Morpheus 9.0.2 and 9.1.0 only and may break
+> on an appliance upgrade. See [Version compatibility](#version-compatibility).
 
 ## What it shows
 
@@ -83,7 +83,7 @@ and invoices in Morpheus.
 ## Install
 
 1. Download `morpheus-msp-tenant-overview-plugin-<version>-all.jar` from the
-   [release msp-tenant-overview-v1.2.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/msp-tenant-overview-v1.2.2) (tag
+   [release msp-tenant-overview-v1.3.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/msp-tenant-overview-v1.3.0) (tag
    `msp-tenant-overview-v<version>`) and check it against `SHA256SUMS`.
 2. *Administration > Integrations > Plugins > Add*, upload the jar.
 3. Open *Operations > Analytics* in the master tenant and pick **MSP Tenant Overview**.
@@ -162,13 +162,14 @@ rule. Its report can still show other amounts than this page, for these reasons:
 
 | Plugin version | Plugin API | Min appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.3.0 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.1.0 (1.3.0-rc.1, master tenant) | `user` (incl. `locale`), `account`, `compute_site`, `instance`, `compute_server`, `container`, `account_invoice` |
 | 1.2.2 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.2.2-rc.2, master tenant) | `user` (incl. `locale`), `account`, `compute_site`, `instance`, `compute_server`, `container`, `account_invoice` |
 | 1.2.1 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.2.1-rc.1, master tenant) | `user` (incl. `locale`), `account`, `compute_site`, `instance`, `compute_server`, `container`, `account_invoice` |
 | 1.2.0 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.2.0, master tenant) | `user` (incl. `locale`), `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
 | 1.1.1 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 (1.1.0; 1.1.1 as master) | `user`, `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
 | 1.1.0 | 1.4.2 | 9.0.2 (`Morpheus-Min-Appliance-Version`) | HPE Morpheus Enterprise 9.0.2 | `user`, `account`, `compute_site`, `instance`, `compute_server`, `account_invoice` |
 
-Queries internal tables, tested on 9.0.2 only, may break on upgrade.
+Queries internal tables, tested on 9.0.2 and 9.1.0 only, may break on upgrade.
 
 ## Identifiers
 

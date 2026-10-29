@@ -71,13 +71,14 @@ report runs, with a warning in the appliance log.
 
 | Plugin version | Plugin API | Min. appliance | Tested appliance | Internal tables read |
 |---|---|---|---|---|
+| 1.2.1 | 1.4.2 | 9.0.2 | 9.1.0 (1.2.1-rc.1, master tenant) | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account`, `user` (language setting) |
 | 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0, master tenant) | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account`, `user` (language setting) |
 | 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0, 1.1.1) | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `compute_server`, `compute_server_type`, `compute_zone`, `compute_zone_type`, `account` |
 
-**The report queries internal database tables. It is tested on 9.0.2 only and may break on an
-upgrade.** If a query fails, the report ends in status *failed* and the appliance log names the
-cause, instead of showing wrong numbers.
+**The report queries internal database tables. It is tested on 9.0.2 and 9.1.0 only and may break
+on an upgrade.** If a query fails, the report ends in status *failed* and the appliance log names
+the cause, instead of showing wrong numbers.
 
 ## Known limits
 
@@ -102,8 +103,8 @@ run on JDK 21); the build targets Java 11.
 
 ## Install
 
-Download `morpheus-socket-report-plugin-1.2.0-all.jar` from the release
-[socket-report-v1.2.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/socket-report-v1.2.0),
+Download `morpheus-socket-report-plugin-1.2.1-all.jar` from the release
+[socket-report-v1.2.1](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/socket-report-v1.2.1),
 then Administration > Integrations > Plugins > Add and upload the `-all.jar`. Run the report
 from Operations > Reports, type *Socket Usage*.
 

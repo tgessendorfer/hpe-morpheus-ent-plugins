@@ -199,14 +199,15 @@ rule. Its amounts can still differ from this report's, for these reasons:
   from the figures. The `container` table is read as it is when the report runs, not as it was in
   the invoiced month.
 - **Reads internal database tables** (see the matrix below) through the read-only report
-  connection. They are not a public API: the plugin is tested on Morpheus 9.0.2 only and may
-  break on an upgrade. A failed query marks the report result as failed and writes a one-line
-  error to the appliance log (the stack trace at debug level).
+  connection. They are not a public API: the plugin is tested on Morpheus 9.0.2 and 9.1.0 only
+  and may break on an upgrade. A failed query marks the report result as failed and writes a
+  one-line error to the appliance log (the stack trace at debug level).
 
 ## Compatibility
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.3.0 | 1.4.2 | 9.0.2 | 9.1.0 (1.3.0-rc.1, master tenant) | `account_invoice`, `account` (incl. `active`), `compute_site`, `user`, `container` |
 | 1.2.2 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.2-rc.2, master tenant) | `account_invoice`, `account`, `compute_site`, `user`, `container` |
 | 1.2.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.1-rc.1, master tenant) | `account_invoice`, `account`, `compute_site`, `user`, `container` |
 | 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0, master tenant) | `account_invoice`, `account`, `compute_site`, `user` |
@@ -214,12 +215,12 @@ rule. Its amounts can still differ from this report's, for these reasons:
 | 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 run: split no-group rows, fixed in 1.1.2) | `account_invoice`, `account` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `account_invoice`, `account` |
 
-Queries internal tables, tested on 9.0.2 only, may break on upgrade.
+Queries internal tables, tested on 9.0.2 and 9.1.0 only, may break on upgrade.
 
 ## Install
 
 Download `morpheus-tenant-chargeback-plugin-<version>-all.jar` from the
-[release tenant-chargeback-v1.2.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.2.2) (tag
+[release tenant-chargeback-v1.3.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/tenant-chargeback-v1.3.0) (tag
 `tenant-chargeback-v<version>`), then upload it under *Administration → Integrations → Plugins →
 Add*. Updating to a newer version with the same plugin code replaces the plugin in place and
 keeps existing report results. The report then appears under *Operations → Reports* in the

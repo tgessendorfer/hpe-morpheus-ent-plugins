@@ -132,26 +132,27 @@ None. The page has no settings; budgets are managed in Morpheus under
   table (column `locale`); if that read fails, the page falls back to the browser language
   instead of failing.
 - **Reads internal database tables** (see the matrix below) through the read-only report
-  connection. They are not a public API: the plugin is tested on Morpheus 9.0.2 only and may
-  break on an upgrade. A failed query shows a short error on the page; details go to the
+  connection. They are not a public API: the plugin is tested on Morpheus 9.0.2 and 9.1.0 only
+  and may break on an upgrade. A failed query shows a short error on the page; details go to the
   appliance log.
 
 ## Compatibility
 
 | Plugin version | Plugin API | Min. appliance | Tested on | Internal tables read |
 |---|---|---|---|---|
+| 1.3.0 | 1.4.2 | 9.0.2 | 9.1.0 (1.3.0 release candidate, master tenant and sub-tenant) | `user`, `account`, `account_budget` (incl. `enabled`), `account_budget_period`, `account_invoice`, `container` |
 | 1.2.2 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.2-rc.2, master tenant) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice`, `container` |
 | 1.2.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.1-rc.1, master tenant) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice`, `container` |
 | 1.2.0 | 1.4.2 | 9.0.2 | 9.0.2 (1.2.0, master tenant) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 | 1.1.1 | 1.4.2 | 9.0.2 | 9.0.2 (1.1.0; 1.1.1 as master) | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 | 1.1.0 | 1.4.2 | 9.0.2 | 9.0.2 | `user`, `account`, `account_budget`, `account_budget_period`, `account_invoice` |
 
-Queries internal tables, tested on 9.0.2 only, may break on upgrade.
+Queries internal tables, tested on 9.0.2 and 9.1.0 only, may break on upgrade.
 
 ## Install
 
 Download `morpheus-budget-burn-plugin-<version>-all.jar` from the
-[release budget-burn-v1.2.2](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/budget-burn-v1.2.2) (tag
+[release budget-burn-v1.3.0](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/releases/tag/budget-burn-v1.3.0) (tag
 `budget-burn-v<version>`), then upload it under *Administration → Integrations → Plugins →
 Add*. Updating to a newer version with the same plugin code replaces the plugin in place.
 
