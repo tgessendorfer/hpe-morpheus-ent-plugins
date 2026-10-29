@@ -84,14 +84,19 @@ on an appliance where the permissions load and the database answers.
   (the trend loads as before); the
   line in English and German and in the singular, none without deactivated tenants or for a
   sub-tenant viewer; the cards unchanged; the rendered strip with the line under the cards.
+- **On HPE Morpheus Enterprise 9.1.0-1**, as a master tenant administrator, with a release
+  candidate built from this source (`1.3.0-rc.1`), uploaded in place of 1.2.2 (status `loaded`):
+  the dashboard rendered and **the KPI strip showed the same figures as before the upload**, with
+  **no deactivated tenants line, as no sub-tenant was deactivated**; no warning in the appliance
+  log.
 
 ### Not yet verified
 
-- The release jar on an appliance: `loaded`, the dashboard unchanged for a role with *Budgets* read
-  or full, and the widgets missing for a role without it.
+- The release jar on an appliance: `loaded`, the dashboard unchanged for a role with *Budgets*
+  read only, and the widgets missing for a role without it.
 - The layout without the Budgets permission was only built in a unit test; the appliance was not
   made to fail that lookup.
-- The line about deactivated sub-tenants was not seen on an appliance: it needs a deactivated
+- **The line about deactivated sub-tenants was not seen on an appliance**: it needs a deactivated
   sub-tenant with invoices. Open checks: both queries on 9.0.2 and 9.1.0, the amounts against
   that tenant's invoices, and that the line is visible in the short KPI strip (one line under the
   cards, cut with an ellipsis when it is too long; the full text is the tooltip) at common
