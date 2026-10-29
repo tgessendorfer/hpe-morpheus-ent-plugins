@@ -6,7 +6,7 @@ shaded `-all.jar` is attached.
 
 ---
 
-## 1.2.1
+## 1.3.0
 
 **The month-to-date split gets a fourth part, *Other*, the rest of month to date, so the split
 accounts for all of the figure above it unless the three parts already exceed it. Also fixed: a
@@ -83,7 +83,7 @@ are unchanged; no new database column is read.
   read that is; the user hand-over only for the same instance, with no user query for the render of
   another instance. Each of these tests fails against the 1.2.0 code paths.
 - Local build with JDK 17 and Gradle 9.8.0, one jar
-  `morpheus-instance-showback-plugin-1.2.1-all.jar`.
+  `morpheus-instance-showback-plugin-1.3.0-all.jar`.
 
 ### Not yet verified
 
@@ -108,7 +108,7 @@ are unchanged; no new database column is read.
   which is what leaves a value for a later request; only the normal call order was read from the
   9.0.2 bytecode.
 
-**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/instance-showback-v1.2.0...instance-showback-v1.2.1
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/instance-showback-v1.2.0...instance-showback-v1.3.0
 
 ## 1.2.0
 

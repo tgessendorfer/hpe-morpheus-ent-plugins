@@ -14,7 +14,7 @@ months before, all taken from the invoices Morpheus already calculates.
 - **Forecast for month end** (`total_price`), the projection Morpheus stores on the invoice.
 - **Plan** of the instance from the current invoice.
 - **Split, month to date:** compute (CPU + memory), storage, licenses and *Other*, the rest of
-  month to date (since 1.2.1). See [Split of the month to date](#split-of-the-month-to-date).
+  month to date (since 1.3.0). See [Split of the month to date](#split-of-the-month-to-date).
 - **History:** the current month and the three months before, one row per month and currency,
   with a bar scaled to the highest month **of the same currency**.
 - **Footer:** time of the last cost run, converted to UTC whatever the JVM time zone, and a note
@@ -31,7 +31,7 @@ Per currency, the split divides the month-to-date figure shown above it into fou
 | Compute (CPU + RAM) | `actual_compute_price` + `actual_memory_price`, else `compute_price` + `memory_price` |
 | Storage | `actual_storage_price`, else `storage_price` |
 | Licenses | `actual_license_price`, else `license_price` |
-| Other (since 1.2.1) | month to date (`running_price`) minus the three parts above |
+| Other (since 1.3.0) | month to date (`running_price`) minus the three parts above |
 
 The first three use the actual prices where Morpheus has them, otherwise the plan prices.
 
