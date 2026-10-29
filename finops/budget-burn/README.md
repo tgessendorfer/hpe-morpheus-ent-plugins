@@ -46,7 +46,7 @@ budget owned by the master tenant also counts the invoices of its sub-tenants wi
 tenant's invoices, even when its cloud is shared by the master tenant or its group or user also
 carries invoices of the master tenant.
 
-**Switched-off budgets (since 1.2.3).** A budget whose `enabled` flag is off (`enabled: false`
+**Switched-off budgets (since 1.3.0).** A budget whose `enabled` flag is off (`enabled: false`
 in the REST API and the CLI; the budget form of Morpheus 9.1.0 has no such field) is still
 listed, with all its amounts, but at the end of the table and with the status *Disabled*
 instead of *On track*, *Warning*, *Over budget* or *Currency mismatch*. *Disabled* has a look

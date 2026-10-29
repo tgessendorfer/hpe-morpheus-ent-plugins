@@ -6,7 +6,7 @@ One section per version, newest first. The same text is the body of the matching
 
 ---
 
-## 1.2.3
+## 1.3.0
 
 **Switched-off budgets show *Disabled* instead of *Over budget* or *Warning*; currency codes are
 checked the way Instance Showback checks them, the invoice month no longer depends on the JVM
@@ -101,7 +101,7 @@ minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
   'ComputeZone'`) carry `total_price` 0 and only the `actual_*` cost columns, the basis of the new
   README note on Morpheus' own budget page. How that page computes its figure is taken from the
   Morpheus 9.1.0 documentation linked there.
-- Local build with JDK 17 and Gradle 9.8.0, one jar `morpheus-budget-burn-plugin-1.2.3-all.jar`.
+- Local build with JDK 17 and Gradle 9.8.0, one jar `morpheus-budget-burn-plugin-1.3.0-all.jar`.
 
 ### Not yet verified
 
@@ -120,7 +120,7 @@ minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
   *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an appliance
   with container hosts.
 
-**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.2.2...budget-burn-v1.2.3
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.2.2...budget-burn-v1.3.0
 
 ## 1.2.2
 
