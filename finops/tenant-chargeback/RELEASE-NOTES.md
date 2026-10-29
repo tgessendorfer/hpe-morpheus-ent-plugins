@@ -98,8 +98,6 @@ plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and option
 
 ### Not yet verified
 
-- On an appliance: the release jar loads in place of 1.2.2 (the release candidate above was a
-  separate build).
 - On an appliance: the amounts of a new report against 1.2.2 for the same month; a sub-tenant
   user who starts the report through the API (if Morpheus accepts the request) gets a *failed*
   result and no rows; the warning lines in the appliance log.
@@ -115,6 +113,13 @@ plugin API 1.4.2, minimum appliance 9.0.2; plugin code, provider code and option
   on 9.1.0-1, above).
 - The *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an
   appliance with container hosts.
+
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same
+plugin id; the candidate had replaced 1.2.2), status `loaded`.
+
+Built by the release workflow from the source at tag `tenant-chargeback-v1.3.0`.
+
+sha256 `1c36424ad643443a1a070db5f6214b8f3abb72326a2e543e83eea941b69e52fa`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/tenant-chargeback-v1.2.2...tenant-chargeback-v1.3.0
 

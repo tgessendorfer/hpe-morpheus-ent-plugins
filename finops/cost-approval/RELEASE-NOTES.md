@@ -115,8 +115,6 @@ plugin API 1.4.2 and minimum appliance 9.0.2 are unchanged; no new options.
 
 ### Not yet verified
 
-- On an appliance: the release jar loads in place of 1.2.3 (the release candidate above was a
-  separate build).
 - On an appliance: an unreadable policy threshold above a looser level that would approve the
   request, an extreme threshold such as `1e999999999`, and an unreadable *Threshold Currency*
   (for example `euro`), each with its rejection and its log line.
@@ -125,6 +123,13 @@ plugin API 1.4.2 and minimum appliance 9.0.2 are unchanged; no new options.
   whether Morpheus stores an emptied *Monthly Cost Threshold*, a number field, as empty and not as
   the text `null`: the plugin would read `null` as an unreadable value and reject every
   cost-checked request of that policy or integration.
+
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same
+plugin id; the candidate had replaced 1.2.3), status `loaded`.
+
+Built by the release workflow from the source at tag `cost-approval-v1.2.4`.
+
+sha256 `8877dc2fc0d8b4f5c47f837482290ade571d8eecb6dca5847c5e2e7e9ad6329c`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/cost-approval-v1.2.3...cost-approval-v1.2.4
 

@@ -229,8 +229,6 @@ No new setting.
 
 ### Not yet verified
 
-- On an appliance: the release jar loads in place of 1.6.5 and its integrations stay `ok` (the
-  release candidate above was a separate build).
 - On an appliance: a long tool loop on Morpheus 9.1 still gets its question back with the scoped
   memory (this needs the system prompt to stay the same during the loop; the log line above says
   when it does not); a model removed from the catalog disappears from the agent form, and one an
@@ -253,6 +251,13 @@ No new setting.
   `api.anthropic.com` to OpenRouter loses its old values at the next refresh, read back in the UI
   or over the API and not only from the log line (the plugin empties the values Morpheus hands
   it with the integration; if those arrive empty, the stored ones stay).
+
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same
+plugin id; the candidate had replaced 1.6.5), status `loaded`; its integrations stayed `ok`.
+
+Built by the release workflow from the source at tag `anthropic-v1.6.6`.
+
+sha256 `f16814ce1be7a8a8be774c83b3dcf13249771694ab28c94f5d5443a2a3ffe529`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.6.5...anthropic-v1.6.6
 

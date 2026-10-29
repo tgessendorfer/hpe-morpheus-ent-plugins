@@ -96,7 +96,7 @@ are unchanged; no new database column is read.
 
 ### Not yet verified
 
-- On an appliance: the release jar loads in place of 1.2.0, and the *Costs* tab shows the same
+- On an appliance: the *Costs* tab shows the same
   figures as 1.2.0, compared side by side, plus the new *Other* column.
 - On an appliance: the label *Sonstiges* for a user with a German language setting.
 - Whether network, extra or software prices, when a price set has them, are part of month to date
@@ -113,6 +113,13 @@ are unchanged; no new database column is read.
 - Whether Morpheus ever runs a tab's `show()` without its `renderTemplate()` on the same thread,
   which is what leaves a value for a later request; only the normal call order was read from the
   9.0.2 bytecode.
+
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same
+plugin id; the candidate had replaced 1.2.0), status `loaded`.
+
+Built by the release workflow from the source at tag `instance-showback-v1.3.0`.
+
+sha256 `458f0c02db281dbe3514112ee103e975390d0a36058e3694f521732a2c6714dd`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/instance-showback-v1.2.0...instance-showback-v1.3.0
 

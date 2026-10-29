@@ -150,8 +150,6 @@ catalog no longer empties the integration.** Built against plugin API 1.4.2. No 
 
 ### Not yet verified
 
-- On an appliance: the release jar loads in place of 0.2.4 and its integration stays `ok` (the
-  release candidate above was a separate build).
 - On an appliance: a chat whose question the Morpheus 9.1 chat memory drops still gets it back
   (*Restored the user's question ...* in the log). That relies on Morpheus keeping the system
   message the same through a tool loop.
@@ -166,6 +164,13 @@ catalog no longer empties the integration.** Built against plugin API 1.4.2. No 
   question ...* instead of one user getting the other's question.
 - **A chat with this version**: the test had no agent on an OpenRouter integration, so nothing
   of the chat path above ran on the appliance.
+
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same
+plugin id; the candidate had replaced 0.2.4), status `loaded`; its integration stayed `ok`.
+
+Built by the release workflow from the source at tag `openrouter-v0.2.5`.
+
+sha256 `24ab9c9beb46273deb8ea0c2471b8a0a77dfc7c905cb3805529b082dc0c05d8c`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.2.4...openrouter-v0.2.5
 

@@ -92,7 +92,7 @@ on an appliance where the permissions load and the database answers.
 
 ### Not yet verified
 
-- The release jar on an appliance: `loaded`, the dashboard unchanged for a role with *Budgets*
+- On an appliance: the dashboard unchanged for a role with *Budgets*
   read only, and the widgets missing for a role without it.
 - The layout without the Budgets permission was only built in a unit test; the appliance was not
   made to fail that lookup.
@@ -103,6 +103,13 @@ on an appliance where the permissions load and the database answers.
   dashboard widths, also when the cards wrap to two rows, in light and dark mode.
 - The *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an
   appliance with container hosts.
+
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same
+plugin id; the candidate had replaced 1.2.2), status `loaded`.
+
+Built by the release workflow from the source at tag `finops-insights-v1.3.0`.
+
+sha256 `9a8866e9f6183947197e4a959cf0a55a9b1d44e67f010a38aa770425292769c9`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/finops-insights-v1.2.2...finops-insights-v1.3.0
 

@@ -229,8 +229,6 @@ seconds after a clone in which a refresh can still add a discovered server (abov
 
 ### Not yet verified
 
-- On the lab appliance: the release jar loads in place of 0.1.32 and the cloud stays `ok` (the
-  release candidate above was a separate build).
 - On the lab appliance: a provision with two networks (`net0`/`net1`, `ipconfig1`) and a NIC
   added on reconfigure; provisions from an uploaded image and a system image through this
   cloud's locations; that a refresh during a clone adds no discovered server (the
@@ -257,6 +255,13 @@ seconds after a clone in which a refresh can still add a discovered server (abov
   refused without a reset): Morpheus 9.1.0-1 did not call it from its Restart action.
 - Stop and Delete of a VM managed by Proxmox HA: whether the `hastop` task ends before the VM is
   off, so that Stop reports success too early and Delete's destroy finds the VM still running.
+
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same
+plugin id; the candidate had replaced 0.1.32), status `loaded`; the cloud synced `ok`.
+
+Built by the release workflow from the source at tag `proxmox-ve-v0.1.33-lab`.
+
+sha256 `b5f4a549a16dd1a6db8189eba5d26d5e6764771913e8431192f3804d584a02ee`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.32-lab...proxmox-ve-v0.1.33-lab
 

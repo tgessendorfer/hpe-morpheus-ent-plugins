@@ -240,8 +240,6 @@ in *Only List These Models*, and GPT-6 handled as a reasoning model.** Built aga
 
 ### Not yet verified
 
-- On an appliance: the release jar loads in place of 0.1.4 and its integrations stay `ok` (the
-  release candidate above was a separate build).
 - Whether the built-in Morpheus MCP tools mark only real requirements as `required`. A tool that
   listed every parameter as required would keep its empty arguments: check that
   `Dropped empty arguments from list_servers` still appears with `openai/gpt-5.4-mini` through
@@ -270,6 +268,13 @@ in *Only List These Models*, and GPT-6 handled as a reasoning model.** Built aga
 - **Any GPT-6 model in a Morpheus agent**: the expected failure of its tool calls (see the GPT-6
   entry above) and the error api.openai.com answers with. The limit comes from OpenAI's
   latest-model guide (checked 2026-10-29), not from a request the plugin made.
+
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same
+plugin id; the candidate had replaced 0.1.4), status `loaded`; its integrations stayed `ok`.
+
+Built by the release workflow from the source at tag `openai-v0.2.0`.
+
+sha256 `ac84b59642df704c4ecc090a2f260620e578afecfc7013909af3a8f736a1a203`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.4...openai-v0.2.0
 

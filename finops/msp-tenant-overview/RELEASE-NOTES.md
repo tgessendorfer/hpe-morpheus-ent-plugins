@@ -99,8 +99,6 @@ name, and a failed connection release no longer breaks the page.** Built against
 
 ### Not yet verified
 
-- On an appliance: the release jar loads in place of 1.2.2 (the release candidate above was a
-  separate build).
 - On an appliance: the page next to 1.2.2, the same tenants, amounts and totals, except that a
   tenant without any amount (no invoices, or only zero amounts) no longer adds a zero total and
   cards in a currency no other tenant uses (see above); German texts after the upload; a failed
@@ -115,6 +113,13 @@ name, and a failed connection release no longer breaks the page.** Built against
   and dark mode.
 - The *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an
   appliance with container hosts.
+
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same
+plugin id; the candidate had replaced 1.2.2), status `loaded`.
+
+Built by the release workflow from the source at tag `msp-tenant-overview-v1.3.0`.
+
+sha256 `944afc6fd1a75913ada043c73b16a2fcb53a36a54b19dfedbf6bdc78a26440ab`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.2.2...msp-tenant-overview-v1.3.0
 

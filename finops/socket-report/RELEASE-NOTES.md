@@ -41,11 +41,16 @@ appliance 9.0.2 are unchanged; no new options.
 
 ### Not yet verified
 
-- On an appliance: the release jar loads in place of 1.2.0 (the release candidate above was a
-  separate build).
 - On an appliance: the report total against `GET /api/license` with a hypervisor host whose
   `max_sockets` is 0. The totals above match, but the test did not check whether such a host was
   among them.
+
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same
+plugin id; the candidate had replaced 1.2.0), status `loaded`.
+
+Built by the release workflow from the source at tag `socket-report-v1.2.1`.
+
+sha256 `117ee7b16f20e4475813846341674b10a75008d56451c3988accab8d05a89a14`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/socket-report-v1.2.0...socket-report-v1.2.1
 

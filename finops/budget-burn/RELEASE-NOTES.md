@@ -114,7 +114,7 @@ minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
 
 ### Not yet verified
 
-- On an appliance: the release jar loads in place of 1.2.2, and the page shows the same budgets,
+- On an appliance: the page shows the same budgets,
   amounts and statuses as 1.2.2, compared side by side, as a master tenant user and as a
   sub-tenant user.
 - A switched-off budget on an appliance: in German (*Deaktiviert*, *sonst Über Budget*), with
@@ -127,6 +127,13 @@ minimum appliance 9.0.2; plugin code, provider code and options are unchanged.
   cloud budget on this page next to the same budget on Morpheus' budget page). The
   *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an appliance
   with container hosts.
+
+On Morpheus 9.1.0 (build 9.1.0-1): the release jar replaced the release candidate in place (same
+plugin id; the candidate had replaced 1.2.2), status `loaded`.
+
+Built by the release workflow from the source at tag `budget-burn-v1.3.0`.
+
+sha256 `2b5003e63160fada78a0c773113acebecb8ef1d892504805a5de309d8c451fcd`
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/budget-burn-v1.2.2...budget-burn-v1.3.0
 
