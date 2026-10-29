@@ -146,13 +146,13 @@ The plugin lists a model when
   a router in front of them may serve them over chat completions itself. To leave them out there,
   use a `!` entry in the [allow list](#allow-list).
 
-Listed, but limited over chat completions: per OpenAI's latest-model guide (checked 2026-10-29),
-**`gpt-6-astra`, `gpt-6.1-sol` and `gpt-6.1-terra` answer over chat completions but call tools only
-through the Responses API**, and `gpt-6-sol` and `gpt-6-luna` call tools over chat completions only
-with a reasoning effort of `none`, which **Reasoning Effort** does not offer. A Morpheus agent sends
-its MCP tools on every request, so an agent on one of these models is expected to fail (not tested
-yet). They stay listed, since they are not Responses-only models; leave them out with `!gpt-6*` in
-the allow list.
+**GPT-6 models are listed, but cannot call tools through this plugin.** Per OpenAI's latest-model
+guide (checked 2026-10-29), **`gpt-6-astra`, `gpt-6.1-sol` and `gpt-6.1-terra` answer over chat
+completions but call tools only through the Responses API**, and `gpt-6-sol` and `gpt-6-luna` call
+tools over chat completions only with a reasoning effort of `none`, which **Reasoning Effort** does
+not offer. A Morpheus agent sends its MCP tools on every request, so **an agent on a GPT-6 model is
+expected to fail** through this plugin (not tested yet). They stay listed, since they are not
+Responses-only models; to hide them, enter **`*, !gpt-6*`** in the [allow list](#allow-list).
 
 Names are taken from the catalog when it has them (OpenRouter: *OpenAI: GPT-5.5*) and are the id
 otherwise (`gpt-5.4-mini`, `deepseek-v3.2`) — never title-cased, so the agent form shows the spelling

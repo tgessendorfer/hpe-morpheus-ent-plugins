@@ -632,11 +632,31 @@ class OpenAiProviderSpec extends Specification {
 		'gpt-6.1-sol'          || true
 		'openai/gpt-6-astra'   || true
 		'GPT-6-luna'           || true
+		'gpt-6.1-terra'        || true
+		'gpt-6-sol'            || true
 		'gpt-4.1'              || false
 		'gpt-oss-120b'         || false
 		'deepseek-v3.2'        || false
 		'google/gemini-3-pro'  || false
 		'claude-sonnet-5'      || false
+	}
+
+	def "a GPT-6 model with a configured effort gets reasoning_effort and still no sampling parameters"() {
+		given: 'OpenAI wants temperature and top_p removed unless the effort is none, which Reasoning Effort does not offer'
+		LlmChatRequest request = new LlmChatRequest(model: model, messages: [message('user', 'hi')], temperature: 0.7d, topP: 0.9d, maxOutputTokens: 1000)
+
+		when:
+		Map body = provider.buildChatRequestBody(request, configured([reasoningEffort: 'low']), false)
+
+		then:
+		body.reasoning_effort == 'low'
+		!body.containsKey('temperature')
+		!body.containsKey('top_p')
+		!body.containsKey('max_tokens')
+		body.max_completion_tokens == 8192
+
+		where:
+		model << ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna']
 	}
 
 	def "a reasoning model keeps the integration's own output limit, and a caller's limit above the floor"() {
@@ -1061,6 +1081,21 @@ class OpenAiProviderSpec extends Specification {
 
 		expect:
 		provider.buildModelsFromApiResponse(new LlmIntegration(accountIntegration: ai), catalog)*.code == ['gpt-5.4-mini', 'gpt-5.5']
+	}
+
+	def "GPT-6 models stay listed on api.openai.com as reasoning models, and *, !gpt-6* hides them"() {
+		given: 'they answer over chat completions but call tools only through the Responses API, so they are no Responses-only models'
+		Map catalog = [data: ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.5', 'gpt-4.1']
+			.collect { [id: it, object: 'model', owned_by: 'openai'] }]
+
+		when:
+		List<LlmModel> listed = provider.buildModelsFromApiResponse(new LlmIntegration(accountIntegration: integration), catalog)
+		List<LlmModel> hidden = provider.buildModelsFromApiResponse(new LlmIntegration(accountIntegration: configured([modelAllowList: '*, !gpt-6*'])), catalog)
+
+		then:
+		listed*.code as Set == ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.5', 'gpt-4.1'] as Set
+		listed.findAll { it.code.startsWith('gpt-6') }.every { it.metadata.supportsReasoning }
+		hidden*.code as Set == ['gpt-5.5', 'gpt-4.1'] as Set
 	}
 
 	def "a field without ! lists exactly what it listed before"() {

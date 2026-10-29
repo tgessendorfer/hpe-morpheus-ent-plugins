@@ -6,12 +6,12 @@ shaded `-all.jar` is attached.
 
 ---
 
-## 0.1.5
+## 0.2.0
 
-**Fix release from a code review: the output limit, parameters an API rejects, tool arguments,
-streams and the question map; plus a model list without api.openai.com's Responses-only models,
-`!` exclusions in *Only List These Models*, and GPT-6 handled as a reasoning model.** Built against
-plugin API 1.4.2. No new setting; plugin code unchanged.
+**Fixes from a code review (the output limit, parameters an API rejects, tool arguments, streams
+and the question map), a model list without api.openai.com's Responses-only models, `!` exclusions
+in *Only List These Models*, and GPT-6 handled as a reasoning model.** Built against plugin API
+1.4.2. No new setting; plugin code unchanged.
 
 - **api.openai.com no longer lists models it serves only through its Responses API.** The plugin
   calls `/chat/completions`, and OpenAI refuses these models there, so an agent given one failed on
@@ -25,7 +25,7 @@ plugin API 1.4.2. No new setting; plugin code unchanged.
   `computer-use-preview`, also Responses-only, was already left out as no chat model. Models that
   work over chat completions stay listed, `chatgpt-4o-latest` and `chat-latest` among them, and so
   do the GPT-6 models, although OpenAI's guide limits their tool calls over chat completions (see
-  *Not yet verified*). **The rule applies to api.openai.com and its data residency hosts**
+  the GPT-6 entry below). **The rule applies to api.openai.com and its data residency hosts**
   (`eu.api.openai.com`, `us.api.openai.com` and the others OpenAI names) **only**; LiteLLM,
   OpenRouter, Azure and local servers list these models as before, since a router in front of them
   may serve them over chat completions itself. A refresh logs the models it leaves out:
@@ -45,7 +45,15 @@ plugin API 1.4.2. No new setting; plugin code unchanged.
   `temperature` or `top_p`. OpenAI's latest-model guide (checked 2026-10-29) says to remove
   `temperature` and `top_p` unless the reasoning effort is `none`, and `gpt-6-astra` and
   `gpt-6.1-sol` do not support `none`; up to 0.1.4 the plugin passed on Morpheus' `temperature` to
-  them.
+  them. A configured *Reasoning Effort* still goes out with them.
+
+  **GPT-6 models cannot call tools through this plugin.** Per the same guide, **`gpt-6-astra`,
+  `gpt-6.1-sol` and `gpt-6.1-terra` call tools only through the Responses API**, and `gpt-6-sol`
+  and `gpt-6-luna` call tools over chat completions only with a reasoning effort of `none`, which
+  *Reasoning Effort* does not offer. A Morpheus agent sends its MCP tools on every request, so **an
+  agent on a GPT-6 model is expected to fail** through this plugin, which calls
+  `/chat/completions`. The GPT-6 models stay listed, since they answer over chat completions and are
+  not Responses-only models; **`*, !gpt-6*` in *Only List These Models* hides them.**
 - **Default Max Output Tokens is now a floor.** Morpheus asks for 1000 output tokens on every chat
   request, so up to 0.1.4 the integration's value was never used in chat. The plugin now sends the
   larger of the two: a caller asking for more keeps its value, and without a configured value the
@@ -208,10 +216,13 @@ plugin API 1.4.2. No new setting; plugin code unchanged.
   without `!` giving the same patterns as before; `!*` and an exclusion of every included model
   ignored, and a typo in the narrowing entries ignored while the `!` entries still apply; an allow
   list of only Responses-only entries (`o3-pro`, `gpt-5.5-pro*`) listing every chat model on
-  api.openai.com, and only those models on LiteLLM; `gpt-6.1-sol`, `openai/gpt-6-astra` and
-  `GPT-6-luna` sent `max_completion_tokens` and no sampling parameters, `gpt-oss-120b` not. The test
-  that expected `codex-mini-latest` in the api.openai.com list now expects it gone.
-- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 245 tests,
+  api.openai.com, and only those models on LiteLLM; `gpt-6.1-sol`, `openai/gpt-6-astra`,
+  `GPT-6-luna`, `gpt-6.1-terra` and `gpt-6-sol` sent `max_completion_tokens` and no sampling
+  parameters, `gpt-oss-120b` not; the five GPT-6 models with a configured *Reasoning Effort* sent
+  `reasoning_effort`, at least 8192 output tokens and no `temperature` or `top_p`; on api.openai.com
+  the five GPT-6 models listed and marked as reasoning models, and `*, !gpt-6*` leaving them out.
+  The test that expected `codex-mini-latest` in the api.openai.com list now expects it gone.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 253 tests,
   0 failures.
 
 ### Not yet verified
@@ -242,14 +253,11 @@ plugin API 1.4.2. No new setting; plugin code unchanged.
   Responses-only models comes from OpenAI's model pages, not from a request the plugin made.
 - `!` entries on a LiteLLM integration, saved through the edit form: that the form keeps the `!`
   and the refresh removes the matching models.
-- Any GPT-6 model in a Morpheus agent. Per OpenAI's latest-model guide (checked 2026-10-29),
-  **`gpt-6-astra`, `gpt-6.1-sol` and `gpt-6.1-terra` call tools only through the Responses API**,
-  and `gpt-6-sol` and `gpt-6-luna` call tools over chat completions only with a reasoning effort of
-  `none`, which *Reasoning Effort* does not offer. A Morpheus agent sends its MCP tools on every
-  request, so an agent on one of them is expected to fail. They stay listed, since they are not
-  Responses-only models; `!gpt-6*` in *Only List These Models* leaves them out.
+- Any GPT-6 model in a Morpheus agent: the expected failure of its tool calls (see the GPT-6 entry
+  above) and the error api.openai.com answers with. The limit comes from OpenAI's latest-model
+  guide (checked 2026-10-29), not from a request the plugin made.
 
-**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.4...openai-v0.1.5
+**Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.4...openai-v0.2.0
 
 ## 0.1.4
 

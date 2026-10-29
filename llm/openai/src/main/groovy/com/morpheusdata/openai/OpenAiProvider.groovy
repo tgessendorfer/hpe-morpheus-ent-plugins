@@ -96,6 +96,9 @@ class OpenAiProvider implements LlmProvider {
 	// aliases. computer-use-preview is Responses-only too; it is already dropped for every
 	// endpoint as no chat model. Applied to api.openai.com only: a router or proxy in front
 	// of these models (OpenRouter, LiteLLM) may serve them over chat completions itself.
+	// The GPT-6 models are deliberately not here: they answer over chat completions and only
+	// their tool calls need the Responses API, so they stay listed and an operator hides
+	// them with a ! entry in the allow list.
 	static final List<Pattern> RESPONSES_ONLY_MODEL_IDS = [
 		~/(?i)^(?:o\d+|gpt-\d+(?:\.\d+)*)-pro(?:-|$)/,
 		~/(?i)(?:^|-)codex(?:-|$)/,
