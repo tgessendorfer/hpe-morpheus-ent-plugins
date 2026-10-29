@@ -1540,7 +1540,7 @@ class AnthropicProviderSpec extends Specification {
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
 	}
 
-	def "only tool calls of a request with a question are remembered"() {
+	def "a request without a question marks its tool calls instead of remembering one, and a turn without tool calls adds nothing"() {
 		given:
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
 
@@ -1550,7 +1550,9 @@ class AnthropicProviderSpec extends Specification {
 		AnthropicProvider.rememberQuestion([messages: [[role: 'user', content: 'Q']]], [content: [[type: 'text', text: 'Done.']]])
 
 		then:
-		AnthropicProvider.QUESTION_BY_TOOL_CALL.isEmpty()
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.keySet() == ['toolu_t1AbCdEfGhIjKl'] as Set
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get('toolu_t1AbCdEfGhIjKl').question == null
+		AnthropicProvider.isAmbiguous(AnthropicProvider.QUESTION_BY_TOOL_CALL.get('toolu_t1AbCdEfGhIjKl'))
 
 		cleanup:
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
@@ -1613,6 +1615,387 @@ class AnthropicProviderSpec extends Specification {
 		then:
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.size() == AnthropicProvider.QUESTION_BY_TOOL_CALL_MAX
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(ID).question == 'List the AWS servers'
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	private static List<Map> lostQuestionLoop(String... toolCallIds) {
+		[[role: 'assistant', content: toolCallIds.collect { String id -> [type: 'tool_use', id: id, name: 'list_servers', input: [:]] }],
+		 [role: 'user', content: toolCallIds.collect { String id -> [type: 'tool_result', tool_use_id: id, content: '[]'] }]]
+	}
+
+	def "two loops that store different questions under one tool call id at the same time get neither question back"() {
+		given: 'a backend that reuses tool call ids, and two users of one agent asking at the same time'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String SHARED = 'toolu_SharedAbCdEfGhIj'
+		String OWN = 'toolu_OwnAbCdEfGhIjKlMn'
+		LlmChatRequest askedA = new LlmChatRequest(messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')])
+		LlmChatRequest askedB = new LlmChatRequest(messages: [message('system', 'You are Murph.'), message('user', 'Which VMs are stopped?')])
+		String scope = AnthropicProvider.questionScope(integration, askedA)
+		AnthropicProvider.rememberQuestion(provider.buildMessagesRequestBody(askedA, integration, false),
+			[content: [[type: 'tool_use', id: OWN, name: 'list_servers', input: [:]], [type: 'tool_use', id: SHARED, name: 'list_servers', input: [:]]]], scope)
+		AnthropicProvider.rememberQuestion(provider.buildMessagesRequestBody(askedB, integration, false),
+			[content: [[type: 'tool_use', id: SHARED, name: 'list_servers', input: [:]]]], scope)
+		List<Map> lostA = lostQuestionLoop(OWN, SHARED)
+		List<Map> lostB = lostQuestionLoop(SHARED)
+
+		when:
+		boolean restoredA = AnthropicProvider.restoreLostQuestion(lostA, scope)
+		boolean restoredB = AnthropicProvider.restoreLostQuestion(lostB, scope)
+
+		then: 'neither request gets a question, not even through the id only one loop used'
+		!restoredA
+		!restoredB
+		lostA.size() == 2
+		lostB.size() == 2
+
+		and: 'the shared id keeps a marker with the time of the clash and two hashes, without either question'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(SHARED).keySet() == ['ambiguous', 'clashed', 'updated'] as Set
+
+		when: 'one of the loops stores its question for the id again'
+		AnthropicProvider.rememberQuestion(provider.buildMessagesRequestBody(askedA, integration, false),
+			[content: [[type: 'tool_use', id: SHARED, name: 'list_servers', input: [:]]]], scope)
+
+		then: 'the id stays marked, and the question was already part of the clash'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(SHARED).ambiguous
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(SHARED).clashed.size() == 2
+		!AnthropicProvider.restoreLostQuestion(lostB, scope)
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "the same question stored under one tool call id from another integration or system prompt at the same time marks the id too"() {
+		given: 'a backend that reuses tool call ids, and the same question asked in two scopes'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String SHARED = 'toolu_SharedAbCdEfGhIj'
+		Map toolTurn = [content: [[type: 'tool_use', id: SHARED, name: 'list_servers', input: [:]]]]
+		AccountIntegration first = new AccountIntegration(id: 2L, serviceUrl: 'https://api.anthropic.com')
+		AccountIntegration other = new AccountIntegration(id: otherId, serviceUrl: 'https://api.anthropic.com')
+		LlmChatRequest askedFirst = new LlmChatRequest(messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')])
+		LlmChatRequest askedOther = new LlmChatRequest(messages: [message('system', otherSystem), message('user', 'List the AWS servers')])
+		String firstScope = AnthropicProvider.questionScope(first, askedFirst)
+		String otherScope = AnthropicProvider.questionScope(other, askedOther)
+		AnthropicProvider.rememberQuestion(provider.buildMessagesRequestBody(askedFirst, first, false), toolTurn, firstScope)
+		AnthropicProvider.rememberQuestion(provider.buildMessagesRequestBody(askedOther, other, false), toolTurn, otherScope)
+		List<Map> lostFirst = lostQuestionLoop(SHARED)
+		List<Map> lostOther = lostQuestionLoop(SHARED)
+
+		expect:
+		firstScope != otherScope
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(SHARED).keySet() == ['ambiguous', 'clashed', 'updated'] as Set
+		!AnthropicProvider.restoreLostQuestion(lostFirst, firstScope)
+		!AnthropicProvider.restoreLostQuestion(lostOther, otherScope)
+		lostFirst.size() == 2
+		lostOther.size() == 2
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		where:
+		otherId | otherSystem
+		7L      | 'You are Murph.'
+		2L      | 'You are the billing agent.'
+	}
+
+	def "the same question stored again under a tool call id only refreshes it, and it still comes back"() {
+		given:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String SHARED = 'toolu_SharedAbCdEfGhIj'
+		LlmChatRequest asked = new LlmChatRequest(messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')])
+		String scope = AnthropicProvider.questionScope(integration, asked)
+		Map body = provider.buildMessagesRequestBody(asked, integration, false)
+		Map toolTurn = [content: [[type: 'tool_use', id: SHARED, name: 'list_servers', input: [:]]]]
+		AnthropicProvider.rememberQuestion(body, toolTurn, scope)
+		long earlier = System.currentTimeMillis() - 60000L
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(SHARED).updated = earlier
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(SHARED).costKey = 'first'
+		List<Map> lost = lostQuestionLoop(SHARED)
+
+		when:
+		AnthropicProvider.rememberQuestion(body, toolTurn, scope)
+		boolean restored = AnthropicProvider.restoreLostQuestion(lost, scope)
+
+		then: 'the id keeps the cost key it was stored with first'
+		!AnthropicProvider.QUESTION_BY_TOOL_CALL.get(SHARED).ambiguous
+		(AnthropicProvider.QUESTION_BY_TOOL_CALL.get(SHARED).updated as long) > earlier
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(SHARED).costKey == 'first'
+		restored
+		lost[0].content == AnthropicProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a different question after the clash window takes the tool call id over and comes back"() {
+		given: 'the id held another question, or was marked ambiguous, longer ago than the window'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String SHARED = 'toolu_SharedAbCdEfGhIj'
+		LlmChatRequest asked = new LlmChatRequest(messages: [message('system', 'You are Murph.'), message('user', 'List the AWS servers')])
+		String scope = AnthropicProvider.questionScope(integration, asked)
+		long outside = System.currentTimeMillis() - AnthropicProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.put(SHARED, earlier + [updated: outside])
+		List<Map> lost = lostQuestionLoop(SHARED)
+
+		when:
+		AnthropicProvider.rememberQuestion(provider.buildMessagesRequestBody(asked, integration, false),
+			[content: [[type: 'tool_use', id: SHARED, name: 'list_servers', input: [:]]]], scope)
+		boolean restored = AnthropicProvider.restoreLostQuestion(lost, scope)
+
+		then:
+		!AnthropicProvider.QUESTION_BY_TOOL_CALL.get(SHARED).ambiguous
+		restored
+		lost[0].content == AnthropicProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		where:
+		earlier << [[question: 'Which VMs are stopped?', costKey: 'k'],
+			[ambiguous: System.currentTimeMillis() - AnthropicProvider.QUESTION_CLASH_WINDOW_MS - 1000L, clashed: ['a', 'b'] as Set]]
+	}
+
+	private static final String MURPH = '2:abcdef0123456789'
+
+	/** Remembers a question asked of one agent on integration 2 for these tool call ids. */
+	private static void ask(String question, String... toolCallIds) {
+		AnthropicProvider.rememberQuestion([messages: [[role: 'user', content: question]]],
+			[content: toolCallIds.collect { String id -> [type: 'tool_use', id: id, name: 'list_servers', input: [:]] }], MURPH)
+	}
+
+	private static Map remembered(String id) {
+		return AnthropicProvider.QUESTION_BY_TOOL_CALL.get(id)
+	}
+
+	def "the loops that clashed storing their own questions again do not renew the mark, which ends 10 minutes after the last clash"() {
+		given: 'a clash on the shared id nine minutes ago; the first loop also called a tool of its own'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String SHARED = 'toolu_SharedAbCdEfGhIj'
+		String OWN = 'toolu_OwnAbCdEfGhIjKlMn'
+		ask('List the AWS servers', SHARED)
+		ask('Which VMs are stopped?', SHARED)
+		long clash = System.currentTimeMillis() - AnthropicProvider.QUESTION_CLASH_WINDOW_MS + 60000L
+		remembered(SHARED).ambiguous = clash
+		remembered(SHARED).updated = clash
+
+		when: 'both loops call the tool again within the window, each with its own question'
+		ask('Which VMs are stopped?', SHARED)
+		ask('List the AWS servers', SHARED)
+		ask('List the AWS servers', OWN)
+
+		then: 'the id is refreshed, but the mark keeps the time of the clash and still holds'
+		(remembered(SHARED).updated as long) > clash
+		remembered(SHARED).ambiguous == clash
+		remembered(SHARED).clashed.size() == 2
+		!AnthropicProvider.restoreLostQuestion(lostQuestionLoop(OWN, SHARED), MURPH)
+
+		when: 'the window passes since the clash'
+		remembered(SHARED).ambiguous = System.currentTimeMillis() - AnthropicProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		List<Map> lost = lostQuestionLoop(OWN, SHARED)
+
+		then: 'the mark is over: the loop gets its question back through its own id'
+		!AnthropicProvider.isAmbiguous(remembered(SHARED))
+		AnthropicProvider.restoreLostQuestion(lost, MURPH)
+		lost[0].content == AnthropicProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+
+		when: 'one loop stores its question for the shared id again, while the id is still stored for within the window'
+		ask('List the AWS servers', SHARED)
+		lost = lostQuestionLoop(SHARED)
+
+		then: 'the id holds no question, so a loop with only that id left gets nothing back'
+		remembered(SHARED).question == null
+		!AnthropicProvider.isAmbiguous(remembered(SHARED))
+		!AnthropicProvider.restoreLostQuestion(lost, MURPH)
+		lost.size() == 2
+
+		when: 'nothing is stored for it for the window, and then a question is'
+		remembered(SHARED).updated = System.currentTimeMillis() - AnthropicProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		ask('List the AWS servers', SHARED)
+		lost = lostQuestionLoop(SHARED)
+
+		then: 'that question takes it over'
+		remembered(SHARED).question == 'List the AWS servers'
+		AnthropicProvider.restoreLostQuestion(lost, MURPH)
+		lost[0].content == AnthropicProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers'
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "after the mark ends, a tool call id the loops still store for hands neither loop the other one's question"() {
+		given: 'loops A and B clashed on X more than 10 minutes ago and both kept storing their questions for it'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String X = 'toolu_SharedAbCdEfGhIj'
+		ask('List the AWS servers', X)
+		ask('Which VMs are stopped?', X)
+		remembered(X).ambiguous = System.currentTimeMillis() - AnthropicProvider.QUESTION_CLASH_WINDOW_MS - 1000L
+		remembered(X).updated = System.currentTimeMillis() - 60000L
+
+		when: 'A stores its question for X again; B lost its question and has only X left'
+		ask('List the AWS servers', X)
+		List<Map> lostB = lostQuestionLoop(X)
+
+		then: "B does not get A's question"
+		remembered(X).question == null
+		!AnthropicProvider.restoreLostQuestion(lostB, MURPH)
+		lostB.size() == 2
+
+		when: 'a question that was not part of the clash is stored for X within the window'
+		ask('Which clouds are offline?', X)
+
+		then: 'it is a new clash'
+		AnthropicProvider.isAmbiguous(remembered(X))
+		remembered(X).clashed.size() == 3
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a loop that lost its question marks its tool calls even when nothing was known of it, so another loop's question cannot come back"() {
+		given: 'the plugin knows nothing of loop B (it was reloaded), and B lost its question'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'toolu_SharedAbCdEfGhIj'
+		List<Map> lostB = lostQuestionLoop('toolu_UnknownAbCdEfGhIjK')
+
+		when: 'B calls Y, and loop A, with its own question, gets the same id a moment later'
+		boolean restoredBefore = AnthropicProvider.restoreLostQuestion(lostB, MURPH)
+		AnthropicProvider.rememberQuestion([messages: lostB], [content: [[type: 'tool_use', id: Y, name: 'list_servers', input: [:]]]], MURPH)
+		Map marked = new LinkedHashMap(remembered(Y))
+		ask('List the AWS servers', Y)
+		List<Map> nextB = lostQuestionLoop(Y)
+
+		then: 'B left a marker without question for Y'
+		!restoredBefore
+		marked.question == null
+		AnthropicProvider.isAmbiguous(marked)
+
+		and: "A's question for Y is a clash, and B gets nothing back"
+		remembered(Y).question == null
+		AnthropicProvider.isAmbiguous(remembered(Y))
+		!AnthropicProvider.restoreLostQuestion(nextB, MURPH)
+		nextB.size() == 2
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a restored request counts on the cost key of its tool calls only while they name one question"() {
+		given: 'a restored request whose tool calls Y and Z are known'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'toolu_FirstAbCdEfGhIjKl'
+		String Z = 'toolu_SecondAbCdEfGhIjK'
+		long now = System.currentTimeMillis()
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.put(Y, [question: 'List the AWS servers', costKey: 'kA', scope: MURPH, updated: now])
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.put(Z, z + [updated: now])
+		List<Map> restored = [[role: 'user', content: AnthropicProvider.RESTORED_QUESTION_NOTE + 'List the AWS servers']] + lostQuestionLoop(Y, Z)
+
+		expect: 'with Z marked or holding another question, neither cost key is used'
+		!(AnthropicProvider.questionKey([model: 'm', messages: restored], MURPH) in ['kA', 'kB'])
+
+		when: 'Z is no longer known'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.remove(Z)
+
+		then: "Y's cost key is used"
+		AnthropicProvider.questionKey([model: 'm', messages: restored], MURPH) == 'kA'
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		where:
+		z << [[ambiguous: System.currentTimeMillis(), clashed: ['a', 'b'] as Set], [question: 'Which VMs are stopped?', costKey: 'kB', scope: MURPH]]
+	}
+
+	def "a third question for a marked tool call id is a new clash and renews the mark"() {
+		given:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String SHARED = 'toolu_SharedAbCdEfGhIj'
+		ask('List the AWS servers', SHARED)
+		ask('Which VMs are stopped?', SHARED)
+		long earlier = System.currentTimeMillis() - 60000L
+		remembered(SHARED).ambiguous = earlier
+
+		when:
+		ask('Which clouds are offline?', SHARED)
+
+		then:
+		(remembered(SHARED).ambiguous as long) > earlier
+		remembered(SHARED).clashed.size() == 3
+		!AnthropicProvider.restoreLostQuestion(lostQuestionLoop(SHARED), MURPH)
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+	}
+
+	def "a request whose known tool calls hold different questions, or a marked one, gets no question back"() {
+		given: 'a loop with two tool calls left, the first of them clean'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'toolu_FirstAbCdEfGhIjKl'
+		String Z = 'toolu_SecondAbCdEfGhIjK'
+		long now = System.currentTimeMillis()
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.put(Y, [question: 'Which VMs are stopped?', costKey: 'k', scope: MURPH, updated: now])
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.put(Z, z + [updated: now])
+		List<Map> lost = lostQuestionLoop(Y, Z)
+
+		expect:
+		AnthropicProvider.restoreLostQuestion(lost, MURPH) == expected
+		lost.size() == (expected ? 3 : 2)
+
+		cleanup:
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+
+		where:
+		z                                                                         || expected
+		[question: 'List the AWS servers', costKey: 'k', scope: MURPH]            || false
+		[ambiguous: System.currentTimeMillis(), clashed: ['a'] as Set]            || false
+		[question: 'Which VMs are stopped?', costKey: 'k', scope: MURPH]          || true
+		[question: 'List the AWS servers', costKey: 'k', scope: '7:0000000000000000'] || true
+	}
+
+	def "a loop refused its question marks its next tool calls, so the other loop's question cannot come back through them"() {
+		given: 'loops A and B clashed on Y; A called Z with its question still in memory'
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String Y = 'toolu_FirstAbCdEfGhIjKl'
+		String Z = 'toolu_SecondAbCdEfGhIjK'
+		String W = 'toolu_ThirdAbCdEfGhIjKl'
+		ask('List the AWS servers', Y)
+		ask('Which VMs are stopped?', Y)
+		ask('List the AWS servers', Z)
+		long clash = System.currentTimeMillis() - 300000L
+		remembered(Y).ambiguous = clash
+
+		when: 'B lost its question, is refused it through Y and calls Z without it'
+		List<Map> refused = lostQuestionLoop(Y)
+		boolean restoredThroughY = AnthropicProvider.restoreLostQuestion(refused, MURPH)
+		long refusedAt = System.currentTimeMillis()
+		AnthropicProvider.rememberQuestion([messages: refused], [content: [[type: 'tool_use', id: Z, name: 'list_instances', input: [:]]]], MURPH)
+
+		and: 'the chat memory dropped the calls on Y; B calls W, then A does'
+		List<Map> later = lostQuestionLoop(Z)
+		boolean restoredThroughZ = AnthropicProvider.restoreLostQuestion(later, MURPH)
+		AnthropicProvider.rememberQuestion([messages: later], [content: [[type: 'tool_use', id: W, name: 'get_instance', input: [:]]]], MURPH)
+		long markedW = (remembered(W).ambiguous as long) - 60000L
+		remembered(W).ambiguous = markedW
+		ask('List the AWS servers', W)
+		List<Map> last = lostQuestionLoop(W)
+
+		then: 'Z holds a marker without question, and B gets nothing back through it'
+		!restoredThroughY
+		AnthropicProvider.isAmbiguous(remembered(Z))
+		remembered(Z).question == null
+		!restoredThroughZ
+		later.size() == 2
+
+		and: 'the mark B passed on starts at its own call, not at the clash on Y'
+		(remembered(Z).ambiguous as long) >= refusedAt
+		remembered(Y).ambiguous == clash
+
+		and: "A's question on W is part of the clash, so it neither lifts nor renews the mark B left there"
+		AnthropicProvider.isAmbiguous(remembered(W))
+		remembered(W).ambiguous == markedW
+		remembered(W).question == null
+		!AnthropicProvider.restoreLostQuestion(last, MURPH)
+		last.size() == 2
 
 		cleanup:
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
@@ -1776,6 +2159,70 @@ class AnthropicProviderSpec extends Specification {
 
 		then:
 		AnthropicProvider.THINKING_BY_TOOL_CALL.isEmpty()
+	}
+
+	def "thinking kept twice under one tool call id within the clash window comes back only when both stores agree"() {
+		given: 'a backend that reuses tool call ids: a second turn keeps thinking under the same id'
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String SHARED = 'toolu_SharedAbCdEfGhIj'
+		AccountIntegration ai = configured([thinkingEnabled: 'on'])
+		LlmChatRequest loop = toolLoop(SHARED)
+		String scope = AnthropicProvider.questionScope(ai, loop)
+		AnthropicProvider.rememberThinking([SHARED], [[type: 'thinking', thinking: 'List first.', signature: 'sig-a']], scope)
+		AnthropicProvider.rememberThinking([SHARED], [[type: 'thinking', thinking: secondThinking, signature: secondSignature]],
+			sameScope ? scope : '7:0000000000000000')
+
+		when:
+		Map body = provider.buildMessagesRequestBody(loop, ai, false)
+
+		then: 'a clash leaves a marker and the request goes out without thinking, never with the other turn\'s blocks'
+		(AnthropicProvider.THINKING_BY_TOOL_CALL.get(SHARED).ambiguous as boolean) == !kept
+		body.containsKey('thinking') == kept
+		body.messages[1].content*.type == (kept ? ['thinking', 'text', 'tool_use'] : ['text', 'tool_use'])
+
+		cleanup:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+
+		where:
+		secondThinking | secondSignature | sameScope || kept
+		'List first.'  | 'sig-a'         | true      || true
+		'Stopped VMs?' | 'sig-b'         | true      || false
+		'List first.'  | 'sig-a'         | false     || false
+	}
+
+	def "a tool loop whose tool call id another question claimed at the same time gets no thinking back"() {
+		given: 'loop A thought and called a tool; loop B, with another question, got the same id on a turn without thinking'
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
+		String SHARED = 'toolu_SharedAbCdEfGhIj'
+		AccountIntegration ai = configured([thinkingEnabled: 'on'])
+		LlmChatRequest loopA = toolLoop(SHARED)
+		LlmChatRequest loopB = new LlmChatRequest(messages: [
+			message('user', 'Which VMs are stopped?'),
+			message('assistant', 'Checking.', [tool_calls: [[id: SHARED, type: 'function', function: [name: 'list_servers', arguments: '{}']]]]),
+			message('tool', '{"total":3}', [tool_call_id: SHARED])
+		])
+		String scope = AnthropicProvider.questionScope(ai, loopA)
+		Map toolTurn = [content: [[type: 'tool_use', id: SHARED, name: 'list_servers', input: [:]]]]
+		AnthropicProvider.rememberQuestion([messages: [[role: 'user', content: 'List the AWS servers']]], toolTurn, scope)
+		AnthropicProvider.rememberThinking([SHARED], [[type: 'thinking', thinking: 'List first.', signature: 'sig-a']], scope)
+		AnthropicProvider.rememberQuestion([messages: [[role: 'user', content: 'Which VMs are stopped?']]], toolTurn, scope)
+
+		when:
+		Map bodyA = provider.buildMessagesRequestBody(loopA, ai, false)
+		Map bodyB = provider.buildMessagesRequestBody(loopB, ai, false)
+
+		then: 'the blocks are only in the thinking map, yet neither loop gets them'
+		!AnthropicProvider.THINKING_BY_TOOL_CALL.get(SHARED).ambiguous
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.get(SHARED).ambiguous
+		!bodyA.containsKey('thinking')
+		!bodyB.containsKey('thinking')
+		bodyB.messages[1].content*.type == ['text', 'tool_use']
+
+		cleanup:
+		AnthropicProvider.THINKING_BY_TOOL_CALL.clear()
+		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()
 	}
 
 	// ------------------------------------------------------------------

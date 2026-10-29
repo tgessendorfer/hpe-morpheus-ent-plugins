@@ -24,6 +24,9 @@ class LlmModelsSyncSpec extends Specification {
 	List<LlmModel> created = []
 	List<LlmModel> removed = []
 	boolean removeThrows = false
+	// Models an agent points at: a bulk removal that holds one of them fails as a whole.
+	Set<Long> inUse = []
+	List<List<Long>> removeAttempts = []
 
 	private LlmModel model(Long id, String code, Boolean enabled = true) {
 		return new LlmModel(id: id, code: code, name: code, enabled: enabled, llmIntegration: integration, metadata: [:])
@@ -40,7 +43,8 @@ class LlmModelsSyncSpec extends Specification {
 		modelService.bulkSave(_) >> { List<List<LlmModel>> args -> saved.addAll(args[0]); Single.just(Mock(BulkSaveResult)) }
 		modelService.bulkCreate(_) >> { List<List<LlmModel>> args -> created.addAll(args[0]); Single.just(Mock(BulkCreateResult)) }
 		modelService.bulkRemove(_) >> { List<List<LlmModel>> args ->
-			if (removeThrows) {
+			removeAttempts << args[0]*.id
+			if (removeThrows || args[0].any { LlmModel model -> model.id in inUse }) {
 				throw new RuntimeException('Cannot delete or update a parent row: a foreign key constraint fails')
 			}
 			removed.addAll(args[0])
@@ -80,6 +84,26 @@ class LlmModelsSyncSpec extends Specification {
 		sync.execute([model(null, 'claude-haiku-4-5')])
 
 		then:
+		saved*.id == [2L]
+		saved*.enabled == [false]
+		created.isEmpty()
+	}
+
+	def "a bulk removal that fails on one model in use is retried model by model"() {
+		given: 'two models left the catalog, and an agent still points at one of them'
+		inUse << 2L
+		LlmModelsSync sync = syncOver([model(1L, 'claude-haiku-4-5'), model(2L, 'claude-3-haiku'), model(3L, 'claude-3-opus')])
+
+		when:
+		sync.execute([model(null, 'claude-haiku-4-5')])
+
+		then: 'the batch fails, then each model is tried on its own'
+		removeAttempts.size() == 3
+		removeAttempts[0].sort() == [2L, 3L]
+		removeAttempts.drop(1).flatten().sort() == [2L, 3L]
+
+		and: 'the free model is removed, the one in use is kept and disabled'
+		removed*.id == [3L]
 		saved*.id == [2L]
 		saved*.enabled == [false]
 		created.isEmpty()

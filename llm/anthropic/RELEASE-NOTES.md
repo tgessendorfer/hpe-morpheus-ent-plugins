@@ -10,7 +10,8 @@ shaded `-all.jar` is attached. Notes for 1.4.1 and earlier exist only there.
 
 **Fix release from a code review: the chat retry works, keys in stored credentials are found on
 update and refresh, models that leave the catalog are removed, and the per-question memory is kept
-per integration and agent.** Built against plugin API 1.4.2. No new setting.
+per integration and agent, where a tool call id that two questions claim at once restores
+nothing.** Built against plugin API 1.4.2. No new setting.
 
 - **The chat retry never ran.** `generateResponse` was meant to send a request up to three times
   after a broken connection, but it waited for an exception, and the API service reports every
@@ -46,10 +47,65 @@ per integration and agent.** Built against plugin API 1.4.2. No new setting.
   integration id and a hash of the system prompt Morpheus sends (the agent's prompt), and only used
   within that scope. Before, a backend with predictable tool call ids could hand one conversation the
   question or thinking of another, and the same first question asked through two integrations shared
-  one cost total. When a request has lost its question and its tool calls are known only under
-  another integration or system prompt, the plugin logs *... the question is not restored*. The
-  eviction above 10,000 entries now runs under a lock, so concurrent requests drop no more than the
-  excess.
+  one cost total. **The per-question cost total (the *Cost* footer through OpenRouter) now adds up
+  only the requests of the same integration and system prompt.** When a request has lost its
+  question and its tool calls are known only under another integration or system prompt, the plugin
+  logs *... the question is not restored*. The eviction above 10,000 entries now runs under a lock,
+  so concurrent requests drop no more than the excess.
+- **Two tool loops that share a tool call id get no question back.** Morpheus hands the plugin no
+  user, so two users of the same agent on the same integration share one scope, and a backend that
+  names its tool calls in a fixed pattern (`tool_0_list_servers`) gives two tool loops running at
+  the same time the same id. Up to 1.6.5 the question stored last on that id came back in both
+  conversations. The rule now:
+  - **A different question stored on a tool call id that was written less than 10 minutes before
+    is a clash and marks the id ambiguous.** The mark holds short hashes of the questions that
+    clashed and the time of the last clash, never a question text.
+  - **While an id is marked, a request that carries it gets no question back**, not even through
+    another tool call of the same loop. The same goes for a request whose tool calls hold
+    different questions. The log says *Not restoring a dropped question: its tool calls belong to
+    more than one question, so it could be another conversation's*, without any question text.
+  - **A mark ends 10 minutes after the last clash.** A question that is already part of the clash,
+    stored again by a loop that keeps running, does not renew it; only another different question
+    does. After the mark the id no longer stops a request, but it holds no question until nothing
+    has been stored on it for 10 minutes, since either loop may still be running; then the next
+    question stored on it takes it over.
+  - The same question stored again on an id that is not marked only refreshes its time; the id
+    keeps the cost key it was first stored with. An id not written for 10 minutes takes a new
+    question, as before.
+  - **A loop that has no question left and gets none back marks the tool calls it makes next**,
+    whether it was refused or nothing was known of its earlier tool calls (after a plugin reload,
+    say). Each id it marks stays marked for 10 minutes from that call, so the loop gets nothing
+    back for the rest of its run, and a question another loop stores on those ids later does not
+    come back into it.
+  - When it cannot tell which question a request's tool calls belong to, the plugin restores
+    nothing: the worst case there is the lost question of Morpheus 9.1, never another user's
+    question.
+
+  In this plugin the map is keyed by the tool call id alone and each question is stored with its
+  integration and system prompt, so the same question stored for an id from another integration or
+  system prompt counts as a different question and marks the id too, and a marked id stops a
+  request from any integration or system prompt. Anthropic's own `toolu_...` ids differ on every
+  call, so through `api.anthropic.com` this should not trigger; it guards gateways that reuse ids.
+
+  Two known limits: a backend that repeats its ids from one question to the next also marks a
+  user's own follow-up question asked within 10 minutes, which then gets no restore through those
+  ids; and since an id not written for 10 minutes takes the next question, a loop whose latest tool
+  call is more than 10 minutes old (one tool that runs that long), or whose earlier tool calls the
+  plugin no longer knows (after a plugin reload), can still get back the question of another loop
+  that stored on the same id in the meantime. One long tool loop on Morpheus 9.1 was measured at
+  137 s. The size and age limits of the map (10,000 entries, one hour) are unchanged.
+- **The thinking blocks of a tool loop follow the same rule.** Like the question, they were stored
+  with a plain overwrite, so with a backend that reuses tool call ids one loop could send the model
+  the thinking of another loop's turn. **Different thinking blocks (or the same ones from another
+  integration or system prompt) stored for a tool call id within 10 minutes now mark the id, and a
+  tool call id that is marked, for its thinking or for its question, gets no thinking blocks
+  back**; an id that was marked keeps no blocks. The request then goes out without extended
+  thinking, as when the blocks are unknown, and the log says *A tool loop has a tool call id that
+  another loop used at the same time; its thinking blocks are not put back*. The question mark
+  counts too because a turn without thinking stores no blocks: when it shares an id with another
+  loop's turn that thought, only the question map sees the clash. A loop that gets no question back
+  marks its next tool calls, so the rest of that tool loop runs without extended thinking; the next
+  question thinks again.
 - **Extended thinking with a forced tool choice.** The API accepts only `tool_choice` `auto` and
   `none` while thinking is on; `any` (Morpheus' `required`) and a named tool now go out as `auto`
   instead of failing with 400.
@@ -68,28 +124,56 @@ per integration and agent.** Built against plugin API 1.4.2. No new setting.
   disabled as before.
 - A chat request that got no HTTP answer, or a 529, is sent up to twice more.
 - A dropped question and a tool loop's thinking blocks only come back within the same integration
-  and system prompt.
+  and system prompt, and the per-question cost total only adds up requests of that scope.
+- A dropped question is not restored while a tool call of the request is marked (a different
+  question was stored on it less than 10 minutes after it was last written; the mark ends 10 minutes
+  after the last clash), or when its tool calls hold different questions; 1.6.5 restored the
+  question stored last. An id that was marked brings no question back until nothing has been stored
+  on it for 10 minutes, and a loop that gets no question back marks the tool calls it makes next.
+- A tool loop's thinking blocks follow the same rule: different blocks, or the same blocks from
+  another integration or system prompt, stored for one tool call id within 10 minutes mark it. A
+  tool loop that gets no question back runs without extended thinking until it ends.
 - With thinking on, a forced tool choice becomes `auto`.
 - A tool call cut off at `max_tokens` no longer reaches Morpheus.
 - A chat request without any API key is not sent.
 
 ### Verified
 
-- Unit tests (Spock), 30 more test cases than in 1.6.5: a connection failure and a 529 are
-  retried, an HTTP error, a read timeout and a fourth attempt are not; a request without a key is not sent, streaming
-  or not; the stored credential is loaded once and kept, a handed-over key needs no lookup, Local
-  Credentials and a failing lookup fall back to the local field, and saving finds the stored key; a
-  failed continuation sends the paused turn once; a cut-off tool call is dropped and the complete one
-  before it stays; a forced tool choice becomes `auto` with thinking on and stays without; nested
-  usage adds up without changing the first segment; a lost question comes back only in its own
-  integration and system prompt, thinking blocks only in their scope, and two integrations keep two
-  cost totals; eviction drops exactly the expired and the oldest entries; unlisted models are removed,
-  a model an agent uses is disabled, a catalog without a list or without a Claude model removes
-  nothing; the stream accumulator keeps a `server_tool_use` input and the citations of the answer;
-  `shutdown()` closes every pooled client; the model list request carries `limit=1000` as a query
-  string (a local HTTP server checks the request line instead of the former test that checked
+- Unit tests (Spock), 52 more test cases than in 1.6.5: a connection failure and a 529 are retried,
+  an HTTP error, a read timeout and a fourth attempt are not; a request without a key is not sent,
+  streaming or not; the stored credential is loaded once and kept, a handed-over key needs no
+  lookup, Local Credentials and a failing lookup fall back to the local field, and saving finds the
+  stored key; a failed continuation sends the paused turn once; a cut-off tool call is dropped and
+  the complete one before it stays; a forced tool choice becomes `auto` with thinking on and stays
+  without; nested usage adds up without changing the first segment; a lost question comes back only
+  in its own integration and system prompt, thinking blocks only in their scope, and two
+  integrations keep two cost totals; two tool loops that store different questions on one tool call
+  id at once restore neither, not even through an id only one of them used, and the id holds no
+  question text; both loops storing their own questions again refresh the id without renewing the
+  mark, while a third question renews it; 10 minutes after the last clash the loop gets its question
+  back through its own id, while the shared id, still stored on, gives no question back until
+  nothing has been stored on it for 10 minutes and then takes the next question; once the mark has
+  ended, a loop that stores its question on the shared id again hands the other loop nothing, and a
+  question that was not part of the clash marks the id again; the same question again on an id that
+  is not marked only refreshes it, keeps its cost key and is still restored; a different question on
+  an id not written for 10 minutes, whether it held an old question or an ended mark, replaces it
+  and is restored; a request whose tool calls hold different questions, or a marked one, restores
+  nothing, and a restored request counts on its tool calls' cost key only while they name one
+  question; a loop refused its question marks its next tool calls from the time of its own call, and
+  the other loop's question stored on them later neither lifts nor renews that mark; a loop that
+  lost its question while nothing was known of its tool calls marks them too, so another loop's
+  question stored on them does not come back into it; the same question stored for the id from
+  another integration or system prompt marks it too; thinking blocks stored twice under one id come
+  back only when both stores hold the same blocks in the same scope, and a loop whose id another
+  question claimed gets no thinking back; eviction drops exactly the expired and the oldest entries;
+  unlisted models are removed, a model an agent uses is disabled, a bulk removal that fails on one
+  model in use is retried model by model so the free model still goes, a catalog without a list or
+  without a Claude model removes nothing; the stream accumulator keeps a `server_tool_use` input and
+  the citations of the answer, and each streamed block carries exactly the fields of a non-streaming
+  one; `shutdown()` closes every pooled client; the model list request carries `limit=1000` as a
+  query string (a local HTTP server checks the request line instead of the former test that checked
   nothing).
-- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 162 tests,
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 184 tests,
   0 failures.
 
 ### Not yet verified
@@ -101,6 +185,15 @@ per integration and agent.** Built against plugin API 1.4.2. No new setting.
   and one an agent uses stays disabled; a retry after a real connection failure or 529; the streaming
   path, which Morpheus has not called in any test so far; the pool shutdown, which only matters when
   Morpheus passes a client scope key.
+- Two users chatting with the same agent at the same time, each with a tool loop: each gets only
+  their own question back, and with Anthropic's own tool call ids neither *Not restoring a dropped
+  question ...* nor *... another loop used at the same time ...* appears, with extended thinking on
+  as well.
+- The *Cost* footer through OpenRouter for a question with a tool loop: it still sums every request
+  of the question now that its total is kept per integration and system prompt.
+- The **Sources** list under answers is unchanged in this release. In a chat with web search and
+  three follow-up questions: whether the model starts writing its own **Sources** heading, and the
+  input tokens of each request (the replayed answers carry their source lists).
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.6.5...anthropic-v1.6.6
 

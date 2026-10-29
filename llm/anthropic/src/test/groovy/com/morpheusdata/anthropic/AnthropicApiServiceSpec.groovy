@@ -72,8 +72,9 @@ class AnthropicApiServiceSpec extends Specification {
 		accumulated.content[1].name == 'list_instances'
 		accumulated.content[1].input == [max: 10]
 
-		and: 'internal buffers are not leaked into the result'
-		accumulated.content.every { !it.containsKey('__jsonBuffer') }
+		and: 'each block carries exactly the fields of a non-streaming block, no accumulator state'
+		accumulated.content[0].keySet() == ['type', 'text'] as Set
+		accumulated.content[1].keySet() == ['type', 'id', 'name', 'input'] as Set
 	}
 
 	def "the sse accumulator keeps the signature of a thinking block"() {

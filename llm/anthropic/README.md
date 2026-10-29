@@ -230,8 +230,10 @@ Two further option interactions worth knowing:
 
 - **Extended thinking in tool loops.** The API wants the thinking blocks of the turn that called a
   tool back on the next round; Morpheus does not store them, so the plugin keeps them for an hour per
-  tool call id and puts them back. When they are lost (another appliance node, a plugin reload), that
-  one request runs without thinking instead of failing.
+  tool call id and puts them back. When they are lost (another appliance node, a plugin reload), or a
+  tool call id is marked because two loops stored different turns for it at the same time (a gateway
+  that reuses ids; the mark ends 10 minutes after the last clash), that one request runs without
+  thinking instead of failing.
 - **Extended thinking drops `temperature` and `top_p`.** The API rejects them alongside thinking, so
   the provider strips them and raises `max_tokens` above the thinking budget automatically. Thinking
   output lands in the response *metadata*, not the message body.
@@ -550,7 +552,8 @@ What has been checked against the live OpenRouter endpoint:
   `*Kosten: $0.0184 (2 Anfragen)*` under a German answer, and likewise in Polish — rather than the token line,
   summed over every request of the question, because an agent answer with tool rounds is many billed
   requests and the last one alone would understate it. Morpheus passes no conversation id, so the
-  requests of one question are recognised by the conversation up to the user's latest message.
+  requests of one question are recognised by the integration, the agent's system prompt and the
+  conversation up to the user's latest message.
 
 Two things to know:
 
@@ -587,7 +590,7 @@ Two things to know:
 | The chat's agent picker says **No agents found** for an agent you just created | The chat widget loads its agent list with the page. Reload the page. |
 | The agent still says it cannot reach the web | Re-save the integration after ticking **Enable Web Search and Fetch**, and start a *new* conversation — the tool catalog is fixed for the life of one. Also confirm the agent is on this integration and not a second one. |
 | The chat answers *This request did not fit into the model's context window* | Anthropic answered `400 prompt is too long`. With web search on this usually means fetched pages, added inside the one request, overflowed the context window. Lower **Web Fetch Max Content Tokens** or the search and fetch caps, or ask a narrower question. The log has a `WARN Anthropic API error: HTTP 400 ...` line with the `request_id` Anthropic support asks for. Before 1.6.0 this showed as *An error occurred while processing your request* and the question was dropped. |
-| After a long tool loop the answer reads *It looks like your message came through empty* | Morpheus 9.1 keeps the chat memory in a token window (32,000 tokens unless `morpheus.ai.chat.maxMemoryTokens` is set on the appliance) and evicts the oldest message first; an agent paging through truncated MCP results with `get_result_excerpt` pushes the question out within one question. Since 1.6.4 the plugin puts the question back (log: *Restored the user's question ...*). Narrow questions that need few tool calls avoid the loop altogether. |
+| After a long tool loop the answer reads *It looks like your message came through empty* | Morpheus 9.1 keeps the chat memory in a token window (32,000 tokens unless `morpheus.ai.chat.maxMemoryTokens` is set on the appliance) and evicts the oldest message first; an agent paging through truncated MCP results with `get_result_excerpt` pushes the question out within one question. Since 1.6.4 the plugin puts the question back (log: *Restored the user's question ...*), since 1.6.6 only within the same integration and agent, and not while a tool call id of the loop is marked because another question was stored for it at the same time (a gateway that reuses ids), nor when the loop's tool calls hold different questions; a mark ends 10 minutes after the last clash (log: *Not restoring a dropped question: its tool calls belong to more than one question ...*). Narrow questions that need few tool calls avoid the loop altogether. |
 | An answer reads *The model ended its turn without writing an answer* | The model stopped without text twice, the second time when asked explicitly. The `Anthropic turn finished:` line in the log shows the stop reason, which server tools ran and the `max_tokens` sent. Morpheus asks for 1000 output tokens on some requests; a search-heavy turn can use them up. |
 | `400 invalid_request_error` mentioning web search | Web search is disabled for the organization in the Anthropic Console under *Privacy*, or the **Restrict to Domains** list has a scheme or a trailing slash the API rejects. |
 | The agent answers about a URL without reading it | `web_fetch` only reads URLs already in the conversation. Paste the link in the chat; a link that exists only in the agent's system prompt does not count. |

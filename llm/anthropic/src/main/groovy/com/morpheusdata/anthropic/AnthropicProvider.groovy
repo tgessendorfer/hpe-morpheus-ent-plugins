@@ -117,6 +117,15 @@ class AnthropicProvider implements LlmProvider {
 	protected static final ConcurrentHashMap<String, Map> QUESTION_BY_TOOL_CALL = new ConcurrentHashMap<>()
 	static final long QUESTION_BY_TOOL_CALL_TTL_MS = 60L * 60L * 1000L
 	static final int QUESTION_BY_TOOL_CALL_MAX = 10000
+	// Morpheus hands the plugin no user, so two users of one agent share a scope, and a backend
+	// that reuses tool call ids gives two tool loops running at the same time the same id. A
+	// different question stored on an id written less than this long ago is a clash: the id is
+	// marked ambiguous and restores nothing until this long after the last clash (see
+	// clashChecked). The thinking blocks below follow the same rule. One long tool loop
+	// measured 137 s.
+	static final long QUESTION_CLASH_WINDOW_MS = 10L * 60L * 1000L
+	// A marked id keeps short hashes of the questions that clashed on it, never their text.
+	static final int QUESTION_CLASH_HASHES_MAX = 8
 	// With extended thinking on, the assistant turn that issued the tool calls of a running
 	// loop has to come back starting with its thinking blocks, signature included, or the
 	// API answers 400. Morpheus rebuilds that turn from its own stored tool_calls only, so
@@ -964,8 +973,9 @@ class AnthropicProvider implements LlmProvider {
 		boolean cachingEnabled = isPromptCachingEnabled(accountIntegration)
 		if (thinkingEnabled && !lastToolTurnStartsWithThinking(messages)) {
 			// The thinking blocks that opened the running tool loop are unknown (another
-			// appliance node, a plugin reload, or a turn older than an hour): this request goes
-			// out without thinking rather than failing with 400. The next question thinks again.
+			// appliance node, a plugin reload, a turn older than an hour, or a tool call id
+			// another loop used at the same time): this request goes out without thinking
+			// rather than failing with 400. The next question thinks again.
 			log.info('Anthropic: thinking blocks of the running tool loop not known, sending this request without extended thinking')
 			thinkingEnabled = false
 			stripThinkingBlocks(messages)
@@ -1833,8 +1843,10 @@ class AnthropicProvider implements LlmProvider {
 		}
 		if (restored) {
 			// The question was put back after the chat memory dropped it: keep counting on
-			// the key its first requests used, so the footer covers the whole question.
-			String original = knownQuestionEntry(messages, scope)?.costKey as String
+			// the key its first requests used, so the footer covers the whole question. An
+			// ambiguous entry may hold another conversation's key, so it is not used.
+			List<Map> entries = knownQuestionEntries(messages, scope)
+			String original = unsureQuestions(entries) == null ? entries.find { Map entry -> entry.question }?.costKey as String : null
 			if (original) {
 				return original
 			}
@@ -1901,20 +1913,133 @@ class AnthropicProvider implements LlmProvider {
 
 	/**
 	 * Maps every tool call the model issued in this turn to the question of the request,
-	 * so the question can be put back once the chat memory has dropped it.
+	 * so the question can be put back once the chat memory has dropped it. A request that
+	 * has no question left and got none back marks the tool calls of this turn instead (see
+	 * markedEntry).
 	 */
 	protected static void rememberQuestion(Map requestBody, Map data, String scope = null) {
-		String question = latestQuestion(requestBody?.messages as List)
-		List<String> ids = toolCallIds([content: data?.content])
-		if (!question || !ids) {
+		List messages = requestBody?.messages as List
+		String question = latestQuestion(messages)
+		List<String> ids = toolCallIds([content: data?.content]).findAll { String id -> isDistinctToolCallId(id) }
+		if (!ids) {
 			return
 		}
 		long now = System.currentTimeMillis()
-		String costKey = questionKey(requestBody, scope)
-		ids.findAll { String id -> isDistinctToolCallId(id) }.each { String id ->
-			QUESTION_BY_TOOL_CALL.put(id, [question: question, costKey: costKey, scope: scope, updated: now])
+		if (question) {
+			String costKey = questionKey(requestBody, scope)
+			ids.each { String id ->
+				QUESTION_BY_TOOL_CALL.compute(id) { String ignored, Map existing ->
+					clashChecked(existing, [question: question, costKey: costKey, scope: scope, updated: now], now)
+				}
+			}
+		} else {
+			// Also when nothing was known of the loop's tool calls (a plugin reload, or only
+			// ended marks left): left unmarked, these ids would take the next question another
+			// loop stores for them, and this loop would get that question back.
+			Set<String> unsure = unsureQuestions(knownQuestionEntries(messages, scope), now) ?: ([] as Set<String>)
+			ids.each { String id ->
+				QUESTION_BY_TOOL_CALL.compute(id) { String ignored, Map existing ->
+					markedEntry(existing, unsure, now)
+				}
+			}
 		}
 		evictEntries(QUESTION_BY_TOOL_CALL, QUESTION_BY_TOOL_CALL_TTL_MS, QUESTION_BY_TOOL_CALL_MAX)
+	}
+
+	/**
+	 * What a tool call id holds once a question (or, in the thinking map, thinking blocks) is
+	 * stored for it. The rule is the same in the Anthropic, OpenRouter and OpenAI-compatible
+	 * plugins:
+	 * - an id nothing was stored for within QUESTION_CLASH_WINDOW_MS takes the new entry, a
+	 *   marker included;
+	 * - the same question again only refreshes the id's time; it keeps its cost key;
+	 * - a different question for an id stored on less than the window ago is a clash: the id
+	 *   becomes a marker that holds no question, only short hashes of the questions that
+	 *   clashed and the time of the last clash;
+	 * - a marker stored on less than the window ago stays one, whether its mark still runs or
+	 *   has ended: a question among its hashes only refreshes the id's time, and any other
+	 *   question is a new clash. So the mark ends one window after the last clash, however
+	 *   often the loops that clashed store their own questions again, and the id gives no
+	 *   question back until nothing was stored for it for a whole window: either loop may
+	 *   still be running.
+	 * The id alone is the key here and the scope sits in the entry, so the same question
+	 * stored from another integration or system prompt counts as a different one.
+	 */
+	protected static Map clashChecked(Map existing, Map entry, long now) {
+		if (existing == null || now - (existing.updated as long) >= QUESTION_CLASH_WINDOW_MS) {
+			return entry
+		}
+		String hash = entryHash(entry)
+		if (existing.ambiguous != null) {
+			Set<String> clashed = (existing.clashed ?: []) as Set<String>
+			return hash in clashed ? [ambiguous: existing.ambiguous, clashed: clashed, updated: now] :
+				[ambiguous: now, clashed: withHashes(clashed, [hash]), updated: now]
+		}
+		String held = entryHash(existing)
+		if (held == hash) {
+			return existing + [updated: now]
+		}
+		return [ambiguous: now, clashed: withHashes(held ? [held] : [], [hash]), updated: now]
+	}
+
+	/**
+	 * What an id holds once a loop whose request has no question left, and got none back,
+	 * makes a tool call on it: a marker with the hashes of the questions the loop could not
+	 * choose between, if there were any. Without it, a question another loop stores for this
+	 * id later would come back into this loop. A marker stored on less than the window ago
+	 * that already holds all of these hashes keeps the time of its last clash; every other id
+	 * is marked from now, so the loop gets nothing back for the rest of its run.
+	 */
+	protected static Map markedEntry(Map existing, Set<String> hashes, long now) {
+		boolean recent = existing != null && now - (existing.updated as long) < QUESTION_CLASH_WINDOW_MS
+		if (recent && existing.ambiguous != null) {
+			Set<String> clashed = (existing.clashed ?: []) as Set<String>
+			return clashed.containsAll(hashes) ? [ambiguous: existing.ambiguous, clashed: clashed, updated: now] :
+				[ambiguous: now, clashed: withHashes(clashed, hashes), updated: now]
+		}
+		String held = recent ? entryHash(existing) : null
+		return [ambiguous: now, clashed: withHashes(held ? [held] : [], hashes), updated: now]
+	}
+
+	/**
+	 * A short hash of what an entry holds (its question or its thinking blocks) and its scope,
+	 * or null for a marker, which holds neither.
+	 */
+	protected static String entryHash(Map entry) {
+		def held = entry?.question != null ? entry.question : entry?.blocks
+		return held != null ? sha256(JsonOutput.toJson([scope: entry.scope, held: held])).substring(0, 16) : null
+	}
+
+	/** These hashes and more, the latest QUESTION_CLASH_HASHES_MAX of them. */
+	protected static Set<String> withHashes(Collection<String> hashes, Collection<String> more) {
+		List<String> all = ((hashes as List<String>) + (more as List<String>)).unique()
+		return new LinkedHashSet<String>(all.drop(Math.max(0, all.size() - QUESTION_CLASH_HASHES_MAX)))
+	}
+
+	/** True while the last clash on this id is younger than the clash window. */
+	protected static boolean isAmbiguous(Map entry, long now = System.currentTimeMillis()) {
+		return entry?.ambiguous != null && now - (entry.ambiguous as long) < QUESTION_CLASH_WINDOW_MS
+	}
+
+	/**
+	 * The hashes of the questions a request's known tool calls belong to, when they do not name
+	 * exactly one: one of them is marked, or they hold different questions. Null when they
+	 * name one question or none. The tool calls left in a request whose question the chat
+	 * memory dropped all belong to one tool loop, so a second question among them was stored
+	 * by another loop.
+	 */
+	protected static Set<String> unsureQuestions(List<Map> entries, long now = System.currentTimeMillis()) {
+		boolean marked = false
+		Set<String> hashes = new LinkedHashSet<>()
+		(entries ?: []).each { Map entry ->
+			if (isAmbiguous(entry, now)) {
+				marked = true
+				hashes.addAll((entry.clashed ?: []) as Set<String>)
+			} else if (entryHash(entry)) {
+				hashes << entryHash(entry)
+			}
+		}
+		return marked || hashes.size() > 1 ? hashes : null
 	}
 
 	/**
@@ -1952,17 +2077,32 @@ class AnthropicProvider implements LlmProvider {
 			block.type == 'redacted_thinking' ? [type: 'redacted_thinking', data: block.data] :
 				[type: 'thinking', thinking: block.thinking, signature: block.signature]
 		}
-		ids.each { String id -> THINKING_BY_TOOL_CALL.put(id, [blocks: kept, scope: scope, updated: now]) }
+		ids.each { String id ->
+			THINKING_BY_TOOL_CALL.compute(id) { String ignored, Map existing ->
+				clashChecked(existing, [blocks: kept, scope: scope, updated: now], now)
+			}
+		}
 		evictEntries(THINKING_BY_TOOL_CALL, THINKING_BY_TOOL_CALL_TTL_MS, THINKING_BY_TOOL_CALL_MAX)
 	}
 
-	/** The thinking blocks remembered in this scope for the first known of these OpenAI-shaped tool calls, or none. */
+	/**
+	 * The thinking blocks remembered in this scope for the first known of these OpenAI-shaped
+	 * tool calls, or none. None as well while one of the ids is marked ambiguous, for its
+	 * thinking or for its question: another loop used the id at the same time, and a turn of
+	 * that loop without thinking leaves no mark in the thinking map.
+	 */
 	protected static List<Map> rememberedThinking(List toolCalls, String scope = null) {
 		long now = System.currentTimeMillis()
-		for (def call : (toolCalls ?: [])) {
-			String id = call instanceof Map ? (call as Map).id?.toString() : null
-			Map entry = isDistinctToolCallId(id) ? THINKING_BY_TOOL_CALL.get(id) : null
-			if (entry && entry.scope == scope && now - (entry.updated as long) <= THINKING_BY_TOOL_CALL_TTL_MS) {
+		List<String> ids = (toolCalls ?: []).collect { def call ->
+			call instanceof Map ? (call as Map).id?.toString() : null
+		}.findAll { String id -> isDistinctToolCallId(id) }
+		if (ids.any { String id -> isAmbiguous(THINKING_BY_TOOL_CALL.get(id), now) || isAmbiguous(QUESTION_BY_TOOL_CALL.get(id), now) }) {
+			log.info('A tool loop has a tool call id that another loop used at the same time; its thinking blocks are not put back')
+			return []
+		}
+		for (String id : ids) {
+			Map entry = THINKING_BY_TOOL_CALL.get(id)
+			if (entry?.blocks != null && entry.scope == scope && now - (entry.updated as long) <= THINKING_BY_TOOL_CALL_TTL_MS) {
 				return (entry.blocks as List<Map>).collect { new LinkedHashMap(it) }
 			}
 		}
@@ -2019,38 +2159,48 @@ class AnthropicProvider implements LlmProvider {
 	}
 
 	/**
-	 * The remembered entry of the first known tool call in these messages, or null. With
-	 * anyScope false only an entry of this scope counts.
+	 * The remembered entries of every known tool call in these messages, in order, each once:
+	 * markers whatever scope stored them, and questions of this scope only (of any scope with
+	 * anyScope true).
 	 */
-	protected static Map knownQuestionEntry(List messages, String scope = null, boolean anyScope = false) {
+	protected static List<Map> knownQuestionEntries(List messages, String scope = null, boolean anyScope = false) {
 		long now = System.currentTimeMillis()
+		Map<String, Map> entries = [:]
 		for (def message : (messages ?: [])) {
 			if (!(message instanceof Map)) {
 				continue
 			}
 			for (String id : toolCallIds(message as Map)) {
 				Map entry = isDistinctToolCallId(id) ? QUESTION_BY_TOOL_CALL.get(id) : null
-				if (entry && (anyScope || entry.scope == scope) && now - (entry.updated as long) <= QUESTION_BY_TOOL_CALL_TTL_MS) {
-					return entry
+				if (entry && (entry.question == null || anyScope || entry.scope == scope) &&
+					now - (entry.updated as long) <= QUESTION_BY_TOOL_CALL_TTL_MS) {
+					entries.put(id, entry)
 				}
 			}
 		}
-		return null
+		return entries.values() as List<Map>
 	}
 
 	/**
 	 * Puts the question back at the start of a request that has none left: Morpheus
 	 * evicted it from its chat memory, but the tool calls that worked on it are still
-	 * there. Only a question asked in the same scope comes back. Returns true when a
-	 * question was restored.
+	 * there. Only a question asked in the same scope comes back, and none while one of the
+	 * tool call ids is marked or when they hold different questions: the question could be
+	 * another conversation's. Returns true when a question was restored.
 	 */
 	protected static boolean restoreLostQuestion(List<Map> messages, String scope = null) {
 		if (!messages || latestQuestion(messages)) {
 			return false
 		}
-		String question = knownQuestionEntry(messages, scope)?.question as String
+		List<Map> entries = knownQuestionEntries(messages, scope)
+		if (unsureQuestions(entries) != null) {
+			// The questions stay out of the log.
+			log.info("Not restoring a dropped question: its tool calls belong to more than one question, so it could be another conversation's")
+			return false
+		}
+		String question = entries.find { Map entry -> entry.question }?.question as String
 		if (!question) {
-			if (knownQuestionEntry(messages, scope, true)) {
+			if (knownQuestionEntries(messages, scope, true).any { Map entry -> entry.question }) {
 				log.info('A request without its question has tool calls known from another integration or system prompt; the question is not restored')
 			}
 			return false
