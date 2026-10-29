@@ -103,14 +103,25 @@ plugin API 1.4.2 and minimum appliance 9.0.2 are unchanged; no new options.
   now expect the rejection and the new warning text.
 - Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 168 tests
   (132 in 1.2.3), 0 failures.
+- **On Morpheus 9.1.0 (build 9.1.0-1)** with a release candidate built from this source
+  (`1.2.4-rc.1`), uploaded in place of 1.2.3 (same plugin id, status `loaded`): a provisioning
+  approval policy with the threshold `abc` and an order priced at 12.50 EUR per month. **The
+  request was rejected as threshold misconfigured**, the instance was denied and no VM was built.
+  The log showed *Cost threshold approval: policy threshold 'abc' is not a non-negative amount of
+  at most 12 integer digits, request rejected (threshold misconfigured)* and the info line
+  *... 12.50 EUR per month, policy threshold cannot be read -> THRESHOLD_MISCONFIGURED
+  (rejected)*. The integration's own threshold (10 EUR) would have rejected the order too, so
+  this run shows the new outcome and log lines, not a looser level being passed over.
 
 ### Not yet verified
 
-- On an appliance: one approval run with an unreadable threshold, for example a policy with the
-  threshold `abc` or `1e999999999` (set through the API): the request is rejected with *Cost
-  threshold misconfigured*, the warning is in the log and the monitor run reports the rejection.
+- On an appliance: the release jar loads in place of 1.2.3 (the release candidate above was a
+  separate build).
+- On an appliance: an unreadable policy threshold above a looser level that would approve the
+  request, an extreme threshold such as `1e999999999`, and an unreadable *Threshold Currency*
+  (for example `euro`), each with its rejection and its log line.
 - On an appliance: an empty threshold field saved through the policy and integration forms counts
-  as not set (no false *threshold misconfigured*); the jar replaces 1.2.3 in place. In particular,
+  as not set (no false *threshold misconfigured*). In particular,
   whether Morpheus stores an emptied *Monthly Cost Threshold*, a number field, as empty and not as
   the text `null`: the plugin would read `null` as an unreadable value and reject every
   cost-checked request of that policy or integration.
