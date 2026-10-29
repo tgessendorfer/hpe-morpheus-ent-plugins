@@ -8,9 +8,11 @@ One section per version, newest first. The same text is the body of the matching
 
 ## 1.2.3
 
-**The FinOps widgets are never shown without their permission, and a failed connection release no
-longer breaks a widget.** Built against plugin API 1.4.2, minimum appliance 9.0.2. Fix release from a
-code review; nothing changes on an appliance where the permissions load and the database answers.
+**The FinOps widgets are never shown without their permission, a failed connection release no
+longer breaks a widget, and the KPI strip names the deactivated sub-tenants its figures leave
+out.** Built against plugin API 1.4.2, minimum appliance 9.0.2. Fix release from a code review;
+apart from the new line about deactivated sub-tenants, nothing changes on an appliance where the
+permissions load and the database answers.
 
 ### What changes
 
@@ -35,16 +37,53 @@ code review; nothing changes on an appliance where the permissions load and the 
   the widget's template and CSS, not seen in a browser); the width is now clamped to 0-100 % by the
   same rule. The amount and the share still show the real figures: the share of such a row is a
   negative percentage, as in 1.2.2.
-- **Behaviour change from 1.2.2:** only when the Budgets permission cannot be loaded at plugin start:
-  the three FinOps widgets are missing from the dashboard instead of being shown to everyone.
+- **One line about deactivated sub-tenants under the KPI cards (provider view).** The master view
+  counts active sub-tenants only and keeps doing so; **the cards, the trend and the split are
+  unchanged**. Up to 1.2.2 nothing showed that deactivated sub-tenants (`account.active = 0`) with
+  invoices were left out. When there are such tenants with an amount in the current month, one
+  line under the cards now says how many and gives their revenue and cost per currency, the
+  widgets' main currency first: *Not shown: 2 deactivated tenants with invoices in 2026-10:
+  revenue 123.45 EUR, cost 100.00 EUR* (German *Nicht gezeigt: 2 deaktivierte Tenants mit
+  Rechnungen in 2026-10: Umsatz 123,45 EUR, Kosten 100,00 EUR*). It uses the cards' invoice filter
+  and currency rule. A tenant counts when its own revenue or cost in a currency, rounded to cents,
+  is not zero (the rule of MSP Tenant Overview, so both pages count the same tenants); the amounts
+  of the tenants that count are summed per currency and rounded once, as the cards are; a currency
+  without an amount is left out, and without such tenants there is no line. Only when the KPI
+  strip renders in the provider view, the widget first asks whether a deactivated sub-tenant exists
+  at all (`SELECT 1 ... FROM account a WHERE a.master_account = 0 AND a.active = 0 LIMIT 1`); only
+  when one does are their invoices read, in one grouped query (`... i.account_id IN (SELECT a.id
+  FROM account a WHERE a.master_account = 0 AND a.active = 0) GROUP BY i.account_id,
+  i.currency`). If either query fails, the appliance log gets one warning and the strip shows its
+  figures without the line. Sub-tenant users see no change.
+- **README: Docker hosts and Kubernetes nodes.** A new section *Known limits* says what the
+  invoice filter does with container hosts: a server invoice is not counted when a `container` row
+  links the server to an instance, so the own server invoice of a Docker host or Kubernetes node
+  that runs Morpheus-managed container instances is not counted either; only the instance
+  invoices of its containers are. The widgets do not check whether those carry the host's cost,
+  and they read the `container` table as it is when the dashboard is loaded. Documentation only.
+- **Behaviour changes from 1.2.2:** only when the Budgets permission cannot be loaded at plugin
+  start: the three FinOps widgets are missing from the dashboard instead of being shown to
+  everyone. In the provider view, when deactivated sub-tenants have invoices with an amount this
+  month, the KPI strip shows one more line. Every render of the strip in the provider view runs
+  one more small query (whether a deactivated sub-tenant exists), and a second one for their
+  invoices only when one does.
 
 ### Verified
 
-- 141 unit tests and 36 browser script tests (JDK 17, Gradle 9.8.0). New tests: the layout without
+- 156 unit tests and 36 browser script tests (JDK 17, Gradle 9.8.0). New tests: the layout without
   the Budgets permission (no FinOps widget, no row gap, the log row unchanged), a failing connection
   release after a successful load, an unknown user and a failed query (the result stays), no release
   for a connection that was never opened, the chart with a negative month and the split with a
   negative cloud.
+- Unit tests for the line about deactivated sub-tenants: the queries (the widgets' invoice filter,
+  one month, deactivated sub-tenants only); the summary (summed per currency and rounded once, main
+  currency first, a tenant below one cent not counted, also next to a priced one); the load as the
+  KPI strip asks for it (figures and tenant count unchanged, the deactivated tenants apart), a
+  failing invoice query (figures kept, no line), no invoice query when the check finds no
+  deactivated sub-tenant or fails, a sub-tenant viewer (no query); only the KPI strip asks for it
+  (the trend loads as before); the
+  line in English and German and in the singular, none without deactivated tenants or for a
+  sub-tenant viewer; the cards unchanged; the rendered strip with the line under the cards.
 
 ### Not yet verified
 
@@ -52,6 +91,13 @@ code review; nothing changes on an appliance where the permissions load and the 
   or full, and the widgets missing for a role without it.
 - The layout without the Budgets permission was only built in a unit test; the appliance was not
   made to fail that lookup.
+- The line about deactivated sub-tenants was not seen on an appliance: it needs a deactivated
+  sub-tenant with invoices. Open checks: both queries on 9.0.2 and 9.1.0, the amounts against
+  that tenant's invoices, and that the line is visible in the short KPI strip (one line under the
+  cards, cut with an ellipsis when it is too long; the full text is the tooltip) at common
+  dashboard widths, also when the cards wrap to two rows, in light and dark mode.
+- The *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an
+  appliance with container hosts.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/finops-insights-v1.2.2...finops-insights-v1.2.3
 

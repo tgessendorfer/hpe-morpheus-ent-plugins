@@ -203,9 +203,14 @@ abstract class AbstractFinopsItemProvider extends AbstractDashboardItemTypeProvi
 		return renderContent(opts, locale)
 	}
 
+	/** The invoice figures this widget shows; the KPI strip also asks for the deactivated sub-tenants. */
+	protected Map loadFigures(Map<String, Object> opts, Locale locale) {
+		data.load(opts, locale)
+	}
+
 	/** The visible widget: loads the invoice figures, fills the template model, renders the template. */
 	HTMLResponse renderContent(Map<String, Object> opts, Locale locale) {
-		Map loaded = data.load(opts, locale)
+		Map loaded = loadFigures(opts, locale)
 		Locale shown = (loaded.locale as Locale) ?: locale
 		Map m = [ok: loaded.ok, reason: loaded.reason, t: labels(shown), isMaster: loaded.isMaster, title: message(getTitleKey(), shown)]
 		if(loaded.ok) {

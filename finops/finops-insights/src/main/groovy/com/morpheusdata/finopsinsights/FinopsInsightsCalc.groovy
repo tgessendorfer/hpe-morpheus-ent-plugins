@@ -88,6 +88,44 @@ class FinopsInsightsCalc {
 		rows.findAll { Map r -> currency(r.cur, fallback) == ccy }
 	}
 
+	/**
+	 * The deactivated sub-tenants the master view leaves out, from their invoice rows for one month
+	 * (keys account, cur, rev, cost), with the widgets' currency rule (currency of the row, else the
+	 * fallback, else USD). A tenant's amounts in a currency count when its own revenue or cost there,
+	 * rounded to cents, is not zero (the rule MSP Tenant Overview uses, so a tenant below one cent
+	 * counts on neither page). The counted amounts are summed per currency and rounded to cents once,
+	 * as the cards are; a currency whose rounded revenue and cost are both zero is left out, and a
+	 * tenant counts when it has counted amounts in a currency that is left. The main currency comes
+	 * first, the others follow by code.
+	 *
+	 * @return [count: tenants, amounts: [[currency, rev, cost]]], or null when no tenant counts
+	 */
+	static Map deactivated(List<Map> rows, String mainCurrency, def fallback) {
+		// currency -> tenant -> raw sums
+		Map<String, Map<Object, Map>> perTenant = new TreeMap<String, Map<Object, Map>>()
+		(rows ?: []).each { Map r ->
+			Map t = perTenant.computeIfAbsent(currency(r.cur, fallback)) { [:] }
+				.computeIfAbsent(r.account) { [rev: BigDecimal.ZERO, cost: BigDecimal.ZERO] }
+			t.rev += num(r.rev); t.cost += num(r.cost)
+		}
+		Set<Object> counted = [] as Set
+		List<Map> amounts = []
+		perTenant.each { String c, Map<Object, Map> tenants ->
+			Map<Object, Map> priced = tenants.findAll { Object id, Map t -> centsNonZero(t) }
+			Map sum = [rev: (priced.values()*.rev).sum(BigDecimal.ZERO), cost: (priced.values()*.cost).sum(BigDecimal.ZERO)]
+			if(centsNonZero(sum)) {
+				amounts << [currency: c, rev: r2(sum.rev), cost: r2(sum.cost)]
+				counted.addAll(priced.keySet())
+			}
+		}
+		if(counted.isEmpty()) return null
+		[count: counted.size(), amounts: amounts.sort { Map a -> a.currency == mainCurrency ? 0 : 1 }]
+	}
+
+	private static boolean centsNonZero(Map x) {
+		r2(x.rev).signum() != 0 || r2(x.cost).signum() != 0
+	}
+
 	/** Revenue and cost per period for the given periods, zero-filled, in period order. */
 	static List<Map> perPeriod(List<Map> rows, List<String> periods) {
 		Map<String, Map> acc = [:]

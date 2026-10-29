@@ -16,6 +16,7 @@
     .finops-insights .fi-value small { font-size: 12px; font-weight: 400; opacity: .7; margin-left: 3px; }
     .finops-insights .fi-label { display: block; margin-top: 3px; font-size: 11px; line-height: 1.3; opacity: .75; }
     .finops-insights .fi-sub { display: block; font-size: 11px; line-height: 1.3; opacity: .55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .finops-insights .fi-deactivated { margin-top: 6px; font-size: 11px; line-height: 1.3; opacity: .65; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   </style>
   <div class="dashboard-widget-header"><span class="fi-title">{{title}}</span>{{#if otherCurrencies}}<span class="fi-note">{{t.note_otherCurrencies}} {{otherCurrencies}}</span>{{/if}}</div>
   <div class="dashboard-widget-body">
@@ -30,6 +31,7 @@
         </div>
         {{/each}}
       </div>
+      {{#if deactivatedLine}}<div class="fi-deactivated" title="{{deactivatedLine}}">{{deactivatedLine}}</div>{{/if}}
       {{else}}
       <div class="fi-hint">{{hint}}</div>
       {{/if}}

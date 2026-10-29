@@ -25,6 +25,19 @@ entries of the tenant's servers with a log history page.
   sub-tenants (`account.master_account = 0`, `active = 1`): the provider view with revenue, cost
   and margin. A user of a sub-tenant sees only that tenant's spend: no cost, no margin, no tenant
   split.
+- **Deactivated sub-tenants (since 1.2.3)** (`active = 0`) are left out of every figure, as
+  before. In the provider view, when they have invoices with an amount in the current month, one
+  line under the KPI cards says how many there are and gives their revenue and cost per currency,
+  the widgets' main currency first: *Not shown: 2 deactivated tenants with invoices in 2026-10:
+  revenue 123.45 EUR, cost 100.00 EUR*. It uses the same invoices and currency rule as the cards.
+  A tenant counts when its own revenue or cost in a currency, rounded to cents, is not zero (as on
+  MSP Tenant Overview, so a tenant below one cent counts on neither page); the amounts of the
+  tenants that count are summed per currency and rounded once, as the cards are, and a currency
+  without an amount is left out. The trend and the split leave deactivated tenants out without a
+  note. When the KPI strip renders, the widget first asks whether a deactivated sub-tenant exists
+  at all (one small query on `account`); only then are their invoices read, in one grouped query.
+  If either query fails, the widget shows its figures without the line and the appliance log gets
+  one warning.
 - **Invoices counted:** monthly invoices (`period_interval = 'month'`) of instances, plus those of
   servers that belong to no instance (no `container` row links them to one), so a VM is never
   counted twice. Same rule as the MSP Tenant Overview plugin.
@@ -150,11 +163,26 @@ node src/test/js/finops-insights-logs.test.js    # the browser script alone (als
 ```
 
 Plugin API 1.4.2, Gradle 9.8 wrapper, Groovy 3, JDK 17. The unit tests cover the calculations,
-the chart geometry, the message bundles, the plugin identity, the widget settings, the log sources
+the chart geometry, the message bundles, the plugin identity, the widget settings, the line about
+deactivated sub-tenants, the log sources
 (SQL and parameters for the master tenant and for a sub-tenant) and the history page. The browser
 script is tested with plain node (no packages) against a small DOM stub: hostile messages, folding,
 time parsing, filters and paging, running the script twice. The Gradle task `jsTest` runs it and is
 skipped where node is not installed.
+
+## Known limits
+
+- **Docker hosts and Kubernetes nodes.** A server invoice is not counted when a `container` row
+  links that server to an instance (`container.server_id` = the invoice's `ref_id`,
+  `container.instance_id` set); that keeps an instance's own VM from being counted twice. A Docker
+  host or Kubernetes node on which Morpheus-managed container instances run has such rows as well,
+  so its own server invoice is not counted either; the instance invoices of its container
+  instances are. The rule assumes that those instance invoices carry the host's cost. The widgets
+  do not check this: a host cost that is not priced into its container instances is missing from
+  the figures. The `container` table is read as it is when the dashboard is loaded, not as it was
+  in the invoiced month.
+- **The line about deactivated sub-tenants covers the current month only**, the month of the KPI
+  cards; the earlier months of the trend have no such note.
 
 ## Version compatibility
 

@@ -26,7 +26,8 @@ import java.time.YearMonth
  * Loads the invoice figures the three widgets share and resolves the viewer.
  *
  * Scope: a user of the master tenant sees the invoices of all active sub-tenants (the provider
- * view: revenue = tenant price, cost = purchase cost, margin). A user of a sub-tenant sees only
+ * view: revenue = tenant price, cost = purchase cost, margin); the deactivated sub-tenants with
+ * invoices this month are counted separately for one line under the KPI cards. A user of a sub-tenant sees only
  * the invoices of that tenant (spend view: price only). When the viewer cannot be resolved from
  * the request options, nothing is loaded and the widgets show a hint instead of data.
  *
@@ -40,6 +41,18 @@ class FinopsInsightsData {
 	// (same rule as the MSP Tenant Overview plugin).
 	static final String INVOICE_FILTER = "i.period_interval = 'month' AND (i.ref_type = 'Instance' OR (i.ref_type = 'ComputeServer' AND i.instance_id IS NULL" +
 		" AND NOT EXISTS (SELECT 1 FROM container ct WHERE ct.server_id = i.ref_id AND ct.instance_id IS NOT NULL)))"
+
+	// Invoices of the deactivated sub-tenants (active = 0), which the master view leaves out, for one
+	// month: one row per tenant and raw currency. Same filter as the widgets' own invoice query; the
+	// account table is only read in the subquery.
+	static final String DEACTIVATED_SQL = ("SELECT i.account_id AS account, i.currency AS cur," +
+		" SUM(COALESCE(i.total_price, 0)) AS rev, SUM(COALESCE(i.total_cost, 0)) AS cost" +
+		" FROM account_invoice i WHERE ${INVOICE_FILTER} AND i.period = ?" +
+		" AND i.account_id IN (SELECT a.id FROM account a WHERE a.master_account = 0 AND a.active = 0)" +
+		" GROUP BY i.account_id, i.currency").toString()
+
+	// Asked first: without any deactivated sub-tenant the invoice query above is not run at all.
+	static final String DEACTIVATED_EXISTS_SQL = 'SELECT 1 AS found FROM account a WHERE a.master_account = 0 AND a.active = 0 LIMIT 1'
 
 	static final String VIEWER_SQL = '''SELECT u.id AS user_id, u.locale, a.id AS account_id, a.name AS account_name, a.currency,
 		CAST(a.master_account AS UNSIGNED) AS is_master FROM user u JOIN account a ON a.id = u.account_id WHERE u.id = ?'''
@@ -136,9 +149,12 @@ class FinopsInsightsData {
 	 * Everything the widgets need, computed once per render:
 	 *  ok, viewer (isMaster, accountName), currency, otherCurrencies, locale,
 	 *  months (YearMonth list), periods, trend (per period rev/cost/margin), current, previous,
-	 *  byCloud, byTenant (master only), tenants, instances.
+	 *  byCloud, byTenant (master only), tenants, instances,
+	 *  deactivated (master only and only with {@code withDeactivated}, which the KPI strip alone
+	 *  asks for: the deactivated sub-tenants the figures leave out, see FinopsInsightsCalc.deactivated;
+	 *  null when there are none or they could not be read).
 	 */
-	Map load(Map<String, Object> opts, Locale locale) {
+	Map load(Map<String, Object> opts, Locale locale, boolean withDeactivated = false) {
 		Map out = [ok: false, locale: locale]
 		Long userId = viewerId(opts)
 		if(userId == null) {
@@ -189,6 +205,7 @@ class FinopsInsightsData {
 				sql.firstRow('SELECT 1 AS tenants, (SELECT COUNT(*) FROM instance i WHERE i.account_id = ?) AS instances', [viewer.account_id])
 			out.tenants = (counts?.tenants ?: 0) as Long
 			out.instances = (counts?.instances ?: 0) as Long
+			out.deactivated = (isMaster && withDeactivated) ? deactivated(sql, curPeriod, ccy, viewer.currency) : null
 			out.ok = true
 		} catch(Exception e) {
 			log.error("FinOps insights: loading invoice data failed: ${e.message}", e)
@@ -197,6 +214,23 @@ class FinopsInsightsData {
 			release(c)
 		}
 		return out
+	}
+
+	/**
+	 * The deactivated sub-tenants with invoices in {@code period}, which the master view leaves out
+	 * (FinopsInsightsCalc.deactivated), or null when there are none. The invoices are read only when
+	 * a deactivated sub-tenant exists at all. A failing query logs one warning and returns null, so
+	 * the widgets keep their figures.
+	 */
+	protected Map deactivated(Sql sql, String period, String mainCurrency, def fallbackCurrency) {
+		try {
+			if(sql.firstRow(DEACTIVATED_EXISTS_SQL) == null) return null
+			List<Map> rows = sql.rows(DEACTIVATED_SQL, [period]) ?: []
+			return FinopsInsightsCalc.deactivated(rows, mainCurrency, fallbackCurrency)
+		} catch(Exception e) {
+			log.warn("FinOps insights: deactivated tenants not read, the KPI strip shows no line for them: ${e.message}")
+			return null
+		}
 	}
 
 	/**

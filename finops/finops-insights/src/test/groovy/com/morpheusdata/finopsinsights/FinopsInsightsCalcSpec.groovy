@@ -181,4 +181,56 @@ class FinopsInsightsCalcSpec extends Specification {
 		chart.groups*.label == ['Mai', 'Juni', 'Juli', 'Aug.', 'Sept.', 'Okt.']
 		chart.grid*.label == ['0', '13', '25', '38', '50']
 	}
+
+	def "deactivated tenants: amounts per currency by the widgets' rule, the main currency first, tenants with an amount counted"() {
+		given: 'tenant 5 in EUR, tenant 6 with zero amounts only, tenant 7 in USD and without a currency (fallback EUR)'
+		List<Map> rows = [
+			[account: 5L, cur: 'EUR', rev: 100.004G, cost: 80G],
+			[account: 6L, cur: 'EUR', rev: 0G, cost: 0G],
+			[account: 7L, cur: 'usd', rev: 10G, cost: 8G],
+			[account: 7L, cur: null, rev: 1.5G, cost: 1G]]
+
+		when:
+		Map d = FinopsInsightsCalc.deactivated(rows, 'USD', 'EUR')
+
+		then: 'summed, then rounded once; tenant 6 not counted'
+		d.count == 2
+		d.amounts == [[currency: 'USD', rev: 10.00G, cost: 8.00G], [currency: 'EUR', rev: 101.50G, cost: 81.00G]]
+		FinopsInsightsCalc.deactivated(rows, 'EUR', 'EUR').amounts*.currency == ['EUR', 'USD']
+	}
+
+	def "deactivated tenants without any amount give nothing"() {
+		expect:
+		FinopsInsightsCalc.deactivated([], 'EUR', 'EUR') == null
+		FinopsInsightsCalc.deactivated(null, 'EUR', 'EUR') == null
+		FinopsInsightsCalc.deactivated([[account: 6L, cur: 'EUR', rev: 0G, cost: 0.004G]], 'EUR', 'EUR') == null
+	}
+
+	def "a deactivated tenant below one cent does not count, also next to a priced one"() {
+		when: 'tenant 8 has 0.004 EUR, tenant 9 has 10 EUR'
+		Map d = FinopsInsightsCalc.deactivated([
+			[account: 8L, cur: 'EUR', rev: 0.004G, cost: 0G],
+			[account: 9L, cur: 'EUR', rev: 10G, cost: 7G]], 'EUR', 'EUR')
+
+		then: 'only tenant 9 counts, as on MSP Tenant Overview'
+		d.count == 1
+		d.amounts == [[currency: 'EUR', rev: 10.00G, cost: 7.00G]]
+
+		and: 'three tenants of 0.004 EUR each give no line, although their sum would round to 0.01'
+		FinopsInsightsCalc.deactivated([
+			[account: 8L, cur: 'EUR', rev: 0.004G, cost: 0G],
+			[account: 9L, cur: 'EUR', rev: 0.004G, cost: 0G],
+			[account: 10L, cur: 'EUR', rev: 0.004G, cost: 0G]], 'EUR', 'EUR') == null
+	}
+
+	def "the amounts of the counted deactivated tenants are summed first and rounded once, as the cards are"() {
+		when:
+		Map d = FinopsInsightsCalc.deactivated([
+			[account: 8L, cur: 'EUR', rev: 0.006G, cost: 0G],
+			[account: 9L, cur: 'EUR', rev: 0.006G, cost: 0G]], 'EUR', 'EUR')
+
+		then: 'both count (0.01 each when rounded alone); the line shows round(0.012), not 0.01 + 0.01'
+		d.count == 2
+		d.amounts == [[currency: 'EUR', rev: 0.01G, cost: 0.00G]]
+	}
 }
