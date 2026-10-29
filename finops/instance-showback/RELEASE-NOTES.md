@@ -84,15 +84,21 @@ are unchanged; no new database column is read.
   another instance. Each of these tests fails against the 1.2.0 code paths.
 - Local build with JDK 17 and Gradle 9.8.0, one jar
   `morpheus-instance-showback-plugin-1.3.0-all.jar`.
+- **On HPE Morpheus Enterprise 9.1.0-1**, as a master tenant user, with a release candidate built
+  from this source (`1.3.0-rc.1`), uploaded in place of 1.2.0 (status `loaded`): the *Costs* tab of
+  an instance whose month to date Morpheus splits only in part showed a month to date of
+  1,327.89 EUR and the split Compute 1,021.87 + Storage 6.65 + Licenses 0.00 + **Other 299.37 =
+  1,327.89 EUR, exact to the cent**. English labels.
+- **As a sub-tenant user** (impersonated from the master tenant), same build: the *Costs* tab of
+  an instance with a single *Everything* price showed Compute 0.00, Storage 0.00, Licenses 0.00
+  and **Other 40.49 = month to date 40.49 EUR**; up to 1.2.0 the split of such an instance showed
+  only zeros.
 
 ### Not yet verified
 
 - On an appliance: the release jar loads in place of 1.2.0, and the *Costs* tab shows the same
-  figures as 1.2.0 plus the new *Other* column.
-- On an appliance: *Other* on an instance with a single *Everything* price (expected: the whole
-  month to date under *Other*, the three parts 0.00), on an instance with a split price (expected:
-  month to date minus the three parts), and the label *Sonstiges* for a user with a German language
-  setting.
+  figures as 1.2.0, compared side by side, plus the new *Other* column.
+- On an appliance: the label *Sonstiges* for a user with a German language setting.
 - Whether network, extra or software prices, when a price set has them, are part of month to date
   and so of *Other*: no invoice at hand had any.
 - Whether the actual prices of a flat-price invoice are 0 or NULL in general. On the 9.1.0
