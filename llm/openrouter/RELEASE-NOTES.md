@@ -140,9 +140,18 @@ catalog no longer empties the integration.** Built against plugin API 1.4.2. No 
   Morpheus does.
 - Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 178 tests,
   0 failures.
+- On HPE Morpheus Enterprise 9.1.0-1 with a release candidate built from this source
+  (`0.2.5-rc.1`), uploaded in place of 0.2.4: status `loaded`. **The model sync ran with this
+  build**, in Morpheus' own scheduled refresh of the OpenRouter integration (right after the
+  upload, when a refresh was also started by hand and answered HTTP 200, then about every
+  11 minutes): each run listed the same
+  262 models as 0.2.4's last runs before the upload, with nothing added, updated or removed, and
+  the integration stayed `ok`. The appliance log showed no warning or error of the plugin.
 
 ### Not yet verified
 
+- On an appliance: the release jar loads in place of 0.2.4 and its integration stays `ok` (the
+  release candidate above was a separate build).
 - On an appliance: a chat whose question the Morpheus 9.1 chat memory drops still gets it back
   (*Restored the user's question ...* in the log). That relies on Morpheus keeping the system
   message the same through a tool loop.
@@ -155,7 +164,8 @@ catalog no longer empties the integration.** Built against plugin API 1.4.2. No 
   call ids each still gets their own dropped question back; with a backend whose tool call ids
   repeat, the log shows *Not restoring a dropped question: its tool calls belong to more than one
   question ...* instead of one user getting the other's question.
-- A chat and a model refresh with this jar.
+- **A chat with this version**: the test had no agent on an OpenRouter integration, so nothing
+  of the chat path above ran on the appliance.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openrouter-v0.2.4...openrouter-v0.2.5
 
