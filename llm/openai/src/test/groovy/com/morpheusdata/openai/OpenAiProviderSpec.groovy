@@ -629,7 +629,11 @@ class OpenAiProviderSpec extends Specification {
 		'o3'                   || true
 		'O4-mini'              || true
 		'codex-mini-latest'    || true
+		'gpt-6.1-sol'          || true
+		'openai/gpt-6-astra'   || true
+		'GPT-6-luna'           || true
 		'gpt-4.1'              || false
+		'gpt-oss-120b'         || false
 		'deepseek-v3.2'        || false
 		'google/gemini-3-pro'  || false
 		'claude-sonnet-5'      || false
@@ -967,12 +971,149 @@ class OpenAiProviderSpec extends Specification {
 		when:
 		List<LlmModel> models = provider.buildModelsFromApiResponse(new LlmIntegration(accountIntegration: integration), catalog)
 
-		then: 'named by id, since there is nothing else, and sorted'
-		models*.code == ['chatgpt-4o-latest', 'codex-mini-latest', 'gpt-4.1-mini', 'gpt-5.5', 'o3']
+		then: 'named by id, since there is nothing else, and sorted; codex-mini-latest works only through the Responses API'
+		models*.code == ['chatgpt-4o-latest', 'gpt-4.1-mini', 'gpt-5.5', 'o3']
 		models*.name == models*.code
 		models.find { it.code == 'o3' }.metadata.supportsReasoning
 		!models.find { it.code == 'gpt-4.1-mini' }.metadata.supportsReasoning
 		models.every { it.contextWindow == null && it.maxOutputTokens == null && it.modelType == 'chat' && it.enabled }
+	}
+
+	def "api.openai.com does not list the models it serves only through its Responses API"() {
+		given: 'pro, codex, deep research and cyber models with their dated snapshots, among chat models that share a prefix'
+		List<String> responsesOnly = ['o1-pro', 'o1-pro-2025-03-19', 'o3-pro', 'o3-pro-2025-06-10', 'gpt-5-pro', 'gpt-5-pro-2025-10-06',
+									  'gpt-5.2-pro', 'gpt-5.4-pro-2026-03-05', 'gpt-5.5-pro', 'gpt-5.5-pro-2026-04-23',
+									  'codex-mini-latest', 'gpt-5-codex', 'gpt-5.1-codex', 'gpt-5.1-codex-mini', 'gpt-5.1-codex-max',
+									  'gpt-5.2-codex', 'gpt-5.3-codex', 'o3-deep-research', 'o4-mini-deep-research-2025-06-26',
+									  'gpt-5.5-cyber', 'gpt-5.6-cyber', 'gpt-daybreak-red-latest', 'gpt-daybreak-blue-latest']
+		List<String> chat = ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.5', 'gpt-5.5-2026-04-23',
+							 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2', 'o3', 'o4-mini', 'chat-latest', 'chatgpt-4o-latest', 'gpt-5-chat-latest']
+		Map catalog = [data: (responsesOnly + chat).collect { [id: it, object: 'model', owned_by: 'openai'] }]
+
+		expect:
+		provider.buildModelsFromApiResponse(new LlmIntegration(accountIntegration: new AccountIntegration(serviceUrl: url)), catalog)*.code as Set ==
+			(openAi ? chat : responsesOnly + chat) as Set
+
+		where: 'only OpenAI itself; a router or proxy in front of these models may serve them over chat completions'
+		url                                          || openAi
+		'https://api.openai.com/v1'                  || true
+		'https://API.OpenAI.com/v1/'                 || true
+		'https://eu.api.openai.com/v1'               || true
+		null                                         || true
+		'http://litellm.example.com:4000/v1'         || false
+		'https://openrouter.ai/api/v1'               || false
+		'https://example.openai.azure.com/openai/v1' || false
+		'https://api.openai.com.example.com/v1'      || false
+		'http://192.0.2.10:11434/v1'                 || false
+	}
+
+	def "the Responses-only rule matches whole id parts, not any id that contains pro or codex"() {
+		expect:
+		OpenAiProvider.isResponsesOnlyModel(id) == responsesOnly
+
+		where:
+		id                         || responsesOnly
+		'o3-pro'                   || true
+		'gpt-5.5-pro-2026-04-23'   || true
+		'gpt-5.1-codex-max'        || true
+		'codex-mini-latest'        || true
+		'o4-mini-deep-research'    || true
+		'gpt-5.6-cyber'            || true
+		'gpt-daybreak-blue-latest' || true
+		'gpt-5.5'                  || false
+		'gpt-6.1-sol'              || false
+		'chatgpt-4o-latest'        || false
+		'gpt-4o-mini'              || false
+		'o3'                       || false
+		'gpt-5-professional'       || false
+		'my-codexer'               || false
+		null                       || false
+	}
+
+	def "a ! entry removes the models it matches after the plain entries have been applied"() {
+		given:
+		Map catalog = [data: ['gpt-5.5', 'gpt-5.4-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o3', 'o4-mini'].collect { [id: it, object: 'model'] }]
+		AccountIntegration ai = new AccountIntegration(serviceUrl: 'http://litellm.example.com:4000/v1')
+		ai.setConfigMap([modelAllowList: configured])
+
+		expect:
+		provider.buildModelsFromApiResponse(new LlmIntegration(accountIntegration: ai), catalog)*.code as Set == expected as Set
+
+		where:
+		configured                    || expected
+		'*, !*-mini'                  || ['gpt-5.5', 'gpt-4.1', 'o3']
+		'gpt-*, !gpt-4*'              || ['gpt-5.5', 'gpt-5.4-mini']
+		'!o*'                         || ['gpt-5.5', 'gpt-5.4-mini', 'gpt-4.1', 'gpt-4.1-mini']
+		'* !O3 !gpt-4.1'              || ['gpt-5.5', 'gpt-5.4-mini', 'gpt-4.1-mini', 'o4-mini']
+		'*, ! *-mini'                 || ['gpt-5.5', 'gpt-4.1', 'o3']
+		'"*", "!*-mini"'              || ['gpt-5.5', 'gpt-4.1', 'o3']
+		'*, !"*-mini"'                || ['gpt-5.5', 'gpt-4.1', 'o3']
+		'gpt-5*, !*-pro*, !*codex*'   || ['gpt-5.5', 'gpt-5.4-mini']
+		'*, !'                        || ['gpt-5.5', 'gpt-5.4-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o3', 'o4-mini']
+	}
+
+	def "*, !*-pro*, !*codex* keeps pro and codex models out on any endpoint"() {
+		given: 'a LiteLLM catalog, where the Responses-only rule of api.openai.com does not apply'
+		Map catalog = [data: ['gpt-5.5', 'gpt-5.5-pro', 'gpt-5.3-codex', 'codex-mini-latest', 'openai/gpt-5-codex', 'gpt-5.4-mini']
+			.collect { [id: it, object: 'model'] }]
+		AccountIntegration ai = new AccountIntegration(serviceUrl: 'http://litellm.example.com:4000/v1')
+		ai.setConfigMap([modelAllowList: '*, !*-pro*, !*codex*'])
+
+		expect:
+		provider.buildModelsFromApiResponse(new LlmIntegration(accountIntegration: ai), catalog)*.code == ['gpt-5.4-mini', 'gpt-5.5']
+	}
+
+	def "a field without ! lists exactly what it listed before"() {
+		expect:
+		OpenAiProvider.parseModelExcludeList(value).isEmpty()
+		OpenAiProvider.parseModelAllowList(value)*.pattern() == includes
+
+		where:
+		value                                 || includes
+		null                                  || []
+		''                                    || []
+		'*'                                   || ['\\Q\\E.*\\Q\\E']
+		'gpt-5*, gpt-4.1-mini'                || ['\\Qgpt-5\\E.*\\Q\\E', '\\Qgpt-4.1-mini\\E']
+		'"openai/gpt-5*"'                     || ['\\Qopenai/gpt-5\\E.*\\Q\\E']
+	}
+
+	def "! entries that would remove every model are ignored instead of emptying the list"() {
+		given:
+		AccountIntegration ai = new AccountIntegration(serviceUrl: 'http://litellm.example.com:4000/v1')
+		ai.setConfigMap([modelAllowList: configured])
+
+		when:
+		List<LlmModel> models = provider.buildModelsFromApiResponse(new LlmIntegration(id: 1L, accountIntegration: ai),
+			[data: ['gpt-5.5', 'gpt-5.4-mini', 'o3'].collect { [id: it, object: 'model'] }])
+
+		then:
+		models*.code as Set == expected as Set
+
+		where: 'a typo in the plain entries is ignored as before, and the ! entries still apply'
+		configured        || expected
+		'!*'              || ['gpt-5.5', 'gpt-5.4-mini', 'o3']
+		'gpt-5*, !gpt-*'  || ['gpt-5.5', 'gpt-5.4-mini']
+		'gtp-5*, !o*'     || ['gpt-5.5', 'gpt-5.4-mini']
+	}
+
+	def "an allow list of Responses-only models lists every chat model on api.openai.com, and only them elsewhere"() {
+		given: 'entries that name only models api.openai.com serves through its Responses API'
+		Map catalog = [data: ['gpt-5.5', 'gpt-5.4-mini', 'o3', 'o3-pro', 'gpt-5.5-pro', 'gpt-5.5-pro-2026-04-23']
+			.collect { [id: it, object: 'model', owned_by: 'openai'] }]
+		AccountIntegration ai = new AccountIntegration(serviceUrl: url)
+		ai.setConfigMap([modelAllowList: configured])
+
+		expect: 'on api.openai.com they match nothing that is left, so the allow list is ignored rather than emptying the integration'
+		provider.buildModelsFromApiResponse(new LlmIntegration(id: 1L, accountIntegration: ai), catalog)*.code as Set == expected as Set
+
+		where:
+		url                                  | configured             || expected
+		'https://api.openai.com/v1'          | 'o3-pro'               || ['gpt-5.5', 'gpt-5.4-mini', 'o3']
+		'https://api.openai.com/v1'          | 'gpt-5.5-pro*'         || ['gpt-5.5', 'gpt-5.4-mini', 'o3']
+		'https://api.openai.com/v1'          | 'o3-pro, gpt-5.5'      || ['gpt-5.5']
+		'https://api.openai.com/v1'          | 'o3-pro, !gpt-5*'      || ['o3']
+		'http://litellm.example.com:4000/v1' | 'o3-pro'               || ['o3-pro']
+		'http://litellm.example.com:4000/v1' | 'gpt-5.5-pro*'         || ['gpt-5.5-pro', 'gpt-5.5-pro-2026-04-23']
 	}
 
 	def "open-weight *-Instruct chat models stay listed; only OpenAI's legacy instruct model is dropped"() {

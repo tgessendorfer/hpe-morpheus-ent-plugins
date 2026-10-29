@@ -6,9 +6,11 @@ import com.morpheusdata.core.BulkSaveResult
 import com.morpheusdata.core.MorpheusContext
 import com.morpheusdata.core.integration.MorpheusLlmModelService
 import com.morpheusdata.core.integration.MorpheusLlmService
+import com.morpheusdata.model.AccountIntegration
 import com.morpheusdata.model.llm.LlmIntegration
 import com.morpheusdata.model.llm.LlmModel
 import com.morpheusdata.openai.OpenAiApiService
+import com.morpheusdata.openai.OpenAiProvider
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import spock.lang.Specification
@@ -178,6 +180,32 @@ class LlmModelsSyncSpec extends Specification {
 		saved.isEmpty()
 		created.isEmpty()
 		sync.removedCount == 0
+	}
+
+	def "an api.openai.com integration loses its Responses-only models, and one an agent uses is disabled"() {
+		given: 'models an earlier version listed, o3-pro chosen for an agent'
+		usedByAgent << 2L
+		OpenAiApiService api = Mock()
+		api.listModels(_, _, _) >> [success: true, data: [data: ['gpt-5.5', 'o3-pro', 'codex-mini-latest', 'gpt-5.5-pro-2026-04-23']
+			.collect { [id: it, object: 'model', owned_by: 'openai'] }]]
+		LlmModelsSync sync = syncOver([model(1L, 'gpt-5.5'), model(2L, 'o3-pro'), model(3L, 'codex-mini-latest'),
+									   model(4L, 'gpt-5.5-pro-2026-04-23')], api)
+		OpenAiProvider provider = new OpenAiProvider(null, null)
+		integration.accountIntegration = new AccountIntegration(serviceUrl: 'https://api.openai.com/v1')
+
+		when: 'the refresh path: the catalog through the provider into the sync'
+		Map result = sync.execute('https://api.openai.com/v1', 'sk-test', [:]) { Map response ->
+			provider.buildModelsFromApiResponse(integration, response)
+		}
+
+		then:
+		result.success
+		removed*.id as Set == [3L, 4L] as Set
+		saved*.id == [2L]
+		saved*.enabled == [false]
+		created.isEmpty()
+		sync.removedCount == 2
+		sync.disabledCount == 1
 	}
 
 	def "a response without a model list leaves the stored models alone"() {

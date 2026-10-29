@@ -68,8 +68,9 @@ class OpenAiProvider implements LlmProvider {
 	static final String DEFAULT_API_URL = 'https://api.openai.com/v1'
 	// Models that take max_completion_tokens instead of max_tokens and reject sampling
 	// parameters: OpenAI's reasoning models, with or without a vendor prefix such as
-	// openai/ in a router's catalog.
-	static final Pattern REASONING_MODEL_ID = ~/(?i)^(?:[\w.-]+\/)?(?:o\d|gpt-5|codex)/
+	// openai/ in a router's catalog. GPT-6 reasons by default; OpenAI's model guide
+	// (2026-10-29) says to remove temperature and top_p unless reasoning effort is none.
+	static final Pattern REASONING_MODEL_ID = ~/(?i)^(?:[\w.-]+\/)?(?:o\d|gpt-[56]|codex)/
 	// Reasoning tokens count against the output limit, and Morpheus asks for 1000 output
 	// tokens on every chat request: gpt-5-mini spent all of them thinking and answered
 	// nothing (verified 2026-09-21). A reasoning model gets at least this much.
@@ -83,6 +84,25 @@ class OpenAiProvider implements LlmProvider {
 	static final Pattern LEGACY_COMPLETION_MODEL_ID = ~/(?i)^(?:[\w.-]+\/)?gpt-3\.5-turbo-instruct(?:$|[:.-])/
 	// The one endpoint whose model list answers any key, so the key is checked on its own there.
 	static final Pattern OPENROUTER_HOST = ~/(?i)^https?:\/\/([\w-]+\.)*openrouter\.ai(\/|$)/
+	// OpenAI's own API, with its data residency hosts (us., eu., gb., jp. and others, one
+	// label in front of api.openai.com), which answer the same API.
+	static final Pattern OPENAI_HOST = ~/(?i)^https?:\/\/([\w-]+\.)?api\.openai\.com(:\d+)?(\/|$)/
+	// Models api.openai.com lists under /models but serves only through its Responses API
+	// (v1/responses). v1/chat/completions, which this plugin calls, refuses them, so an agent
+	// on one fails on every question. Taken from OpenAI's model pages as of 2026-10-29, as
+	// patterns so that dated snapshots are covered: the pro models (o1-pro, o3-pro, gpt-5-pro
+	// up to gpt-5.5-pro), every codex model (codex-mini-latest, gpt-5-codex up to
+	// gpt-5.3-codex), the deep research models, the cyber models and their gpt-daybreak-*
+	// aliases. computer-use-preview is Responses-only too; it is already dropped for every
+	// endpoint as no chat model. Applied to api.openai.com only: a router or proxy in front
+	// of these models (OpenRouter, LiteLLM) may serve them over chat completions itself.
+	static final List<Pattern> RESPONSES_ONLY_MODEL_IDS = [
+		~/(?i)^(?:o\d+|gpt-\d+(?:\.\d+)*)-pro(?:-|$)/,
+		~/(?i)(?:^|-)codex(?:-|$)/,
+		~/(?i)(?:^|-)deep-research(?:-|$)/,
+		~/(?i)^gpt-\d+(?:\.\d+)*-cyber(?:-|$)/,
+		~/(?i)^gpt-daybreak-/
+	]
 	static final String REASONING_EFFORT_DEFAULT = 'default'
 	static final List<String> REASONING_EFFORTS = ['low', 'medium', 'high']
 	// Parameters the plugin adds on its own, which not every model or API takes:
@@ -342,7 +362,7 @@ class OpenAiProvider implements LlmProvider {
 			// Not empty by default: Morpheus 9.0.1 does not save a text field that is emptied on
 			// edit, so an allow list, once set, could never be removed again.
 			defaultValue: '*',
-			helpText: 'Comma-separated model ids, * as wildcard, e.g. gpt-5*, gpt-4.1-mini. * alone lists every chat model the endpoint serves; use it instead of an empty field, which Morpheus 9.0.1 does not save. A model that drops out is removed on save unless an agent uses it.'
+			helpText: 'Comma-separated model ids, * as wildcard, e.g. gpt-5*, gpt-4.1-mini. * alone lists every chat model the endpoint serves; use it instead of an empty field, which Morpheus 9.0.1 does not save. An entry starting with ! removes the models it matches, e.g. *, !*-pro*, !*codex*. Models that api.openai.com serves only through its Responses API are never listed. A model that drops out is removed on save unless an agent uses it.'
 		)
 
 		optionTypes << new OptionType(
@@ -438,6 +458,11 @@ class OpenAiProvider implements LlmProvider {
 	/** openrouter.ai and its regional subdomains. */
 	protected static boolean isOpenRouter(String baseUrl) {
 		return baseUrl && OPENROUTER_HOST.matcher(baseUrl).find()
+	}
+
+	/** api.openai.com and its regional hosts such as eu.api.openai.com. */
+	protected static boolean isOpenAi(String baseUrl) {
+		return baseUrl && OPENAI_HOST.matcher(baseUrl).find()
 	}
 
 	/** The failed model list call, naming the URL, with a hint for the statuses that have an obvious cause. */
@@ -744,7 +769,7 @@ class OpenAiProvider implements LlmProvider {
 	 * Both sides speak the OpenAI format, so this is mostly a copy. Sampling
 	 * parameters are forwarded unchanged, except to OpenAI's reasoning models:
 	 * Morpheus sends a temperature on every request, and api.openai.com answers a
-	 * temperature for o-series or GPT-5 models with 400. Those models also take
+	 * temperature for o-series, GPT-5 or GPT-6 models with 400. Those models also take
 	 * max_completion_tokens instead of the deprecated max_tokens.
 	 */
 	protected Map buildChatRequestBody(LlmChatRequest request, AccountIntegration accountIntegration, Boolean stream) {
@@ -854,7 +879,7 @@ class OpenAiProvider implements LlmProvider {
 		return "${function.name} ${arguments.length() > 300 ? arguments.substring(0, 300) + '...' : arguments}".toString()
 	}
 
-	/** OpenAI's o-series, GPT-5 and codex models, with or without a vendor prefix. */
+	/** OpenAI's o-series, GPT-5, GPT-6 and codex models, with or without a vendor prefix. */
 	protected static boolean isReasoningModel(String modelId) {
 		return modelId && REASONING_MODEL_ID.matcher(modelId.trim()).find()
 	}
@@ -1173,21 +1198,62 @@ class OpenAiProvider implements LlmProvider {
 	// Model catalog
 	// ------------------------------------------------------------------
 
+	/**
+	 * The catalog entries that {@link #isListedModel} lets through, less the models
+	 * api.openai.com serves only through its Responses API (that host only), narrowed by
+	 * Only List These Models: its plain entries first, then its !entries remove what they
+	 * match. Neither half of that field is allowed to empty the list.
+	 */
 	protected List<LlmModel> buildModelsFromApiResponse(LlmIntegration llmIntegration, Map apiResponse) {
 		AccountIntegration accountIntegration = llmIntegration?.accountIntegration
 		String configuredAllowList = accountIntegration?.getConfigProperty('modelAllowList')?.toString()
 		List<Pattern> allowList = parseModelAllowList(configuredAllowList)
+		List<Pattern> excludeList = parseModelExcludeList(configuredAllowList)
+		boolean openAi = isOpenAi(resolveBaseUrl(accountIntegration))
 		LocalDate today = LocalDate.now(ZoneOffset.UTC)
+		List<String> responsesOnly = []
 		List<Map> candidates = apiResponse?.data instanceof List ? (apiResponse.data as List).findAll { entry ->
-			entry instanceof Map && isListedModel(entry as Map, today)
+			if (!(entry instanceof Map) || !isListedModel(entry as Map, today)) {
+				return false
+			}
+			String id = (entry as Map).id.toString().trim()
+			if (openAi && isResponsesOnlyModel(id)) {
+				responsesOnly << id
+				return false
+			}
+			return true
 		} as List<Map> : []
+		if (responsesOnly) {
+			log.info("OpenAI-compatible integration ${llmIntegration?.id}: not listing ${responsesOnly.size()} models that " +
+				"api.openai.com serves only through its Responses API: ${responsesOnly.sort(false)}")
+		}
 		List<Map> selected = candidates.findAll { Map entry -> matchesAllowList(entry.id?.toString()?.trim(), allowList) }
 		if (allowList && !selected && candidates) {
 			// Applied, an allow list that matches nothing removes every model of the
 			// integration - which a typo, or a value the edit form mangled, once did.
-			log.warn("OpenAI-compatible integration ${llmIntegration?.id}: Only List These Models '${configuredAllowList}' matches none of " +
-				"${candidates.size()} models and is ignored, so the model list is not emptied")
+			// On api.openai.com it can also name only Responses-only models (o3-pro), which
+			// are gone by now: say so, since the field holds no typo then.
+			List<String> namedResponsesOnly = responsesOnly.findAll { String id -> matchesAllowList(id, allowList) }
+			if (namedResponsesOnly) {
+				log.warn("OpenAI-compatible integration ${llmIntegration?.id}: Only List These Models '${configuredAllowList}' matches only " +
+					"models that api.openai.com serves only through its Responses API (${namedResponsesOnly.sort(false)}) and is ignored, " +
+					"so all ${candidates.size()} chat models are listed instead of none")
+			} else {
+				log.warn("OpenAI-compatible integration ${llmIntegration?.id}: Only List These Models '${configuredAllowList}' matches none of " +
+					"${candidates.size()} models and is ignored, so the model list is not emptied")
+			}
 			selected = candidates
+		}
+		if (excludeList && selected) {
+			List<Map> kept = selected.findAll { Map entry -> !matchesAnyPattern(entry.id?.toString()?.trim(), excludeList) }
+			if (kept) {
+				selected = kept
+			} else {
+				// The same guard for the other half of the field: !* or an exclusion that
+				// covers every included model would remove every model of the integration.
+				log.warn("OpenAI-compatible integration ${llmIntegration?.id}: the !entries of Only List These Models '${configuredAllowList}' " +
+					"remove all ${selected.size()} models and are ignored, so the model list is not emptied")
+			}
 		}
 		List<LlmModel> models = []
 		selected.each { Map entryMap ->
@@ -1256,21 +1322,51 @@ class OpenAiProvider implements LlmProvider {
 	}
 
 	protected static boolean matchesAllowList(String id, List<Pattern> allowList) {
-		return !allowList || (id && allowList.any { Pattern pattern -> pattern.matcher(id).matches() })
+		return !allowList || matchesAnyPattern(id, allowList)
+	}
+
+	protected static boolean matchesAnyPattern(String id, List<Pattern> patterns) {
+		return id && patterns?.any { Pattern pattern -> pattern.matcher(id).matches() }
+	}
+
+	/** A model api.openai.com serves only through its Responses API; see RESPONSES_ONLY_MODEL_IDS. */
+	protected static boolean isResponsesOnlyModel(String id) {
+		return id && RESPONSES_ONLY_MODEL_IDS.any { Pattern pattern -> pattern.matcher(id.trim()).find() }
 	}
 
 	/**
-	 * The allow list as case-insensitive patterns matching a whole model id, with * as
-	 * the only wildcard. Empty when nothing is configured. Quotes around an entry are
-	 * dropped: a value emptied through the REST API comes back from the edit form as "".
+	 * The plain entries of Only List These Models as case-insensitive patterns matching a
+	 * whole model id, with * as the only wildcard. Empty when the field has none, which
+	 * lets every model through.
 	 */
 	protected static List<Pattern> parseModelAllowList(String configured) {
+		return modelFilterEntries(configured).findAll { String entry -> !entry.startsWith('!') }.collect { String glob -> globPattern(glob) }
+	}
+
+	/** The entries with ! in front, without the !, as patterns like those of the allow list. */
+	protected static List<Pattern> parseModelExcludeList(String configured) {
+		return modelFilterEntries(configured).findAll { String entry -> entry.startsWith('!') }
+			.collect { String entry -> stripQuotes(entry.substring(1)) }.findAll { it }.collect { String glob -> globPattern(glob) }
+	}
+
+	/**
+	 * The entries of Only List These Models, split at commas and whitespace. Quotes around
+	 * an entry are dropped: a value emptied through the REST API comes back from the edit
+	 * form as "". A ! followed by a space still belongs to the entry after it.
+	 */
+	protected static List<String> modelFilterEntries(String configured) {
 		if (!configured?.trim()) {
 			return []
 		}
-		return configured.split(/[,\s]+/).collect { String token -> token.replaceAll(/^["']+|["']+$/, '') }.findAll { it }.collect { String glob ->
-			Pattern.compile(glob.split(/\*/, -1).collect { String part -> Pattern.quote(part) }.join('.*'), Pattern.CASE_INSENSITIVE)
-		}
+		return configured.replaceAll(/!\s+/, '!').split(/[,\s]+/).collect { String token -> stripQuotes(token) }.findAll { it } as List<String>
+	}
+
+	protected static String stripQuotes(String token) {
+		return token?.replaceAll(/^["']+|["']+$/, '') ?: ''
+	}
+
+	protected static Pattern globPattern(String glob) {
+		return Pattern.compile(glob.split(/\*/, -1).collect { String part -> Pattern.quote(part) }.join('.*'), Pattern.CASE_INSENSITIVE)
 	}
 
 	/** The listed name, with the date a model goes away when that is less than a year off. */

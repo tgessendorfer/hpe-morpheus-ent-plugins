@@ -27,10 +27,10 @@ over HTTP or HTTPS.
 |---|---|
 | Chat completions and streaming | yes |
 | Tool use / function calling (MCP) | yes — OpenAI format, passed through |
-| Model catalog sync | yes — chat models only, with an optional allow list |
+| Model catalog sync | yes — chat models only, with an optional allow list and `!` exclusions; on api.openai.com without the models it serves only through its Responses API |
 | Key check on save | yes — `GET /models` with the key; OpenRouter also `GET /key`, since its model list is public |
 | API key | optional — a LAN endpoint may take none |
-| OpenAI reasoning models (o-series, GPT-5, codex) | `max_completion_tokens`, no sampling parameters, at least 8192 output tokens |
+| OpenAI reasoning models (o-series, GPT-5, GPT-6, codex) | `max_completion_tokens`, no sampling parameters, at least 8192 output tokens |
 | Empty tool arguments | dropped before Morpheus runs the tool — optional, on by default |
 | Cut-off answers | say so |
 | Errors visible in chat | yes — the API's message and what to do, instead of Morpheus' generic error |
@@ -133,7 +133,26 @@ The plugin lists a model when
   `gpt-3.5-turbo-instruct` (open-weight chat models named `*-Instruct` stay listed);
 - the catalog, when it says so, lists tool calling (`tools` in `supported_parameters`) and text-only
   output;
-- it has not passed its expiration date, when the catalog has one.
+- it has not passed its expiration date, when the catalog has one;
+- on api.openai.com (and its data residency hosts such as `eu.api.openai.com`), it is not one of the
+  models OpenAI serves only through its Responses API. This plugin calls `/chat/completions`, and
+  OpenAI refuses these models there, so an agent on one would fail on every question. Per OpenAI's
+  model pages (checked 2026-10-29) that is the **pro** models (`o1-pro`, `o3-pro`, `gpt-5-pro` up
+  to `gpt-5.5-pro`), **every codex model** (`codex-mini-latest`, `gpt-5-codex` up to
+  `gpt-5.3-codex`), the **deep research** models (`o3-deep-research`, `o4-mini-deep-research`), the
+  **cyber** models (`gpt-5.6-cyber`) and their `gpt-daybreak-*` aliases, each with its dated
+  snapshots (`gpt-5.5-pro-2026-04-23`). `computer-use-preview` is Responses-only too and already
+  left out above. Other endpoints — LiteLLM, OpenRouter, Azure, a local server — keep these models:
+  a router in front of them may serve them over chat completions itself. To leave them out there,
+  use a `!` entry in the [allow list](#allow-list).
+
+Listed, but limited over chat completions: per OpenAI's latest-model guide (checked 2026-10-29),
+**`gpt-6-astra`, `gpt-6.1-sol` and `gpt-6.1-terra` answer over chat completions but call tools only
+through the Responses API**, and `gpt-6-sol` and `gpt-6-luna` call tools over chat completions only
+with a reasoning effort of `none`, which **Reasoning Effort** does not offer. A Morpheus agent sends
+its MCP tools on every request, so an agent on one of these models is expected to fail (not tested
+yet). They stay listed, since they are not Responses-only models; leave them out with `!gpt-6*` in
+the allow list.
 
 Names are taken from the catalog when it has them (OpenRouter: *OpenAI: GPT-5.5*) and are the id
 otherwise (`gpt-5.4-mini`, `deepseek-v3.2`) — never title-cased, so the agent form shows the spelling
@@ -151,8 +170,16 @@ hundred models. **Only List These Models** narrows the list to the models you ac
 - It only narrows. It never brings back a model the rules above leave out.
 - **`*` lists every chat model, and it is the default.** Morpheus 9.0.1 does not save a text field
   that is emptied on edit — the form puts the old value back — so enter `*` instead of clearing it.
+- **An entry starting with `!` removes the models it matches**, with the same wildcard, after the
+  other entries have been applied: `*, !*-pro*, !*codex*` lists every chat model except the pro and
+  codex ones, `gpt-5*, !*-mini` the GPT-5 models without the minis. A field of `!` entries only
+  starts from every chat model. This works on every endpoint.
 - An allow list that matches no model at all is ignored, with a warning in the log, instead of
-  emptying the integration.
+  emptying the integration. So are `!` entries that would remove every model that is left (`!*`);
+  the other entries still apply.
+- **On api.openai.com, an allow list that names only Responses-only models** (`o3-pro`,
+  `gpt-5.5-pro*`) **matches nothing that is left, so it is ignored the same way and every chat model
+  is listed.** The log names the models it matched. Name the chat models you want instead.
 
 ### When a model drops out
 
@@ -175,7 +202,7 @@ Model sync for integration 8: 45 listed, 0 added, 0 updated, 2 removed, 0 disabl
 Morpheus asks for **1000 output tokens** on every chat request. **Default Max Output Tokens** is a
 floor over that: with a value set, the plugin sends the larger of the caller's limit and that value,
 so a caller asking for more keeps its limit. Empty, the request goes out with the caller's limit, or
-without one. For most models 1000 is enough for an answer built from MCP data. OpenAI's reasoning models — the o-series, GPT-5 and codex, with or
+without one. For most models 1000 is enough for an answer built from MCP data. OpenAI's reasoning models — the o-series, GPT-5, GPT-6 and codex, with or
 without a vendor prefix such as `openai/` — think inside that budget: `gpt-5-mini` spent 960 tokens
 reasoning and answered nothing. The plugin therefore
 
@@ -321,6 +348,9 @@ trusts, or use plain HTTP on a trusted network.
 | **Only List These Models** cannot be emptied | Morpheus 9.0.1 puts the old value back into an emptied field. Enter `*`. |
 | Switching from a stored credential to *Local Credentials* is not saved | Morpheus 9.0.1 keeps the stored credential on edit. Change the key inside that credential under *Infrastructure > Trust > Credentials*, or create a new integration and point the agents at it. |
 | The log says `Only List These Models '...' matches none of N models and is ignored` | A typo in the allow list. The list stays complete until it is fixed. |
+| The log says `Only List These Models '...' matches only models that api.openai.com serves only through its Responses API` | The allow list names only models this plugin cannot use there (`o3-pro`, `gpt-5.5-pro*`), so it is ignored and every chat model is listed. Name chat models instead, such as `gpt-5.5, o3`. |
+| The log says `the !entries of Only List These Models '...' remove all N models and are ignored` | The `!` entries cover every model the other entries leave. The list stays as the other entries make it until they are fixed. |
+| A pro, codex or deep research model is missing on api.openai.com | OpenAI serves it only through its Responses API, which this plugin does not call; the log says `not listing N models that api.openai.com serves only through its Responses API`. An agent that used one keeps a disabled model: give it another model. |
 | An agent fails after the model list was narrowed | Its model is disabled because it is no longer listed. The log names it. List it again, or give the agent another model. |
 | The model tab has no search | Not available to plugins. Use the allow list. Reported to HPE: [docs/hpe/hpe-feature-request-llm-model-search.md](../../docs/hpe/hpe-feature-request-llm-model-search.md). |
 | An agent calls `get_result_excerpt` over and over | The built-in MCP tools return a large result truncated, as a preview with an artifact id, and a model can page through it piece by piece. Ask a narrower question. |

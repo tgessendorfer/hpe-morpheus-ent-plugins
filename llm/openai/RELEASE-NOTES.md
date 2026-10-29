@@ -9,9 +9,43 @@ shaded `-all.jar` is attached.
 ## 0.1.5
 
 **Fix release from a code review: the output limit, parameters an API rejects, tool arguments,
-streams and the question map.** Built against plugin API 1.4.2. No new setting; plugin code
-unchanged.
+streams and the question map; plus a model list without api.openai.com's Responses-only models,
+`!` exclusions in *Only List These Models*, and GPT-6 handled as a reasoning model.** Built against
+plugin API 1.4.2. No new setting; plugin code unchanged.
 
+- **api.openai.com no longer lists models it serves only through its Responses API.** The plugin
+  calls `/chat/completions`, and OpenAI refuses these models there, so an agent given one failed on
+  every question. Per OpenAI's model pages (checked 2026-10-29) they are the **pro** models
+  (`o1-pro`, `o3-pro`, `gpt-5-pro`, `gpt-5.2-pro`, `gpt-5.4-pro`, `gpt-5.5-pro`), **every codex
+  model** (`codex-mini-latest`, `gpt-5-codex`, `gpt-5.1-codex`, `-mini`, `-max`, `gpt-5.2-codex`,
+  `gpt-5.3-codex`), the **deep research** models (`o3-deep-research`, `o4-mini-deep-research`), the
+  **cyber** models (`gpt-5.6-cyber`, and `gpt-5.5-cyber`, which has no model page, by the same
+  pattern) and the `gpt-daybreak-red-latest` and `gpt-daybreak-blue-latest` aliases. **They are
+  matched by pattern, so their dated snapshots (`gpt-5.5-pro-2026-04-23`) go too.**
+  `computer-use-preview`, also Responses-only, was already left out as no chat model. Models that
+  work over chat completions stay listed, `chatgpt-4o-latest` and `chat-latest` among them, and so
+  do the GPT-6 models, although OpenAI's guide limits their tool calls over chat completions (see
+  *Not yet verified*). **The rule applies to api.openai.com and its data residency hosts**
+  (`eu.api.openai.com`, `us.api.openai.com` and the others OpenAI names) **only**; LiteLLM,
+  OpenRouter, Azure and local servers list these models as before, since a router in front of them
+  may serve them over chat completions itself. A refresh logs the models it leaves out:
+  *not listing N models that api.openai.com serves only through its Responses API: [...]*. The list
+  is fixed in the plugin: a future Responses-only model whose id matches none of these patterns
+  stays listed until a release adds it; a `!` entry (below) removes it meanwhile.
+- **`!` entries in *Only List These Models* remove models, on every endpoint.** An entry starting
+  with `!` removes the ids it matches, with the same `*` wildcard, after the other entries have been
+  applied: `*, !*-pro*, !*codex*` lists every chat model except the pro and codex ones. A field with
+  `!` entries only starts from every chat model. A `!` followed by a space and quotes around an
+  entry are accepted. **`!` entries that would remove every model left are ignored**, with a warning
+  in the log, as an allow list that matches nothing already is; the other entries still apply. **An
+  empty field, `*`, or a field without `!` lists exactly what it listed before.**
+- **GPT-6 models are handled as OpenAI reasoning models**, like the o-series, GPT-5 and codex, with
+  or without a vendor prefix (`openai/gpt-6.1-sol`): `max_completion_tokens` instead of
+  `max_tokens`, at least 8192 output tokens when *Default Max Output Tokens* is empty, and no
+  `temperature` or `top_p`. OpenAI's latest-model guide (checked 2026-10-29) says to remove
+  `temperature` and `top_p` unless the reasoning effort is `none`, and `gpt-6-astra` and
+  `gpt-6.1-sol` do not support `none`; up to 0.1.4 the plugin passed on Morpheus' `temperature` to
+  them.
 - **Default Max Output Tokens is now a floor.** Morpheus asks for 1000 output tokens on every chat
   request, so up to 0.1.4 the integration's value was never used in chat. The plugin now sends the
   larger of the two: a caller asking for more keeps its value, and without a configured value the
@@ -96,6 +130,23 @@ unchanged.
 
 ### Behaviour changes from 0.1.4
 
+- **Existing api.openai.com integrations lose models on their first refresh after the upgrade**
+  (on save, *Actions > Refresh* or Morpheus' periodic sync): every Responses-only model listed above,
+  dated snapshots included, is removed from the model tab and the agent form. **One that an agent
+  still uses cannot be removed and stays disabled**, and the log names it (*Models no longer listed
+  but still used by an agent, left disabled: [...]*); that agent already failed on every question
+  and needs another model. Integrations on any other endpoint keep their models.
+- **On api.openai.com, an *Only List These Models* that names only Responses-only models now lists
+  every chat model.** With `o3-pro` or `gpt-5.5-pro*` alone, 0.1.4 listed just those models (which
+  failed on every question); now its entries match nothing that is left, and an allow list that
+  matches nothing is ignored rather than emptying the integration. The log says *Only List These
+  Models '...' matches only models that api.openai.com serves only through its Responses API
+  ([...]) and is ignored*. Name the chat models you want instead.
+- A `!` at the start of an entry in *Only List These Models* now means "remove". 0.1.4 took it as
+  part of a model id, so such an entry matched nothing.
+- Requests to GPT-6 models carry `max_completion_tokens` instead of `max_tokens` and no
+  `temperature` or `top_p`, and get at least 8192 output tokens when *Default Max Output Tokens* is
+  empty. The model list marks them as reasoning models.
 - An integration with *Default Max Output Tokens* set (for example 4096) now sends that value on
   every chat request instead of Morpheus' 1000. Answers can be longer and cost more output tokens.
   A reasoning model whose caller asks for more than the configured value now gets the caller's
@@ -145,7 +196,22 @@ unchanged.
   catalog leaving the stored models alone; "Can I see my VMs?" English and "Ile serwerów i
   instancji?" Polish. The question-map tests now send the agent's system message on every request,
   as Morpheus does.
-- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 192 tests,
+- Unit tests for the model list: a catalog of api.openai.com ids loses 23 Responses-only ids (pro,
+  codex, deep research, cyber, daybreak, dated snapshots) and keeps 15 chat models that share their
+  prefixes (`gpt-5.5`, `gpt-6.1-sol`, `o3`, `chat-latest`, `chatgpt-4o-latest` and others) at
+  `https://api.openai.com/v1`, an upper-case host, `eu.api.openai.com` and the default URL, while
+  LiteLLM, OpenRouter, Azure, a look-alike host and a LAN address keep all of them; ids such as
+  `gpt-5-professional` or `my-codexer` are not taken for Responses-only; the refresh path from the
+  catalog through the sync on api.openai.com removes the Responses-only models and disables the one
+  an agent uses; `!` entries after `*`, after narrowing entries, on their own, case-insensitive,
+  quoted, and with a space after the `!`; `*, !*-pro*, !*codex*` on a LiteLLM catalog; a field
+  without `!` giving the same patterns as before; `!*` and an exclusion of every included model
+  ignored, and a typo in the narrowing entries ignored while the `!` entries still apply; an allow
+  list of only Responses-only entries (`o3-pro`, `gpt-5.5-pro*`) listing every chat model on
+  api.openai.com, and only those models on LiteLLM; `gpt-6.1-sol`, `openai/gpt-6-astra` and
+  `GPT-6-luna` sent `max_completion_tokens` and no sampling parameters, `gpt-oss-120b` not. The test
+  that expected `codex-mini-latest` in the api.openai.com list now expects it gone.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 245 tests,
   0 failures.
 
 ### Not yet verified
@@ -170,6 +236,18 @@ unchanged.
   repeat, the log shows *Not restoring a dropped question: its tool calls belong to more than one
   question ...* instead of one user getting the other's question.
 - A sync against an endpoint that lists no chat model.
+- A refresh of an api.openai.com integration: which of the Responses-only ids the account's
+  `/models` actually lists (several are shut down), that they leave the model tab and the agent
+  form, that one an agent uses stays disabled, and the log line naming them. The list of
+  Responses-only models comes from OpenAI's model pages, not from a request the plugin made.
+- `!` entries on a LiteLLM integration, saved through the edit form: that the form keeps the `!`
+  and the refresh removes the matching models.
+- Any GPT-6 model in a Morpheus agent. Per OpenAI's latest-model guide (checked 2026-10-29),
+  **`gpt-6-astra`, `gpt-6.1-sol` and `gpt-6.1-terra` call tools only through the Responses API**,
+  and `gpt-6-sol` and `gpt-6-luna` call tools over chat completions only with a reasoning effort of
+  `none`, which *Reasoning Effort* does not offer. A Morpheus agent sends its MCP tools on every
+  request, so an agent on one of them is expected to fail. They stay listed, since they are not
+  Responses-only models; `!gpt-6*` in *Only List These Models* leaves them out.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/openai-v0.1.4...openai-v0.1.5
 
