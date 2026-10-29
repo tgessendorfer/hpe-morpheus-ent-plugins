@@ -47,13 +47,14 @@ class LxcSync {
     // filters by type code for the same reason; this matches it.
     private static final String LXC_SERVER_CODE = 'proxmox-lxc-container'
 
-    LxcSync(ProxmoxVePlugin proxmoxVePlugin, Cloud cloud, HttpApiClient apiClient, CloudProvider cloudProvider) {
+    LxcSync(ProxmoxVePlugin proxmoxVePlugin, Cloud cloud, HttpApiClient apiClient, CloudProvider cloudProvider, Map authConfig = null) {
         this.@plugin = proxmoxVePlugin
         this.@cloud = cloud
         this.@apiClient = apiClient
         this.@context = proxmoxVePlugin.morpheus
         this.@cloudProvider = cloudProvider
-        this.@authConfig = plugin.getAuthConfig(cloud)
+        // A refresh passes its own, which carries the refresh's login ticket
+        this.@authConfig = authConfig ?: plugin.getAuthConfig(cloud)
     }
 
 

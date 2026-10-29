@@ -36,13 +36,14 @@ class VirtualImageLocationSync {
     private Map authConfig
 
 
-    VirtualImageLocationSync(ProxmoxVePlugin proxmoxVePlugin, Cloud cloud, HttpApiClient apiClient, CloudProvider cloudProvider) {
+    VirtualImageLocationSync(ProxmoxVePlugin proxmoxVePlugin, Cloud cloud, HttpApiClient apiClient, CloudProvider cloudProvider, Map authConfig = null) {
         this.@plugin = proxmoxVePlugin
         this.@cloud = cloud
         this.@apiClient = apiClient
         this.@context = proxmoxVePlugin.morpheus
         this.@cloudProvider = cloudProvider
-        this.@authConfig = plugin.getAuthConfig(cloud)
+        // A refresh passes its own, which carries the refresh's login ticket
+        this.@authConfig = authConfig ?: plugin.getAuthConfig(cloud)
     }
 
 

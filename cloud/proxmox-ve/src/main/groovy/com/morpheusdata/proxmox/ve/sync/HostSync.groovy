@@ -34,12 +34,13 @@ class HostSync {
      * @author Neil van Rensburg
      */
 
-    HostSync(ProxmoxVePlugin proxmoxVePlugin, Cloud cloud, HttpApiClient apiClient) {
+    HostSync(ProxmoxVePlugin proxmoxVePlugin, Cloud cloud, HttpApiClient apiClient, Map authConfig = null) {
         this.@plugin = proxmoxVePlugin
         this.@cloud = cloud
         this.@morpheusContext = proxmoxVePlugin.morpheus
         this.@apiClient = apiClient
-        this.@authConfig = plugin.getAuthConfig(cloud)
+        // A refresh passes its own, which carries the refresh's login ticket
+        this.@authConfig = authConfig ?: plugin.getAuthConfig(cloud)
 
         this.@hostUID = cloud.configMap.hostUsername
         this.@hostPWD = cloud.configMap.hostPassword

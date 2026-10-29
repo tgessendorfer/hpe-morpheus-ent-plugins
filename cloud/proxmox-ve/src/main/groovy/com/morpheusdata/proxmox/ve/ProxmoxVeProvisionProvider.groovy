@@ -1076,25 +1076,43 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 	}
 
 	/**
+	 * A new API client for one power action (stop, restart, delete); the caller shuts it down.
+	 * Tests replace it with a client that answers from a script.
+	 */
+	protected HttpApiClient newApiClient() {
+		return new HttpApiClient()
+	}
+
+	/**
 	 * Issues the remote calls necessary top stop a workload element from running.
 	 * @param workload the Workload we want to shut down
 	 * @return Response from API
 	 */
 	@Override
 	ServiceResponse stopWorkload(Workload workload) {
+		return shutdownServer(workload.server)
+	}
+
+	/**
+	 * Stop and Stop Server: a guest shutdown that Proxmox forces off after
+	 * GUEST_SHUTDOWN_TIMEOUT_SEC, waited for (up to about three minutes). It was a hard stop
+	 * before 0.1.33.
+	 */
+	ServiceResponse shutdownServer(ComputeServer computeServer) {
+		HttpApiClient client = newApiClient()
 		try {
-			HttpApiClient client = new HttpApiClient()
-			ComputeServer computeServer = workload.server
 			Map authConfig = plugin.getAuthConfig(computeServer.cloud)
 
 			ServiceResponse identity = verifyGuestIdentity(client, authConfig, computeServer.parentServer.name, computeServer)
 			if (!identity.success) {
 				return identity
 			}
-			return ProxmoxApiComputeUtil.stopVM(client, authConfig, computeServer.parentServer.name, computeServer.externalId)
+			return ProxmoxApiComputeUtil.shutdownVMAndWait(client, authConfig, computeServer.parentServer.name, computeServer.externalId)
 		} catch (e) {
 			log.error "Error performing stop on VM: ${e}", e
 			return ServiceResponse.error("Error performing stop on VM: ${e}")
+		} finally {
+			client.shutdownClient()
 		}
 	}
 
@@ -1125,17 +1143,30 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 	 */
 	@Override
 	ServiceResponse restartWorkload(Workload workload) {
-		def stopResult = stopWorkload(workload)
-		if (!stopResult.success) {
-			log.error("Failed to stop workload ${workload.id} during restart: ${stopResult.msg}")
-			return ServiceResponse.error("Error restarting workload: Failed to stop - ${stopResult.msg}")
+		// A real reboot (status/reboot, waited for), and a reset when the guest does not go down.
+		// Before 0.1.33 this was a hard stop followed by a start, with no wait in between.
+		HttpApiClient client = newApiClient()
+		try {
+			ComputeServer computeServer = workload.server
+			Map authConfig = plugin.getAuthConfig(computeServer.cloud)
+
+			ServiceResponse identity = verifyGuestIdentity(client, authConfig, computeServer.parentServer.name, computeServer)
+			if (!identity.success) {
+				return identity
+			}
+			ServiceResponse rebooted = ProxmoxApiComputeUtil.rebootVMAndWait(client, authConfig, computeServer.parentServer.name, computeServer.externalId)
+			if (!rebooted?.success) {
+				String reason = ProxmoxApiComputeUtil.messageOf(rebooted)
+				log.error("Failed to restart workload ${workload.id}: $reason")
+				return ServiceResponse.error("Error restarting workload: $reason")
+			}
+			return ServiceResponse.success()
+		} catch (e) {
+			log.error "Error performing restart on VM: ${e}", e
+			return ServiceResponse.error("Error performing restart on VM: ${e}")
+		} finally {
+			client.shutdownClient()
 		}
-		def startResult = startWorkload(workload)
-		if (!startResult.success) {
-			log.error("Failed to start workload ${workload.id} during restart: ${startResult.msg}")
-			return ServiceResponse.error("Error restarting workload: Failed to start - ${startResult.msg}")
-		}
-		return ServiceResponse.success()
 	}
 
 	/**
@@ -1147,9 +1178,9 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 	 */
 	@Override
 	ServiceResponse removeWorkload(Workload workload, Map opts) {
+		HttpApiClient deleteClient = newApiClient()
+		HttpApiClient stopClient = newApiClient()
 		try {
-			HttpApiClient deleteClient = new HttpApiClient()
-			HttpApiClient stopClient = new HttpApiClient()
 			ComputeServer server = workload.server
 			Cloud cloud = server.cloud
 			Map authConfig = plugin.getAuthConfig(cloud)
@@ -1172,17 +1203,25 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 			if (!identity.success) {
 				return identity
 			}
-			ProxmoxApiComputeUtil.stopVM(stopClient, authConfig, nodeId, server.externalId)
-			sleep(5000)
+			// A running VM is shut down first and the shutdown task waited for (a hard stop when
+			// that fails); before 0.1.33 a hard stop's result was ignored and 5 s slept instead.
+			ServiceResponse poweredOff = ProxmoxApiComputeUtil.powerOffForDelete(stopClient, authConfig, nodeId, server.externalId)
+			if (!poweredOff.success) {
+				log.warn("VM ${server.externalId} on node $nodeId may still be running: ${ProxmoxApiComputeUtil.messageOf(poweredOff)}; trying the destroy anyway")
+			}
 			def destroyResult = ProxmoxApiComputeUtil.destroyVM(deleteClient, authConfig, nodeId, server.externalId)
 			if (!destroyResult?.success) {
-				return ServiceResponse.error("Destroying VM ${server.externalId} on node $nodeId failed: ${destroyResult?.msg ?: destroyResult?.error ?: destroyResult?.content}")
+				String stopNote = poweredOff.success ? '' : " (stopping it failed first: ${ProxmoxApiComputeUtil.messageOf(poweredOff)})"
+				return ServiceResponse.error("Destroying VM ${server.externalId} on node $nodeId failed: ${ProxmoxApiComputeUtil.apiErrorMessage(destroyResult)}$stopNote")
 			}
 			removeCloudInitSnippets(cloud, nodeId, server.externalId)
 			return ServiceResponse.success()
 		} catch (e) {
 			log.error "Error performing destroy on VM: ${e}", e
 			return ServiceResponse.error("Error performing destroy on VM: ${e}")
+		} finally {
+			stopClient.shutdownClient()
+			deleteClient.shutdownClient()
 		}
 	}
 
@@ -1230,19 +1269,7 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 	 */
 	@Override
 	ServiceResponse stopServer(ComputeServer computeServer) {
-		try {
-			HttpApiClient client = new HttpApiClient()
-			Map authConfig = plugin.getAuthConfig(computeServer.cloud)
-
-			ServiceResponse identity = verifyGuestIdentity(client, authConfig, computeServer.parentServer.name, computeServer)
-			if (!identity.success) {
-				return identity
-			}
-			return ProxmoxApiComputeUtil.stopVM(client, authConfig, computeServer.parentServer.name, computeServer.externalId)
-		} catch (e) {
-			log.error "Error performing stop on VM: ${e}", e
-			return ServiceResponse.error("Error performing stop on VM: ${e}")
-		}
+		return shutdownServer(computeServer)
 	}
 
 	/**
@@ -1333,10 +1360,12 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 		log.debug("resizeServer")
 
 		HttpApiClient resizeClient = new HttpApiClient()
+		// One authConfig for the three steps, so the reconfigure logs in once
+		Map authConfig = plugin.getAuthConfig(server.cloud)
 		List<ServiceResponse> responses = [
-			resizeWorkloadComputePlan(server, resizeRequest, opts, resizeClient),
-			resizeWorkloadDisks(server, resizeRequest, opts, resizeClient),
-			resizeWorkloadNetworks(server, resizeRequest, opts, resizeClient)
+			resizeWorkloadComputePlan(server, resizeRequest, opts, resizeClient, authConfig),
+			resizeWorkloadDisks(server, resizeRequest, opts, resizeClient, authConfig),
+			resizeWorkloadNetworks(server, resizeRequest, opts, resizeClient, authConfig)
 		]
 
 		def rtn = ServiceResponse.success()
@@ -1350,10 +1379,10 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 
 
 
-	ServiceResponse resizeWorkloadComputePlan(ComputeServer computeServer, ResizeRequest resizeRequest, Map opts, HttpApiClient resizeClient) {
+	ServiceResponse resizeWorkloadComputePlan(ComputeServer computeServer, ResizeRequest resizeRequest, Map opts, HttpApiClient resizeClient, Map authConfig = null) {
 		boolean isWorkload = true
 		ServiceResponse rtn = ServiceResponse.success()
-		def authConfigMap = plugin.getAuthConfig(computeServer.cloud)
+		def authConfigMap = authConfig ?: plugin.getAuthConfig(computeServer.cloud)
 
 		try {
 			//Compute
@@ -1412,11 +1441,11 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 
 
 
-	ServiceResponse resizeWorkloadDisks(ComputeServer server, ResizeRequest resizeRequest, Map opts, HttpApiClient resizeClient) {
+	ServiceResponse resizeWorkloadDisks(ComputeServer server, ResizeRequest resizeRequest, Map opts, HttpApiClient resizeClient, Map authConfig = null) {
 		def cloud = server.cloud
 		def extNodeId = server.parentServer.externalId
 		def extServerId = server.externalId
-		Map authConfig = plugin.getAuthConfig(cloud)
+		authConfig = authConfig ?: plugin.getAuthConfig(cloud)
 		List<ServiceResponse> responses = []
 
 		log.debug("Reconfigure: Resize Volumes to delete: $resizeRequest.volumesDelete")
@@ -1485,12 +1514,12 @@ class ProxmoxVeProvisionProvider extends AbstractProvisionProvider implements Vm
 
 
 
-	ServiceResponse resizeWorkloadNetworks(ComputeServer server, ResizeRequest resizeRequest, Map opts, HttpApiClient resizeClient) {
+	ServiceResponse resizeWorkloadNetworks(ComputeServer server, ResizeRequest resizeRequest, Map opts, HttpApiClient resizeClient, Map authConfig = null) {
 		def cloud = server.cloud
 		def extNodeId = server.parentServer.externalId
 		def extServerId = server.externalId
 
-		def authConfigMap = plugin.getAuthConfig(server.cloud)
+		def authConfigMap = authConfig ?: plugin.getAuthConfig(server.cloud)
 		List<ServiceResponse> responses = []
 
 		log.debug("Networks to Add: $resizeRequest.interfacesAdd")

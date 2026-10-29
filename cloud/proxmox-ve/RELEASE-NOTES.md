@@ -17,7 +17,67 @@ new number, and why the digests are recorded.
 
 The medium findings of the code review that 0.1.31 started from, plus a few small ones. They
 concern provisioning with more than one NIC, the template an image is cloned from, what the VM,
-network and image syncs write, and the commands run as root on the node.
+network and image syncs write, and the commands run as root on the node. Three points the review
+had left open are settled too: one API login per job, an optional check of the API's TLS
+certificate, and Stop and Restart through the guest instead of a hard power-off.
+
+**One API login per job.** Every request to the Proxmox API logged in first
+(`POST /access/ticket`): a refresh logged in once for the cluster listing, once per node and
+once per VM config, and every login shows in the cluster's auth log. Now each call Morpheus makes
+into the plugin logs in **once** and reuses that login for all its requests: a cloud refresh with
+all its syncs (the refresh passes its settings to every sync instead of letting each sync build
+its own); the build of a new VM (`runWorkload`: the clone and its task wait, the disk resize, the
+start and the wait for the guest's address); a reconfigure, whose plan, disk and network steps
+share one login; and each start, stop, restart or delete, the task waits of the last three
+included. A provision is more than one such call: Morpheus calls the validation of the order
+(`validateWorkload`) and the server-details check (`getServerDetails`) separately from the
+build, and each of them logs in once too. The ticket and CSRF token are kept, with the time they
+were issued, in the connection settings the call passes around, and reused while they are
+**younger than 60 minutes** (Proxmox accepts a ticket for two hours). The waits for a clone or a
+power task ask for the ticket on every poll and get the kept one; once it is an hour old, the
+next request logs in again, so only a call that runs longer than an hour logs in more than once
+(once more per further hour). Nothing is shared between calls or threads, there is no global
+cache, and the settings are never saved. Saving the cloud form still logs in afresh, once for
+its checks. The HTTP client no longer prints the login's response, which holds the ticket, at
+DEBUG. A ticket Proxmox rejects is not retried with a new login, and API tokens are still not
+supported.
+
+**Optional TLS certificate check.** New cloud setting **Verify TLS Certificate**, unticked by
+default. Unticked, every request goes out exactly as before (no certificate check, no SNI).
+Ticked, every API request of the cloud, the login included, and the check when the cloud is
+saved verify the certificate, chain and host name, against the appliance's Java trust store. A
+certificate the appliance does not trust fails the save with *The Proxmox API certificate is not
+trusted by the Morpheus appliance. Untick "Verify TLS Certificate" on the cloud, or give the
+cluster a certificate the appliance trusts.*; a refresh reports the cloud offline with the same
+text. Morpheus's HTTP client builds its connection on its first request and keeps that request's
+TLS mode for every later one; the mode is read once per job and every client lives inside one
+job, so no client serves both modes. The setting helps only with a certificate the appliance
+already trusts (ACME / Let's Encrypt, or a company CA in its trust store); importing the
+cluster's own `pve-root-ca.pem` into the appliance is the wrong fix, see
+[TLS certificate verification](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/blob/proxmox-ve-v0.1.33-lab/cloud/proxmox-ve/README.md#tls-certificate-verification).
+Node SSH host keys are still not checked. The label and help text are English only, like every
+other field of this cloud form: the plugin has no message bundles.
+
+**Stop shuts the guest down, Restart reboots it.** Stop was `status/stop`, which pulls the plug,
+and Restart was that hard stop followed at once by a start, neither waited for. Stop (instance
+and server) now calls `status/shutdown` with **`forceStop=1` and `timeout=120`**: Proxmox shuts
+the guest down through the QEMU guest agent when the VM has it enabled, by ACPI otherwise, and
+forces the VM off itself after 120 seconds. The plugin waits for that task (its UPID) for up to
+180 seconds and reports a failed task with Proxmox's own message. Restart calls
+`status/reboot` with `timeout=120` and waits the same way; when the reboot task fails or times
+out (a guest that ignores the shutdown), the plugin resets the VM (`status/reset`) and logs that.
+A reboot request that Proxmox refuses outright (a locked VM, for example), or that starts no
+task, is not followed by a reset: Restart fails with Proxmox's message. A stopped VM is started,
+as the old stop-and-start did. Delete no longer sends a hard stop, ignores its result and sleeps
+five seconds: a running VM is shut down the same way and the task waited for; when that fails,
+a hard stop follows, waited for too, and then the VM is destroyed as before. The parameters go
+in the request body. LXC containers do not take these paths: they are discovered only and have
+no power actions in Morpheus. Known limit, unchanged: the cloud provider's own `startServer` and
+`stopServer` are no-ops that report success without calling Proxmox. Known limit, new with the
+wait: for a VM managed by Proxmox HA, Proxmox answers a shutdown or stop with an `hastop` task
+that only hands the request to the HA manager, so the wait can end before the VM is off, and
+Stop can report success (or Delete go on to the destroy) while the VM is still shutting down.
+Not measured.
 
 **Every NIC of a new VM gets its own interface.** Provisioning numbered every interface `net0`,
 so a VM with two networks came up with one NIC, on the last network, and that network's
@@ -98,21 +158,45 @@ image as present on the node.
 - The first provision of an uploaded or system image on a node now copies the image to the node
   (an upload, or a download on the node, up to the image's size). The old file check always
   reported it as present, so `qm disk import` ran on a file that was not there.
+- **Stop can take up to about two minutes** for a guest that ignores the shutdown (Proxmox
+  forces it off after 120 seconds); it was immediate. A guest with the agent or ACPI goes down
+  cleanly instead of losing power.
+- **Restart is a real reboot** through the guest, with a reset only when the reboot task fails
+  or times out; it was a hard stop and a start.
+- Deleting a running VM shuts it down first and waits for it, up to about three minutes for a
+  guest that ignores the shutdown (longer when the hard stop after a failed shutdown has to be
+  waited for too).
+- A Stop or Restart that Proxmox refuses, or whose task fails, now fails in Morpheus with
+  Proxmox's message; before, the plugin reported success as soon as Proxmox accepted the request.
+- A refresh, the build of a VM, a reconfigure and each power action log in once instead of once
+  per API request (a call that runs longer than an hour, once more per further hour). A provision
+  also logs in once for the validation of the order and once for the server-details check, which
+  Morpheus calls separately.
+- New cloud setting *Verify TLS Certificate*; unticked (the default, and what existing clouds
+  get) behaves as before.
 
-Still open from the review, not changed here: TLS certificate and SSH host key verification
-(an option for the cloud form), stop and restart as hard power-off instead of a guest shutdown,
-a fresh API login for every call (ticket cache or API token auth), and the image sync matching
-images across clusters by VMID. An image with no location in this cloud still falls back to its
+Still open from the review, not changed here: SSH host key verification, API token login, and
+the image sync matching images across clusters by VMID. An image with no location in this cloud still falls back to its
 global id, which in another cluster can be an unrelated template with the same VMID; and the few
 seconds after a clone in which a refresh can still add a discovered server (above).
 
 ### Verified
 
-- Local build with JDK 17 and Gradle 9.8.0: 125 test cases (48 new: NIC order and the next NIC
-  index, the template check and the template ids per cloud, the clone lock, the address and
-  node tracking of the VM sync, the image rewrite rule, shell quoting, the node's file check
-  answer, query parameters, the SDN error codes, the taken-VMID check), 0 failures. The retry
-  loops around a taken VMID are not unit-tested: they need a live API.
+- Local build with JDK 17 and Gradle 9.8.0: 174 test cases, 0 failures (77 in 0.1.32). New:
+  NIC order and the next NIC index, the template check and the template ids per cloud, the clone
+  lock, the address and node tracking of the VM sync, the image rewrite rule, shell quoting, the
+  node's file check answer, query parameters, the SDN error codes, the taken-VMID check; and,
+  against a scripted API client without a network, the ticket kept and reused within a job, its
+  60-minute limit, a failed login keeping nothing, the login response kept out of the log, the
+  refresh's settings reaching every sync, the new checkbox and its default, the TLS mode on every
+  request including the login, the certificate message, the shutdown and reboot parameters in
+  the body, the task waits, the reset and hard-stop fallbacks, no reset after a refused reboot or
+  one without a task, a stopped VM on restart and delete, and which Proxmox calls the provider's
+  Stop (instance and server), Restart and Delete make, in order. The retry loops around a taken
+  VMID are not unit-tested: they need a live API.
+- From the plugin API 1.4.2 jar (`javap`): `HttpApiClient` builds its connection client on the
+  first request with that request's `ignoreSSL` and reuses it; `ignoreSSL: false` uses the JVM's
+  default trust store and a socket factory with its default host name check, and sends SNI.
 
 ### Not yet verified
 
@@ -123,6 +207,24 @@ seconds after a clone in which a refresh can still add a discovered server (abov
   two provisions started at the same time; a cluster with and without SDN vnets; the system
   image keeping its `remotePath` after a template sync; an uploaded image whose file name has a
   space; the *Add Network* dialog.
+- One login per job: the Proxmox auth log (`journalctl -u pvedaemon`, *successful auth for user*)
+  shows one login per cloud refresh, reconfigure, start, stop, restart or delete, and for a
+  provision one for the build plus one each for the order validation and the server-details
+  check, instead of one per request; the cloud stays `ok` over several refreshes; a provision or
+  task wait longer than an hour logs in again and carries on.
+- Verify TLS Certificate: ticked on a cloud against the lab's self-signed certificate, saving
+  must fail cleanly with the certificate message, and a refresh of an existing cloud switched to
+  ticked must report it offline with that message; unticked, saving and refreshing must work as
+  before. A host name the certificate does not carry must fail too (the host name check was read
+  from the plugin API's HTTP client, not measured). A trusted (ACME) certificate with the box
+  ticked was not available to test.
+- Stop, Restart and Delete of a test VM with the QEMU guest agent enabled, of one without it
+  (ACPI), and of a guest that ignores the shutdown (Stop forced off after 120 s, Restart falling
+  back to a reset, Delete falling back to a hard stop); that Morpheus waits out a Stop of about
+  two minutes without a timeout of its own; Restart of a stopped VM; Restart of a locked VM
+  (refused, no reset).
+- Stop and Delete of a VM managed by Proxmox HA: whether the `hastop` task ends before the VM is
+  off, so that Stop reports success too early and Delete's destroy finds the VM still running.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/proxmox-ve-v0.1.32-lab...proxmox-ve-v0.1.33-lab
 

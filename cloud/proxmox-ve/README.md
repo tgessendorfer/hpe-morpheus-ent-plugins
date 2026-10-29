@@ -55,6 +55,8 @@ then exposes VM Instance provisioning functionality.
 - [License](#license)
 - [Installing](#installing)
 - [Cloud setup](#cloud-setup)
+- [TLS certificate verification](#tls-certificate-verification)
+- [Stop, restart and delete](#stop-restart-and-delete)
 - [Upload image for provisioning](#upload-image-for-provisioning)
 - [Provisioning the image](#provisioning-the-image)
 
@@ -144,6 +146,64 @@ Once the cloud connects successfully, various artifacts are synchronized under `
 ### Templates (Virtual images - `Library > Virtual Images > Synced`):
 
 ![SyncPool](docs/sync_virtualimage.png)
+
+## TLS certificate verification
+
+By default the plugin does not check the certificate of the Proxmox API, so the cluster's own
+self-signed certificate works without any setup. The cloud setting **Verify TLS Certificate**
+(unticked by default, since lab build 0.1.33) makes every API request of the cloud, the login
+included, and the check when the cloud is saved verify the certificate, chain and host name,
+against the Morpheus appliance's Java trust store. Ticked, the requests also carry the host name
+(SNI), which a reverse proxy in front of the cluster may need; unticked, they do not. A
+certificate the appliance does not trust fails the save with *The Proxmox API certificate is not
+trusted by the Morpheus appliance*, and a refresh reports the cloud offline with the same text:
+untick the setting, or give the cluster a certificate the appliance trusts.
+
+The setting only helps when the appliance already trusts the certificate:
+
+- **ACME / Let's Encrypt.** Proxmox VE requests and renews such certificates itself
+  (*Datacenter > ACME*, then *Node > System > Certificates*). Public CAs are in the appliance's
+  trust store already. The cloud's API URL must use a name the certificate carries.
+- **A company CA** that the appliance's Java trust store already holds.
+
+Do **not** import the cluster's own root CA (`/etc/pve/pve-root-ca.pem`) into the appliance-wide
+trust store to make the self-signed certificate pass:
+
+- It has no name constraints: the appliance would accept it for any host name, not only for the
+  Proxmox nodes.
+- Its private key (`/etc/pve/priv/pve-root-ca.key`) lies on every node of the cluster, so root on
+  any node could issue certificates the whole appliance trusts, for any site.
+- HPE documents re-importing trusted certificates after an upgrade
+  ([Import Trusted Certificates](https://support.hpe.com/hpesc/public/docDisplay?docId=sd00008772en_us&docLocale=en_US&page=GUID-0BBD18FA-91D0-406A-B004-3F068114DE70.html),
+  HPE Morpheus Enterprise Software Documentation 9.1.0): a certificate imported into the Java
+  keystore can be lost on a Morpheus upgrade, and the cloud would go offline after it.
+
+The SSH connections to the nodes (image upload, `qm` commands) still do not check host keys,
+with or without this setting.
+
+## Stop, restart and delete
+
+Since lab build 0.1.33 the plugin goes through the guest instead of pulling the plug:
+
+- **Stop** asks Proxmox to shut the guest down (`status/shutdown` with `forceStop=1` and
+  `timeout=120`): through the QEMU guest agent when the VM has it enabled, by ACPI otherwise. A
+  guest that is not down after 120 seconds is forced off by Proxmox. The plugin waits for that
+  task, so Stop can take about two minutes for a guest that ignores the shutdown.
+- **Restart** is a real reboot (`status/reboot` with `timeout=120`), waited for. When the reboot
+  task fails or the guest does not go down in time, the plugin resets the VM instead (a hard
+  restart) and logs it. A reboot that Proxmox refuses outright, for example for a locked VM, is
+  not followed by a reset: Restart fails with Proxmox's message. A stopped VM is started.
+- **Delete** shuts a running VM down the same way, falls back to a hard stop when that fails,
+  waits for it, and then destroys the VM.
+
+Discovered LXC containers have no power actions in Morpheus. The cloud's own *Start Server* and
+*Stop Server* hooks are no-ops that report success without calling Proxmox; the VM actions above
+go through the provisioning provider.
+
+**VMs under Proxmox HA.** For a VM that the cluster's HA manager manages, Proxmox answers a
+shutdown or stop with an `hastop` task that only hands the request to the HA manager. That task
+can end before the VM is off, so Stop can report success, and Delete can go on to the destroy,
+while the VM is still shutting down. This was not measured.
 
 ## System images (nothing to upload)
 

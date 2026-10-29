@@ -22,6 +22,107 @@ class ProxmoxApiComputeUtil {
     static final Long API_CHECK_WAIT_INTERVAL = 2000
 
     /**
+     * How long a job reuses its login ticket. Proxmox accepts a ticket for two hours; after one
+     * hour the job logs in again, so a ticket handed to a long task wait stays well inside that.
+     */
+    static final long TICKET_MAX_AGE_MS = 60L * 60L * 1000L
+
+    /** Key of the login ticket in a job's authConfig (see getApiV2Token). */
+    static final String TICKET_KEY = 'apiTicket'
+
+    /**
+     * Seconds Proxmox gives a guest to shut down before it forces the VM off (Stop and delete:
+     * shutdown with forceStop), or to go down before a reboot gives up (Restart).
+     */
+    static final long GUEST_SHUTDOWN_TIMEOUT_SEC = 120L
+
+    /** Seconds a power task is waited for on top of GUEST_SHUTDOWN_TIMEOUT_SEC. */
+    static final long POWER_TASK_MARGIN_SEC = 60L
+
+    /** What validate() and a refresh report when the API's certificate is not trusted. */
+    static final String CERTIFICATE_NOT_TRUSTED_MSG = 'The Proxmox API certificate is not trusted by the Morpheus appliance. ' +
+            'Untick "Verify TLS Certificate" on the cloud, or give the cluster a certificate the appliance trusts.'
+
+    /**
+     * The ignoreSSL value of every request of a job: true (nothing is verified, as before 0.1.33)
+     * unless the cloud's "Verify TLS Certificate" is ticked.
+     *
+     * HttpApiClient builds its connection client on its first request, with that request's
+     * ignoreSSL, and reuses it for every later request whatever their ignoreSSL says, so one
+     * client must never serve both modes. It does not: the mode is read once per job into the
+     * job's authConfig (ProxmoxVePlugin.getAuthConfig, or validate()), every request takes it from
+     * there, each client lives inside one job of one cloud, and the login has a client of its own.
+     */
+    static boolean ignoreSsl(Map authConfig) {
+        return authConfig?.verifyTls != true
+    }
+
+    /** Whether a checkbox value from a cloud's config is ticked; Morpheus stores "on". */
+    static boolean checkboxTicked(def raw) {
+        return raw != null && raw.toString().trim().toLowerCase() in ['on', 'true', 'yes', '1']
+    }
+
+    /**
+     * Whether a failed request's error text reads like a TLS certificate failure: a chain the
+     * appliance does not trust, an expired certificate, or a host name the certificate lacks.
+     */
+    static boolean certificateFailure(String text) {
+        return text ? (text =~ /(?i)PKIX|certification path|CertPathValidator|SSLHandshake|SSLPeerUnverified|subject alternative name|No name matching|certificate/).find() : false
+    }
+
+    /**
+     * Proxmox's own words for a refused call: the "message" (and parameter "errors") of the JSON
+     * body, else whatever the client recorded.
+     */
+    static String apiErrorMessage(ServiceResponse response) {
+        String content = response?.content
+        if (content) {
+            try {
+                def parsed = new JsonSlurper().parseText(content)
+                if (parsed instanceof Map) {
+                    String text = [parsed.message?.toString()?.trim(), parsed.errors ? parsed.errors.toString() : null].findAll { it }.join(' ')
+                    if (text) {
+                        return text
+                    }
+                }
+            } catch (ignored) {
+                // not JSON: fall through to the raw text
+            }
+        }
+        def fallback = response?.msg ?: response?.error ?: content ?: (response?.errorCode ? "HTTP ${response.errorCode}" : null)
+        return fallback ? fallback.toString().trim() : 'no response'
+    }
+
+    /**
+     * A failed response with the text in msg as well: ServiceResponse.error() puts it only in
+     * errors.error and leaves msg null, so a caller reading msg found nothing.
+     */
+    static ServiceResponse failure(String message) {
+        ServiceResponse rtn = ServiceResponse.error(message)
+        rtn.msg = message
+        return rtn
+    }
+
+    /** The text of a response: its msg, else its error. */
+    static String messageOf(ServiceResponse response) {
+        return response?.msg ?: response?.error
+    }
+
+    /** The task id (UPID) a Proxmox call that starts a task answers with, or null. */
+    static String taskUpid(ServiceResponse response) {
+        def body = response?.data
+        if (!(body instanceof Map) && response?.content) {
+            try {
+                body = new JsonSlurper().parseText(response.content)
+            } catch (ignored) {
+                body = null
+            }
+        }
+        String upid = body instanceof Map ? body.data?.toString() : null
+        return upid?.startsWith('UPID:') ? upid : null
+    }
+
+    /**
      * Gives the client the cloud's API proxy (authConfig.networkProxy, from the cloud's
      * "API Proxy" setting) unless it already has one. Every request to Proxmox goes through
      * here, so a cloud behind a proxy works without each caller remembering it.
@@ -45,7 +146,7 @@ class ProxmoxApiComputeUtil {
                     ],
                     body     : [:],
                     contentType: ContentType.APPLICATION_JSON,
-                    ignoreSSL: true
+                    ignoreSSL: ignoreSsl(authConfig)
             ]
 
             newNics.each { nic ->
@@ -368,7 +469,7 @@ class ProxmoxApiComputeUtil {
                         delete: ""
                 ],
                 contentType: ContentType.APPLICATION_JSON,
-                ignoreSSL: true
+                ignoreSSL: ignoreSsl(authConfig)
         ]
 
         try {
@@ -409,7 +510,7 @@ class ProxmoxApiComputeUtil {
                         size: "${updatedVolume.maxStorage as Long / 1024 / 1024 / 1024}G"
                 ],
                 contentType: ContentType.APPLICATION_JSON,
-                ignoreSSL: true
+                ignoreSSL: ignoreSsl(authConfig)
         ]
 
         def results = withProxy(client, authConfig).callJsonApi(
@@ -437,7 +538,7 @@ class ProxmoxApiComputeUtil {
                     delete: ""
                 ],
                 contentType: ContentType.APPLICATION_JSON,
-                ignoreSSL: true
+                ignoreSSL: ignoreSsl(authConfig)
             ]
 
             newVolumes.each { vol ->
@@ -474,7 +575,7 @@ class ProxmoxApiComputeUtil {
                         delete: ""
                 ],
                 contentType: ContentType.APPLICATION_JSON,
-                ignoreSSL: true
+                ignoreSSL: ignoreSsl(authConfig)
         ]
 
         try {
@@ -562,7 +663,7 @@ class ProxmoxApiComputeUtil {
                         size  : "${rootVolume.maxStorage as Long / 1024 / 1024 / 1024}G",
                 ],
                 contentType: ContentType.APPLICATION_JSON,
-                ignoreSSL: true
+                ignoreSSL: ignoreSsl(authConfig)
             ]
 
             def resizeResults = withProxy(client, authConfig).callJsonApi(
@@ -588,7 +689,7 @@ class ProxmoxApiComputeUtil {
                         memory: ramValue
                 ],
                 contentType: ContentType.APPLICATION_JSON,
-                ignoreSSL: true
+                ignoreSSL: ignoreSsl(authConfig)
             ]
 
             Map vmConfig = getVMConfigById(client, authConfig, vmId, node)
@@ -719,7 +820,7 @@ class ProxmoxApiComputeUtil {
                     ],
                     body: requestBody,
                     contentType: ContentType.APPLICATION_JSON,
-                    ignoreSSL: true
+                    ignoreSSL: ignoreSsl(authConfig)
             ]
 
             log.debug("Cloning template $templateId from node $templateNode to VM $name($nextId) on node $nodeId")
@@ -1031,16 +1132,22 @@ class ProxmoxApiComputeUtil {
         return actionVMStatus(client, authConfig, nodeId, vmId, "start")
     }
 
+    /** Reboot through the guest (agent or ACPI); Proxmox gives up after GUEST_SHUTDOWN_TIMEOUT_SEC. */
     static rebootVM(HttpApiClient client, Map authConfig, String nodeId, String vmId) {
         log.debug("rebootVM")
-        return actionVMStatus(client, authConfig, nodeId, vmId, "reboot")
+        return actionVMStatus(client, authConfig, nodeId, vmId, "reboot", [timeout: GUEST_SHUTDOWN_TIMEOUT_SEC])
     }
 
+    /**
+     * Shutdown through the guest agent when the VM has one, ACPI otherwise; Proxmox forces the VM
+     * off after GUEST_SHUTDOWN_TIMEOUT_SEC (forceStop).
+     */
     static shutdownVM(HttpApiClient client, Map authConfig, String nodeId, String vmId) {
         log.debug("shutdownVM")
-        return actionVMStatus(client, authConfig, nodeId, vmId, "shutdown")
+        return actionVMStatus(client, authConfig, nodeId, vmId, "shutdown", [forceStop: 1, timeout: GUEST_SHUTDOWN_TIMEOUT_SEC])
     }
 
+    /** Hard stop: the VM is powered off at once, the guest is not asked. */
     static stopVM(HttpApiClient client, Map authConfig, String nodeId, String vmId) {
         log.debug("stopVM")
         return actionVMStatus(client, authConfig, nodeId, vmId, "stop")
@@ -1051,8 +1158,99 @@ class ProxmoxApiComputeUtil {
         return actionVMStatus(client, authConfig, nodeId, vmId, "reset")
     }
 
+    /**
+     * Stop as the Proxmox UI's Shutdown does it (shutdownVM), and return once its task has ended.
+     * A failed or timed-out task fails with Proxmox's message. Before 0.1.33 Stop was the hard
+     * stop, which pulls the plug at once.
+     */
+    static ServiceResponse shutdownVMAndWait(HttpApiClient client, Map authConfig, String nodeId, String vmId) {
+        return waitForPowerTask(client, authConfig, nodeId, vmId, 'shutdown', shutdownVM(client, authConfig, nodeId, vmId))
+    }
 
-    static actionVMStatus(HttpApiClient client, Map authConfig, String nodeId, String vmId, String action, int maxRetries = 3) {
+    /** The hard stop, waited for. */
+    static ServiceResponse stopVMAndWait(HttpApiClient client, Map authConfig, String nodeId, String vmId) {
+        return waitForPowerTask(client, authConfig, nodeId, vmId, 'stop', stopVM(client, authConfig, nodeId, vmId))
+    }
+
+    /**
+     * Restart as a real reboot: Proxmox shuts the guest down and starts it again. When the reboot
+     * task fails or times out (a guest that ignores the shutdown), the VM is reset instead, a hard
+     * restart. A reboot Proxmox refuses outright (a locked VM, a missing permission) or that starts
+     * no task is not followed by a reset: no shutdown failed, and the answer carries Proxmox's
+     * message. A stopped VM is started, as the stop-and-start before 0.1.33 did.
+     */
+    static ServiceResponse rebootVMAndWait(HttpApiClient client, Map authConfig, String nodeId, String vmId) {
+        if (getVMStatus(client, authConfig, nodeId, vmId) == 'stopped') {
+            log.info("VM $vmId on node $nodeId is stopped; restart starts it")
+            ServiceResponse started = startVM(client, authConfig, nodeId, vmId)
+            return started?.success ? started : failure("Starting the stopped VM $vmId on node $nodeId failed: ${apiErrorMessage(started)}")
+        }
+        ServiceResponse requested = rebootVM(client, authConfig, nodeId, vmId)
+        ServiceResponse rebooted = waitForPowerTask(client, authConfig, nodeId, vmId, 'reboot', requested)
+        if (rebooted.success) {
+            return rebooted
+        }
+        if (!requested?.success || !taskUpid(requested)) {
+            // Refused, or no task to wait for: the VM was never asked to go down, so no reset
+            log.warn("Restart of VM $vmId on node $nodeId failed: ${messageOf(rebooted)}")
+            return rebooted
+        }
+        log.warn("Reboot of VM $vmId on node $nodeId did not complete (${messageOf(rebooted)}); resetting the VM instead")
+        ServiceResponse reset = waitForPowerTask(client, authConfig, nodeId, vmId, 'reset', resetVM(client, authConfig, nodeId, vmId))
+        if (!reset.success) {
+            return failure("Restarting VM $vmId failed: ${messageOf(rebooted)}. The reset that followed failed too: ${messageOf(reset)}")
+        }
+        log.info("VM $vmId on node $nodeId was reset because its reboot did not complete")
+        return reset
+    }
+
+    /**
+     * Powers a VM off before it is destroyed: the shutdown of shutdownVMAndWait, and the hard stop
+     * when that fails. A VM Proxmox reports as stopped is left alone. The result is the last step's.
+     */
+    static ServiceResponse powerOffForDelete(HttpApiClient client, Map authConfig, String nodeId, String vmId) {
+        if (getVMStatus(client, authConfig, nodeId, vmId) == 'stopped') {
+            return ServiceResponse.success()
+        }
+        ServiceResponse shutdown = shutdownVMAndWait(client, authConfig, nodeId, vmId)
+        if (shutdown.success) {
+            return shutdown
+        }
+        log.warn("Shutdown of VM $vmId on node $nodeId before its delete failed (${messageOf(shutdown)}); stopping it hard")
+        ServiceResponse hardStop = stopVMAndWait(client, authConfig, nodeId, vmId)
+        if (!hardStop.success) {
+            return failure("Shutdown of VM $vmId failed (${messageOf(shutdown)}), and so did the hard stop (${messageOf(hardStop)})")
+        }
+        return hardStop
+    }
+
+    /**
+     * Waits for the task a power action started (Proxmox answers with its UPID) and turns the
+     * outcome into one response: the call refused, no task returned, or the task's end, with
+     * Proxmox's exit status when it failed.
+     */
+    static ServiceResponse waitForPowerTask(HttpApiClient client, Map authConfig, String nodeId, String vmId, String action, ServiceResponse started) {
+        if (!started?.success) {
+            return failure("Proxmox refused the $action of VM $vmId on node $nodeId: ${apiErrorMessage(started)}")
+        }
+        String upid = taskUpid(started)
+        if (!upid) {
+            return failure("Proxmox returned no task for the $action of VM $vmId on node $nodeId")
+        }
+        ServiceResponse done = waitForTaskComplete(client, authConfig, nodeId, upid, GUEST_SHUTDOWN_TIMEOUT_SEC + POWER_TASK_MARGIN_SEC)
+        if (!done?.success) {
+            return failure("The $action of VM $vmId on node $nodeId failed: ${messageOf(done)}")
+        }
+        log.debug("VM $vmId $action completed (task $upid)")
+        return new ServiceResponse(success: true, msg: "VM $vmId: $action completed", data: [upid: upid])
+    }
+
+
+    /**
+     * POST nodes/{node}/qemu/{vmid}/status/{action}. `params` are the action's parameters
+     * (timeout, forceStop); they go in the body, never in the path.
+     */
+    static actionVMStatus(HttpApiClient client, Map authConfig, String nodeId, String vmId, String action, Map params = [:], int maxRetries = 3) {
         int retryCount = 0
         Exception lastException = null
 
@@ -1068,9 +1266,9 @@ class ProxmoxApiComputeUtil {
                         body     : [
                                 vmid: vmId,
                                 node: nodeId
-                        ],
+                        ] + (params ?: [:]),
                         contentType: ContentType.APPLICATION_JSON,
-                        ignoreSSL: true
+                        ignoreSSL: ignoreSsl(authConfig)
                 ]
 
                 log.debug("Post path is: $authConfig.apiUrl${authConfig.v2basePath}/nodes/$nodeId/qemu/$vmId/status/$action/ (attempt ${retryCount + 1}/$maxRetries)")
@@ -1129,7 +1327,7 @@ class ProxmoxApiComputeUtil {
                             'CSRFPreventionToken': tokenCfg.csrfToken
                     ],
                     body: null,
-                    ignoreSSL: true,
+                    ignoreSSL: ignoreSsl(authConfig),
                     contentType: ContentType.APPLICATION_JSON,
             ]
 
@@ -1177,7 +1375,7 @@ class ProxmoxApiComputeUtil {
                             scsihw: "virtio-scsi-single"
                     ],
                     contentType: ContentType.APPLICATION_JSON,
-                    ignoreSSL: true
+                    ignoreSSL: ignoreSsl(authConfig)
             ]
 
             log.debug("Creating blank template for attaching qcow2...")
@@ -1225,15 +1423,9 @@ class ProxmoxApiComputeUtil {
         log.debug("waitForCloneToComplete: $templateId")
 
         try {
-            def tokenCfg = getApiV2Token(authConfig).data
             def opts = [
-                    headers: [
-                            'Content-Type': 'application/json',
-                            'Cookie': "PVEAuthCookie=$tokenCfg.token",
-                            'CSRFPreventionToken': tokenCfg.csrfToken
-                    ],
                     contentType: ContentType.APPLICATION_JSON,
-                    ignoreSSL: true
+                    ignoreSSL: ignoreSsl(authConfig)
             ]
 
             log.debug("Checking VM Status after clone template $templateId to VM $vmId on node $nodeId")
@@ -1241,6 +1433,14 @@ class ProxmoxApiComputeUtil {
 
             while (duration < timeout) {
                 log.debug("Checking VM $vmId status on node $nodeId")
+                // The job's ticket on every poll (getApiV2Token renews it after an hour), so an
+                // hour-long wait never runs on a ticket that is older than Proxmox accepts.
+                def tokenCfg = getApiV2Token(authConfig).data
+                opts.headers = [
+                        'Content-Type': 'application/json',
+                        'Cookie': "PVEAuthCookie=$tokenCfg.token",
+                        'CSRFPreventionToken': tokenCfg.csrfToken
+                ]
                 def results = withProxy(client, authConfig).callJsonApi(
                         (String) authConfig.apiUrl,
                         "${authConfig.v2basePath}/nodes/$nodeId/qemu/$vmId/config",
@@ -1285,20 +1485,21 @@ class ProxmoxApiComputeUtil {
         log.debug("waitForTaskComplete: $taskUPID on node $nodeId")
 
         try {
-            def tokenCfg = getApiV2Token(authConfig).data
             def opts = [
-                    headers: [
-                            'Content-Type': 'application/json',
-                            'Cookie': "PVEAuthCookie=$tokenCfg.token",
-                            'CSRFPreventionToken': tokenCfg.csrfToken
-                    ],
                     contentType: ContentType.APPLICATION_JSON,
-                    ignoreSSL: true
+                    ignoreSSL: ignoreSsl(authConfig)
             ]
 
             // Poll task status
             while (duration < timeout) {
                 log.debug("Checking task $taskUPID status on node $nodeId")
+                // The job's ticket on every poll, as in waitForCloneToComplete
+                def tokenCfg = getApiV2Token(authConfig).data
+                opts.headers = [
+                        'Content-Type': 'application/json',
+                        'Cookie': "PVEAuthCookie=$tokenCfg.token",
+                        'CSRFPreventionToken': tokenCfg.csrfToken
+                ]
                 def results = withProxy(client, authConfig).callJsonApi(
                         (String) authConfig.apiUrl,
                         "${authConfig.v2basePath}/nodes/$nodeId/tasks/$taskUPID/status",
@@ -2033,7 +2234,7 @@ class ProxmoxApiComputeUtil {
                         'CSRFPreventionToken': tokenCfg.csrfToken
                     ],
                     contentType: ContentType.APPLICATION_JSON,
-                    ignoreSSL: true
+                    ignoreSSL: ignoreSsl(authConfig)
             )
             // The query goes in queryParams: the third argument of callJsonApi is the user name,
             // so a query string passed there was dropped and every listing came back unfiltered.
@@ -2086,11 +2287,46 @@ class ProxmoxApiComputeUtil {
         return params
     }
 
+    /**
+     * The session ticket and CSRF token for a job's requests. The first call of a job logs in
+     * (POST access/ticket) and keeps both in the job's authConfig, with the time it got them;
+     * later calls return them while they are younger than TICKET_MAX_AGE_MS. Before 0.1.33 every
+     * request logged in again. Nothing outlives the job: each job builds its own authConfig
+     * (ProxmoxVePlugin.getAuthConfig, or validate()), and no code saves or logs that map. A failed
+     * login keeps nothing, so the next call tries again.
+     */
     static ServiceResponse getApiV2Token(Map authConfig) {
-        def path = "access/ticket"
-        //log.debug("getApiV2Token: path: ${path}")
-        HttpApiClient client = withProxy(new HttpApiClient(), authConfig)
+        Map ticket = cachedTicket(authConfig, System.currentTimeMillis())
+        if (ticket) {
+            return new ServiceResponse(success: true, data: ticket)
+        }
+        // A client of its own for the login (see ignoreSsl)
+        HttpApiClient client = new HttpApiClient()
+        try {
+            return login(client, authConfig)
+        } finally {
+            // Without this each login kept its connection pool open until garbage collection.
+            client.shutdownClient()
+        }
+    }
 
+    /** The job's ticket as [csrfToken, token] while it is younger than TICKET_MAX_AGE_MS, else null. */
+    static Map cachedTicket(Map authConfig, long now) {
+        def kept = authConfig?.get(TICKET_KEY)
+        if (!(kept instanceof Map) || !kept.token || !kept.csrfToken || !(kept.obtainedAt instanceof Number)) {
+            return null
+        }
+        long age = now - (kept.obtainedAt as long)
+        return (age >= 0 && age < TICKET_MAX_AGE_MS) ? [csrfToken: kept.csrfToken, token: kept.token] : null
+    }
+
+    /**
+     * Logs in through the given client and keeps the ticket in the job's authConfig. The login's
+     * response is kept out of the log: HttpApiClient prints a successful response at DEBUG, and
+     * this one holds the ticket.
+     */
+    static ServiceResponse login(HttpApiClient client, Map authConfig) {
+        def path = "access/ticket"
         def rtn = new ServiceResponse(success: false)
         try {
 
@@ -2102,30 +2338,34 @@ class ProxmoxApiComputeUtil {
                     headers: ['Content-Type':'application/x-www-form-urlencoded'],
                     body: bodyStr,
                     contentType: ContentType.APPLICATION_FORM_URLENCODED,
-                    ignoreSSL: true
+                    ignoreSSL: ignoreSsl(authConfig),
+                    suppressLog: true
             )
             def results = withProxy(client, authConfig).callJsonApi(authConfig.apiUrl,"${authConfig.v2basePath}/${path}", opts, 'POST')
 
-            //log.debug("getApiV2Token API request results: ${results.toMap()}")
             if(results?.success && !results?.hasErrors()) {
-                rtn.success = true
                 def tokenData = results.data.data
+                rtn.success = true
                 rtn.data = [csrfToken: tokenData.CSRFPreventionToken, token: tokenData.ticket]
-
+                authConfig[TICKET_KEY] = [token: tokenData.ticket, csrfToken: tokenData.CSRFPreventionToken,
+                                          obtainedAt: System.currentTimeMillis()]
             } else {
+                String detail = [results?.error, results?.errors ? results.errors.toString() : null, results?.content]
+                        .findAll { it }.join(' ')
                 rtn.success = false
-                rtn.msg = "Error retrieving token: $results.data"
-                log.error("Error retrieving token: $results.data")
+                if (!ignoreSsl(authConfig) && certificateFailure(detail)) {
+                    rtn.msg = CERTIFICATE_NOT_TRUSTED_MSG
+                    log.error("Login to ${authConfig.apiUrl} failed, the certificate is not trusted: ${detail}")
+                } else {
+                    rtn.msg = "Error retrieving token: ${detail ?: results?.data}"
+                    log.error("Error retrieving token: ${detail ?: results?.data}")
+                }
             }
             return rtn
         } catch(e) {
             log.error "Error in getApiV2Token: ${e}", e
             rtn.msg = "Error in getApiV2Token: ${e}"
             rtn.success = false
-        } finally {
-            // Every API call logs in through its own client; without this each one kept its
-            // connection pool open until garbage collection.
-            client.shutdownClient()
         }
         return rtn
     }

@@ -105,7 +105,8 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 				placeHolder: 'https://proxmox.example.com:8006',
 				helpText: 'Full base URL of the Proxmox VE API, including scheme and port — the web UI address, e.g. https://proxmox.example.com:8006. ' +
 						'The plugin appends /api2/json itself. A bare hostname or IP is not accepted and fails validation with ' +
-						'"Unable to validate cloud connection using provided credentials and URL". A self-signed certificate is fine; it is not verified.'
+						'"Unable to validate cloud connection using provided credentials and URL". A self-signed certificate is fine ' +
+						'unless "Verify TLS Certificate" below is ticked.'
 		)
 
 		options << new OptionType(
@@ -148,6 +149,22 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 				helpText: 'Password for the Proxmox API user above. This is the password you use to log into the Proxmox web UI — ' +
 						'not necessarily the same as the node SSH password below.'
 		)
+		// Off by default: off sends every API request with ignoreSSL, as before 0.1.33.
+		options << new OptionType(
+				name: 'Verify TLS Certificate',
+				code: 'proxmox-verify-tls',
+				displayOrder: 4,
+				fieldContext: 'config',
+				fieldLabel: 'Verify TLS Certificate',
+				fieldName: 'verifyTls',
+				inputType: OptionType.InputType.CHECKBOX,
+				required: false,
+				helpText: 'Off by default. When ticked, the appliance checks the Proxmox API certificate (chain and host name) on every API call, ' +
+						'the login included, and refuses a certificate it does not trust. Tick it only when the appliance already trusts the ' +
+						'certificate: one from ACME / Let\'s Encrypt (built into Proxmox), or from a company CA in the appliance\'s Java trust store. ' +
+						'The cluster\'s own self-signed certificate fails. Node SSH host keys are not checked either way.'
+		)
+
 /*		options << new OptionType(
 				name: 'Proxmox Token',
 				code: 'proxmox-token',
@@ -465,12 +482,20 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 				return new ServiceResponse(success: false, msg: 'Enter a base url.')
 			}
 
-			// Setup token get using util class
+			// Setup token get using util class. A new authConfig, so validation always logs in afresh
+			// with the submitted values, the "Verify TLS Certificate" setting included.
 			log.debug("Cloud Validation: Attempting authentication to populate access token and csrf token.")
-			Map authConfig = [username: username, password: password, apiUrl: baseUrl, v2basePath: ProxmoxVePlugin.V2_BASE_PATH, networkProxy: cloudInfo.apiProxy]
+			Map authConfig = [username: username, password: password, apiUrl: baseUrl, v2basePath: ProxmoxVePlugin.V2_BASE_PATH, networkProxy: cloudInfo.apiProxy,
+							  verifyTls: ProxmoxApiComputeUtil.checkboxTicked(cloudInfo.getConfigMap()?.get('verifyTls'))]
 			def tokenTest = ProxmoxApiComputeUtil.getApiV2Token(authConfig)
 			if (tokenTest.success) {
-				ServiceResponse versionResponse = ProxmoxApiComputeUtil.getProxmoxVersion(new HttpApiClient(), authConfig)
+				HttpApiClient versionClient = new HttpApiClient()
+				ServiceResponse versionResponse
+				try {
+					versionResponse = ProxmoxApiComputeUtil.getProxmoxVersion(versionClient, authConfig)
+				} finally {
+					versionClient.shutdownClient()
+				}
 				Map parsedVersion = ProxmoxApiComputeUtil.parseProxmoxVersion(versionResponse?.data?.version?.toString())
 				if (!versionResponse.success || !parsedVersion.major) {
 					return new ServiceResponse(success: false, msg: 'Authenticated, but unable to determine the Proxmox VE version.')
@@ -479,6 +504,8 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 					return new ServiceResponse(success: false, msg: "Unsupported Proxmox VE version ${versionResponse.data.version}. This plugin supports versions 8 and 9.")
 				}
 				return new ServiceResponse(success: true, msg: "Cloud connection validated against Proxmox VE ${versionResponse.data.version}.")
+			} else if (tokenTest.msg == ProxmoxApiComputeUtil.CERTIFICATE_NOT_TRUSTED_MSG) {
+				return new ServiceResponse(success: false, msg: tokenTest.msg)
 			} else {
 				return new ServiceResponse(success: false, msg: 'Unable to validate cloud connection using provided credentials and URL')
 			}
@@ -529,10 +556,13 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 		log.debug("Refresh triggered, service url is: " + cloudInfo.serviceUrl)
 		HttpApiClient client = new HttpApiClient()
 		try {
+			// One authConfig for the whole refresh: it keeps the login ticket, so the check below
+			// logs in and every sync after it reuses that login (getApiV2Token).
+			Map authConfig = plugin.getAuthConfig(cloudInfo)
 			// Reach the API before any sync runs. Every sync skips itself on a failed listing,
 			// but a refresh that cannot even log in must report the cloud offline instead of
 			// success, so the status shows the outage and nothing is synced against it.
-			ServiceResponse ticket = ProxmoxApiComputeUtil.getApiV2Token(plugin.getAuthConfig(cloudInfo))
+			ServiceResponse ticket = ProxmoxApiComputeUtil.getApiV2Token(authConfig)
 			if (!ticket?.success) {
 				log.warn("Proxmox API of cloud ${cloudInfo.name} not reachable: ${ticket?.msg}")
 				return ServiceResponse.error("Proxmox API not reachable: ${ticket?.msg}", null, [status: Cloud.Status.offline])
@@ -541,8 +571,7 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 			// without opening the Proxmox UI. Never fatal: a cloud that cannot report
 			// its version should still sync.
 			try {
-				Map versionAuthConfig = plugin.getAuthConfig(cloudInfo)
-				ServiceResponse versionResponse = ProxmoxApiComputeUtil.getProxmoxVersion(client, versionAuthConfig)
+				ServiceResponse versionResponse = ProxmoxApiComputeUtil.getProxmoxVersion(client, authConfig)
 				String pveVersion = versionResponse?.data?.version?.toString()
 				if (versionResponse?.success && pveVersion && cloudInfo.serviceVersion != pveVersion) {
 					log.info("Proxmox VE version detected: ${pveVersion}")
@@ -554,16 +583,16 @@ class ProxmoxVeCloudProvider implements CloudProvider {
 			}
 
 			log.debug("Synchronizing hosts, datastores, networks, VMs and virtual images...")
-			(new PoolSync(plugin, cloudInfo, client)).execute()
-			(new HostSync(plugin, cloudInfo, client)).execute()
-			(new DatastoreSync(plugin, cloudInfo, client)).execute()
-			(new NetworkSync(plugin, cloudInfo, client)).execute()
-			(new VMSync(plugin, cloudInfo, client, this)).execute()
+			(new PoolSync(plugin, cloudInfo, client, authConfig)).execute()
+			(new HostSync(plugin, cloudInfo, client, authConfig)).execute()
+			(new DatastoreSync(plugin, cloudInfo, client, authConfig)).execute()
+			(new NetworkSync(plugin, cloudInfo, client, authConfig)).execute()
+			(new VMSync(plugin, cloudInfo, client, this, authConfig)).execute()
 			// After VMSync: the two scope themselves by distinct server type codes,
 			// so order does not affect correctness, but running containers second
 			// keeps the log reading VMs-then-containers like the API does.
-			(new LxcSync(plugin, cloudInfo, client, this)).execute()
-			(new VirtualImageLocationSync(plugin, cloudInfo, client, this)).execute()
+			(new LxcSync(plugin, cloudInfo, client, this, authConfig)).execute()
+			(new VirtualImageLocationSync(plugin, cloudInfo, client, this, authConfig)).execute()
 
 		} catch (e) {
 			log.error("refresh cloud error: ${e}", e)

@@ -36,13 +36,14 @@ class VMSync {
     private static final String UNMANAGED_SERVER_CODE = 'proxmox-qemu-vm-unmanaged'
     private static final String MANAGED_SERVER_CODE = 'proxmox-qemu-vm'
 
-    VMSync(ProxmoxVePlugin proxmoxVePlugin, Cloud cloud, HttpApiClient apiClient, CloudProvider cloudProvider) {
+    VMSync(ProxmoxVePlugin proxmoxVePlugin, Cloud cloud, HttpApiClient apiClient, CloudProvider cloudProvider, Map authConfig = null) {
         this.@plugin = proxmoxVePlugin
         this.@cloud = cloud
         this.@apiClient = apiClient
         this.@context = proxmoxVePlugin.morpheus
         this.@cloudProvider = cloudProvider
-        this.@authConfig = plugin.getAuthConfig(cloud)
+        // A refresh passes its own, which carries the refresh's login ticket
+        this.@authConfig = authConfig ?: plugin.getAuthConfig(cloud)
     }
 
 

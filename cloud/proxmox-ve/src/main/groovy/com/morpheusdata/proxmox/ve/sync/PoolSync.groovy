@@ -30,19 +30,20 @@ class PoolSync {
     private Map authConfig
 
 
-    public PoolSync(ProxmoxVePlugin plugin, Cloud cloud, HttpApiClient apiClient) {
+    public PoolSync(ProxmoxVePlugin plugin, Cloud cloud, HttpApiClient apiClient, Map authConfig = null) {
         this.@plugin = plugin
         this.@cloud = cloud
         this.@morpheusContext = plugin.morpheus
         this.@apiClient = apiClient
-        this.@authConfig = plugin.getAuthConfig(cloud)
+        // A refresh passes its own, which carries the refresh's login ticket
+        this.@authConfig = authConfig ?: plugin.getAuthConfig(cloud)
     }
 
 
     def execute() {
         log.debug "PoolSync"
         try {
-            def listResults = ProxmoxApiComputeUtil.listProxmoxPools(apiClient, plugin.getAuthConfig(cloud))
+            def listResults = ProxmoxApiComputeUtil.listProxmoxPools(apiClient, authConfig)
             log.debug("Pools found: $listResults.data")
 
             if (listResults.success) {

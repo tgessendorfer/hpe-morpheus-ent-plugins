@@ -4,6 +4,7 @@ import com.morpheusdata.core.Plugin
 import com.morpheusdata.model.Cloud
 import com.morpheusdata.model.AccountCredential
 import com.morpheusdata.proxmox.ve.ProxmoxVeNodeOptionSourceProvider
+import com.morpheusdata.proxmox.ve.util.ProxmoxApiComputeUtil
 import groovy.util.logging.Slf4j
 
 /**
@@ -45,6 +46,11 @@ class ProxmoxVePlugin extends Plugin {
     }
 
 
+    /**
+     * The connection settings of one job (a refresh, a provision, a power action): a new map on
+     * every call. ProxmoxApiComputeUtil.getApiV2Token keeps the job's login ticket in it, so a job
+     * passes its map along and drops it at the end; it is never saved.
+     */
     def getAuthConfig(Cloud cloud) {
         log.debug "getAuthConfig: ${cloud}"
         def rtn = [
@@ -53,7 +59,9 @@ class ProxmoxVePlugin extends Plugin {
                 username    : null,
                 password    : null,
                 // The cloud's "API Proxy"; ProxmoxApiComputeUtil.withProxy applies it to every request
-                networkProxy: cloud.apiProxy
+                networkProxy: cloud.apiProxy,
+                // The cloud's "Verify TLS Certificate"; off means ignoreSSL, as before 0.1.33
+                verifyTls   : ProxmoxApiComputeUtil.checkboxTicked(cloud.configMap?.verifyTls)
         ]
 
         if(!cloud.accountCredentialLoaded) {
