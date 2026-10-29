@@ -31,6 +31,11 @@ import java.time.Instant
  * Anthropic reports separate buckets for requests, input tokens and output
  * tokens. Morpheus only models one token bucket, so the input token bucket is
  * used - it is the one that MCP-heavy agent traffic actually exhausts.
+ *
+ * The probe is a billed request of its own and runs only against api.anthropic.com.
+ * Through any other host it is skipped and the usage fields are emptied, since
+ * Morpheus keeps no time stamp with them and a value that is never renewed would
+ * read as current.
  */
 @Slf4j
 class LlmUsageSync {
@@ -51,6 +56,15 @@ class LlmUsageSync {
 	// Each probe is a request of its own; three are enough to get past a stale catalog.
 	static final int MAX_PROBE_MODELS = 3
 
+	// The only host the probe is sent to.
+	static final String ANTHROPIC_API_HOST = 'api.anthropic.com'
+
+	// Everything the probe fills in, and everything emptied when it does not run.
+	static final List<String> USAGE_FIELDS = [
+		'tokenUsageLimit', 'tokenUsageRemaining', 'tokenUsageUsed', 'tokenUsagePeriod', 'tokenUsageResetAt',
+		'requestUsageLimit', 'requestUsageRemaining', 'requestUsageUsed', 'requestUsagePeriod', 'requestUsageResetAt'
+	]
+
 	static final List<String> RATE_LIMIT_HEADERS = [
 		REQUESTS_LIMIT, REQUESTS_REMAINING, REQUESTS_RESET,
 		INPUT_TOKENS_LIMIT, INPUT_TOKENS_REMAINING, INPUT_TOKENS_RESET,
@@ -69,10 +83,15 @@ class LlmUsageSync {
 	/**
 	 * Probes with the first model, moving on to the next only when the API says the
 	 * model does not exist or has been retired - a catalog can still list one. Any
-	 * other failure is not about the model, so it is not retried.
+	 * other failure is not about the model, so it is not retried. A base URL whose
+	 * host is not api.anthropic.com gets no probe at all.
 	 */
 	void execute(AnthropicApiService apiService, String baseUrl, String apiKey, String apiVersion, List<String> models, Map opts = [:]) {
 		if (!llmIntegration || !apiService) {
+			return
+		}
+		if (!isAnthropicApiHost(baseUrl)) {
+			skipProbe(baseUrl)
 			return
 		}
 		List<String> candidates = (models ?: [null]).take(MAX_PROBE_MODELS)
@@ -93,8 +112,97 @@ class LlmUsageSync {
 			return
 		}
 		if (applyHeadersUsageMetrics(usageHeaders)) {
-			morpheusContext?.llm?.integration?.save(llmIntegration)
+			saveIntegration()
 		}
+	}
+
+	/**
+	 * True when the base URL's host is api.anthropic.com, in any letter case, with any
+	 * port or path. Only that host is known to answer the probe with the
+	 * anthropic-ratelimit-* headers: OpenRouter sends none, and what another gateway
+	 * passes on would describe the gateway's own Anthropic account, not this integration.
+	 */
+	static boolean isAnthropicApiHost(String baseUrl) {
+		return urlHost(baseUrl) == ANTHROPIC_API_HOST
+	}
+
+	/** The host of a URL, lower case and without a trailing dot; null when it has none. */
+	static String urlHost(String url) {
+		String raw = url?.trim()
+		if (!raw) {
+			return null
+		}
+		try {
+			String host = new URI(raw.contains('://') ? raw : "https://${raw}".toString()).host
+			return host ? host.toLowerCase(Locale.ROOT).replaceFirst('\\.$', '') : null
+		} catch (Exception ignored) {
+			return null
+		}
+	}
+
+	/**
+	 * No probe through a gateway: it would be billed and bring back no Anthropic limits
+	 * for this integration. Values an earlier probe stored, before the endpoint changed,
+	 * are emptied rather than left on show as if they were current.
+	 */
+	protected void skipProbe(String baseUrl) {
+		String reason = "Anthropic usage probe skipped for integration ${integrationLabel()}: " +
+			"${urlHost(baseUrl) ?: 'the endpoint'} is not ${ANTHROPIC_API_HOST}, the only host whose anthropic-ratelimit-* headers describe this integration"
+		if (clearUsageMetrics()) {
+			logInfo("${reason}; the usage values of an earlier probe were cleared")
+		} else {
+			// Repeats on every refresh of a gateway integration, so it stays at DEBUG.
+			logDebug(reason)
+		}
+	}
+
+	/** Empties every usage field and saves the integration when one held a value. */
+	boolean clearUsageMetrics() {
+		if (!llmIntegration) {
+			return false
+		}
+		boolean saveRequired = false
+		USAGE_FIELDS.each { String field ->
+			saveRequired = assignIfChanged(field, null) || saveRequired
+		}
+		if (saveRequired) {
+			saveIntegration()
+		}
+		return saveRequired
+	}
+
+	/**
+	 * The data service hands back an RxJava Single; blocking on it makes sure the save
+	 * has run before the refresh moves on, as the model sync does with its saves.
+	 */
+	protected void saveIntegration() {
+		def integrationService = morpheusContext?.llm?.integration
+		if (!integrationService) {
+			return
+		}
+		try {
+			integrationService.save(llmIntegration)?.blockingGet()
+		} catch (Exception e) {
+			logWarn("Could not save the Anthropic usage values of integration ${integrationLabel()}: ${e.message}")
+		}
+	}
+
+	// The skip line and a failed save go through these, so a test can check their
+	// level and text.
+	protected void logInfo(String line) {
+		log.info(line)
+	}
+
+	protected void logDebug(String line) {
+		log.debug(line)
+	}
+
+	protected void logWarn(String line) {
+		log.warn(line)
+	}
+
+	protected String integrationLabel() {
+		return (llmIntegration?.accountIntegration?.id ?: llmIntegration?.id)?.toString() ?: 'without id'
 	}
 
 	protected static boolean isModelUnavailable(Map usageResult) {

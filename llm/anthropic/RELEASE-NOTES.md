@@ -9,9 +9,10 @@ shaded `-all.jar` is attached. Notes for 1.4.1 and earlier exist only there.
 ## 1.6.6
 
 **Fix release from a code review: the chat retry works, keys in stored credentials are found on
-update and refresh, models that leave the catalog are removed, and the per-question memory is kept
+update and refresh, models that leave the catalog are removed, the per-question memory is kept
 per integration and agent, where a tool call id that two questions claim at once restores
-nothing.** Built against plugin API 1.4.2. No new setting.
+nothing, and the usage probe goes to `api.anthropic.com` only.** Built against plugin API 1.4.2.
+No new setting.
 
 - **The chat retry never ran.** `generateResponse` was meant to send a request up to three times
   after a broken connection, but it waited for an exception, and the API service reports every
@@ -117,6 +118,22 @@ nothing.** Built against plugin API 1.4.2. No new setting.
   under-reported them.
 - **Unloading the plugin closes its pooled HTTP clients**, so an upgrade leaves no connection pool
   behind.
+- **The usage probe is sent to `api.anthropic.com` only.** Every refresh sent a billed
+  `max_tokens: 1` request to read the `anthropic-ratelimit-*` headers, through OpenRouter and other
+  gateways too, where no such headers come back (OpenRouter) or where they would describe the
+  gateway's own Anthropic account rather than this integration. The probe now runs only when the
+  host of the **API Endpoint** is `api.anthropic.com` (any letter case, port or path; an empty
+  endpoint means `api.anthropic.com`). For any other host the refresh sends nothing, empties the
+  integration's usage fields and logs *Anthropic usage probe skipped for integration N:
+  openrouter.ai is not api.anthropic.com, ...* at DEBUG, or at INFO with *... the usage values of an earlier probe
+  were cleared* when it empties values that an earlier probe left behind (from when the
+  integration pointed at `api.anthropic.com`, or from a gateway that passed the headers on).
+  Morpheus stores those fields without a time stamp, so an old value would keep reading as current.
+- **The usage values are saved and the save is waited for.** The probe handed the integration to
+  Morpheus' data service without subscribing to the RxJava `Single` that came back, so whether its
+  values reached the database depended on the appliance's implementation of that service. It now
+  blocks on the save, as the model sync does, and logs a failed save as a warning
+  (*Could not save the Anthropic usage values of integration N: ...*).
 
 ### Behaviour changes from 1.6.5
 
@@ -136,10 +153,18 @@ nothing.** Built against plugin API 1.4.2. No new setting.
 - With thinking on, a forced tool choice becomes `auto`.
 - A tool call cut off at `max_tokens` no longer reaches Morpheus.
 - A chat request without any API key is not sent.
+- **No usage probe through OpenRouter or any other gateway**: only an API Endpoint on
+  `api.anthropic.com` gets it. A gateway integration's usage fields are emptied at the next refresh
+  and stay empty.
+- **The usage values are written with a blocking save.** A refresh on `api.anthropic.com` writes
+  the integration whenever a usage value changed, which is nearly every refresh because the remaining
+  budget moves; a gateway integration is written once, when the values of an earlier probe are
+  emptied. If the appliance's data service saves only once its result is subscribed to, 1.6.5 never
+  stored these values and 1.6.6 is the first version that does.
 
 ### Verified
 
-- Unit tests (Spock), 52 more test cases than in 1.6.5: a connection failure and a 529 are retried,
+- Unit tests (Spock), 78 more test cases than in 1.6.5: a connection failure and a 529 are retried,
   an HTTP error, a read timeout and a fourth attempt are not; a request without a key is not sent,
   streaming or not; the stored credential is loaded once and kept, a handed-over key needs no
   lookup, Local Credentials and a failing lookup fall back to the local field, and saving finds the
@@ -172,8 +197,15 @@ nothing.** Built against plugin API 1.4.2. No new setting.
   the citations of the answer, and each streamed block carries exactly the fields of a non-streaming
   one; `shutdown()` closes every pooled client; the model list request carries `limit=1000` as a
   query string (a local HTTP server checks the request line instead of the former test that checked
-  nothing).
-- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 184 tests,
+  nothing); a refresh sends the usage probe for an empty API Endpoint and for `api.anthropic.com` in
+  any letter case and with a port or path, and none for OpenRouter or another gateway host; a host
+  that only begins or ends with `api.anthropic.com`, carries it in the path or as a user name, or
+  does not parse counts as a gateway; a refresh through a gateway empties the usage fields an
+  earlier probe filled and saves once, and saves nothing when they were empty; the save is
+  subscribed to (a lazy `Single` runs), and a failing save is logged as a warning without breaking
+  the refresh; the skip is logged once, at DEBUG when nothing was stored and at INFO with *were
+  cleared* when values were emptied, and a probe against `api.anthropic.com` logs no skip line.
+- Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 210 tests,
   0 failures.
 
 ### Not yet verified
@@ -191,6 +223,16 @@ nothing.** Built against plugin API 1.4.2. No new setting.
   as well.
 - The *Cost* footer through OpenRouter for a question with a tool loop: it still sums every request
   of the question now that its total is kept per integration and system prompt.
+- The usage probe on an appliance: a refresh of an integration on `api.anthropic.com` still fills
+  the usage fields, now with a blocking save, and where Morpheus shows them; a refresh that also
+  removed or disabled a model leaves the model list and every agent's model as the model sync left
+  them (the integration that is saved afterwards is the one Morpheus handed to the refresh, with the
+  model list from before that sync), and the log shows no *Could not save the Anthropic usage
+  values*; a refresh through OpenRouter sends no `max_tokens: 1` request (none in OpenRouter's
+  activity list) and leaves the usage fields empty, with the DEBUG or INFO line in the log; an
+  integration switched from `api.anthropic.com` to OpenRouter loses its old values at the next
+  refresh, read back in the UI or over the API and not only from the log line (the plugin empties
+  the values Morpheus hands it with the integration; if those arrive empty, the stored ones stay).
 - The **Sources** list under answers is unchanged in this release. In a chat with web search and
   three follow-up questions: whether the model starts writing its own **Sources** heading, and the
   input tokens of each request (the replayed answers carry their source lists).

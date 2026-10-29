@@ -23,7 +23,7 @@ guarantee tool-schema conformance.
 | Extended thinking | yes — optional, with budget control |
 | Web search and fetch | yes — optional, run by Anthropic, no extra MCP server |
 | 1M token context (beta) | yes — optional, Sonnet 4.5+ |
-| Usage / rate limit sync | yes — from the `anthropic-ratelimit-*` headers |
+| Usage / rate limit sync | yes — from the `anthropic-ratelimit-*` headers, `api.anthropic.com` only |
 | Model catalog sync (`GET /v1/models`) | yes |
 | Token usage visible in chat | yes — optional footer, since Morpheus shows none |
 | Embeddings | no (Anthropic offers no embedding endpoint) |
@@ -279,8 +279,9 @@ Two things worth being clear about:
   Several integrations against different endpoints — a corporate gateway, a LiteLLM passthrough, the
   Anthropic API — can each take a different route.
 - **It applies to every call the plugin makes**, not just the chat: the connection test when you
-  save, the model catalog sync, and the usage probe on refresh. A proxy that covers the chat but not
-  the sync would look like a working integration whose model list quietly goes stale.
+  save, the model catalog sync, and the usage probe on refresh (sent to `api.anthropic.com` only). A
+  proxy that covers the chat but not the sync would look like a working integration whose model list
+  quietly goes stale.
 
 Credentials, `noProxy` exceptions and the rest come from the proxy object itself, so there is nothing
 to duplicate here. Change the proxy on the integration and the next call uses it — no restart, and no
@@ -546,7 +547,10 @@ What has been checked against the live OpenRouter endpoint:
   form, where picking one fails with *The AI model is no longer available*. The sync treats both
   spellings as one model, keeps the stored copy and removes the leftover. A copy an agent still points
   at cannot be removed: it stays disabled, is logged, and that agent needs its model picked again.
-- **No `anthropic-ratelimit-*` headers.** The usage fields on the integration stay empty.
+- **No `anthropic-ratelimit-*` headers**, so the plugin sends OpenRouter no usage probe: the probe
+  goes to `api.anthropic.com` only (see [Requirements & caveats](#requirements--caveats)). The usage
+  fields on the integration stay empty, and values left by an earlier probe, from when the
+  integration still pointed at `api.anthropic.com`, are emptied at the next refresh.
 - **Cost instead of tokens.** OpenRouter reports what each request cost. With **Append token usage
   to answers** on, a final answer ends with `*Cost: $0.0184 (2 requests)*` — or
   `*Kosten: $0.0184 (2 Anfragen)*` under a German answer, and likewise in Polish — rather than the token line,
@@ -641,10 +645,20 @@ releases (`.github/workflows/` at the repository root).
   `api.anthropic.com` reject the request.
 - Context window is reported as 200k unless the 1M beta is enabled (Sonnet 4.5+ only).
 - The plugin is unsigned. Depending on appliance policy you may need to allow unsigned plugins.
-- Usage metrics come from a tiny probe request (`max_tokens: 1`) issued during refresh, using the
-  newest enabled Haiku. If the API answers that the model is retired or unknown, as a catalog can
-  still list one, the probe tries the next model, up to three. Anthropic reports per-minute buckets for requests, input tokens and output
-  tokens; Morpheus models a single token bucket, so the **input token** bucket is surfaced.
+- Usage metrics come from a tiny probe request (`max_tokens: 1`, billed like any other request)
+  issued during refresh, **only when the host of the API Endpoint is `api.anthropic.com`** (any
+  letter case, port or path; an empty endpoint is `api.anthropic.com`). Through OpenRouter or any
+  other gateway no probe is sent: OpenRouter returns no rate limit headers, and the headers another
+  gateway passes on would describe the gateway's own Anthropic account, not this integration. There
+  the usage fields stay empty, and values an earlier probe left behind are emptied, because Morpheus
+  stores them without a time stamp and would keep showing them as current. The log says why at
+  DEBUG (*Anthropic usage probe skipped for integration N: ...*), or at INFO when it empties old
+  values. The probe uses the newest enabled Haiku. If the API answers that the model is retired or
+  unknown, as a catalog can still list one, the probe tries the next model, up to three. A probe
+  that fails for another reason (a wrong key, an overloaded API) changes nothing: the previous values
+  stay, and their reset time, within a minute of the probe that set them, shows how old they are.
+  Anthropic reports per-minute buckets for requests, input tokens and output tokens; Morpheus models
+  a single token bucket, so the **input token** bucket is surfaced.
 - API cost is billed by Anthropic per token, entirely outside Morpheus licensing. Set a spend limit
   in the Console if an agent might loop. [Web search](#web-search--answering-from-outside-the-appliance)
   adds a per-search charge on top of that.

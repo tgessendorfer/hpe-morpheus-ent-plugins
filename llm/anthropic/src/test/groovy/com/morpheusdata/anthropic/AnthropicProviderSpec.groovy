@@ -1464,6 +1464,65 @@ class AnthropicProviderSpec extends Specification {
 		probed == ['claude-broken']
 	}
 
+	private static AnthropicProvider providerProbing(List<String> probedUrls) {
+		AnthropicProvider withApi = new AnthropicProvider(null, null)
+		withApi.apiService = new AnthropicApiService() {
+			@Override
+			Map listModels(String baseUrl, String apiKey, String apiVersion, Map opts) {
+				return [success: false, msg: 'not under test']
+			}
+
+			@Override
+			Map fetchUsageHeaders(String baseUrl, String apiKey, String apiVersion, String model, Map opts) {
+				probedUrls << baseUrl
+				return [success: true, headers: ['anthropic-ratelimit-requests-limit': '50', 'anthropic-ratelimit-requests-remaining': '49']]
+			}
+		}
+		return withApi
+	}
+
+	def "a refresh sends the usage probe only when the endpoint is api.anthropic.com"() {
+		given:
+		List<String> probedUrls = []
+		AnthropicProvider withApi = providerProbing(probedUrls)
+		AccountIntegration ai = new AccountIntegration(serviceUrl: serviceUrl, servicePassword: 'sk-test')
+		LlmIntegration llm = new LlmIntegration(accountIntegration: ai)
+
+		when:
+		withApi.refresh(llm)
+
+		then:
+		probedUrls.size() == probes
+		llm.requestUsageLimit == (probes ? 50L : null)
+
+		where:
+		serviceUrl                                       || probes
+		null                                             || 1
+		'https://api.anthropic.com'                      || 1
+		'https://API.ANTHROPIC.COM:443/v1/messages'      || 1
+		'https://openrouter.ai/api'                      || 0
+		'https://llm-gateway.example.com/anthropic/v1'   || 0
+	}
+
+	def "a refresh through a gateway empties the usage an earlier probe left behind"() {
+		given: 'usage stored while the integration still pointed at api.anthropic.com'
+		List<String> probedUrls = []
+		AnthropicProvider withApi = providerProbing(probedUrls)
+		AccountIntegration ai = new AccountIntegration(serviceUrl: 'https://openrouter.ai/api', servicePassword: 'sk-or-v1-test')
+		LlmIntegration llm = new LlmIntegration(accountIntegration: ai,
+			tokenUsageLimit: 30000L, tokenUsageRemaining: 1000L, tokenUsageUsed: 29000L, tokenUsagePeriod: 'minute',
+			tokenUsageResetAt: '2026-09-01T08:00:00Z',
+			requestUsageLimit: 50L, requestUsageRemaining: 49L, requestUsageUsed: 1L, requestUsagePeriod: 'minute',
+			requestUsageResetAt: '2026-09-01T08:00:00Z')
+
+		when:
+		withApi.refresh(llm)
+
+		then:
+		probedUrls.isEmpty()
+		LlmUsageSync.USAGE_FIELDS.every { llm."${it}" == null }
+	}
+
 	def "a request whose question the chat memory dropped gets it back from the tool calls that worked on it"() {
 		given: 'the model answered the question with a tool call'
 		AnthropicProvider.QUESTION_BY_TOOL_CALL.clear()

@@ -497,6 +497,8 @@ class AnthropicProvider implements LlmProvider {
 				.execute(baseUrl, apiKey, apiVersion, clientOpts) { Map apiResponse ->
 					buildModelsFromApiResponse(llmIntegration, apiResponse)
 				}
+			// Probes api.anthropic.com only; through any other host it sends nothing and
+			// empties the usage fields instead.
 			new LlmUsageSync(llmIntegration, morpheusContext)
 				.execute(apiService, baseUrl, apiKey, apiVersion, resolveUsageProbeModels(llmIntegration), clientOpts)
 		} catch (Exception e) {
@@ -2495,10 +2497,10 @@ class AnthropicProvider implements LlmProvider {
 
 	/**
 	 * Models to try for the probe, in order: the newest enabled Haiku first, then
-	 * the older ones, then any other enabled model. A catalog can still list a model
-	 * the API has retired - OpenRouter listed anthropic/claude-3-haiku, and the probe
-	 * that took the first Haiku in the list got "404 ... end of its life" on every
-	 * refresh. The usage sync moves on to the next candidate when that happens.
+	 * the older ones, then any other enabled model. The model list can still hold a
+	 * model that api.anthropic.com has retired or does not know, and a probe with it
+	 * comes back "404 ... end of its life" or not_found on every refresh. The usage
+	 * sync moves on to the next candidate when that happens.
 	 */
 	protected List<String> resolveUsageProbeModels(LlmIntegration llmIntegration) {
 		List<LlmModel> enabled = (llmIntegration?.models ?: []).findAll { it?.enabled != false && it?.code } as List<LlmModel>
