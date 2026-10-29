@@ -207,15 +207,35 @@ No new setting.
   cleared* when values were emptied, and a probe against `api.anthropic.com` logs no skip line.
 - Local build: JDK 17, Gradle 9.8.0, `./gradlew clean test shadowJar --no-daemon`, 210 tests,
   0 failures.
+- On HPE Morpheus Enterprise 9.1.0-1 with a release candidate built from this source
+  (`1.6.6-rc.1`), uploaded in place of 1.6.5 (status `loaded`):
+  - **Refresh:** `POST /api/integrations/<id>/refresh` answered HTTP 200 and left the integration
+    `ok` both for an integration on `api.anthropic.com` and for one through OpenRouter whose key
+    sits in a stored credential (read back over the API); with 1.6.5, just before the upload,
+    the OpenRouter one answered 400 *An Anthropic API key is required*. **No usage probe
+    error**: no *Could not save the Anthropic usage values* warning, and no INFO skip line for
+    the OpenRouter integration, which had no usage values stored. Its model sync removed three
+    Claude models that OpenRouter no longer lists.
+  - **Chat with web search and three follow-up questions**, in one new conversation with an
+    agent on the `api.anthropic.com` integration: the first answer searched the web and carried
+    the plugin's **Sources** list (two links); for *open the first link* the model fetched the
+    first link of that replayed list; the two follow-ups without a search had no **Sources**
+    heading. **The model wrote no Sources heading of its own**: the page showed two, both the
+    plugin's. Input tokens per request (read from the prompt cache / written to it / uncached):
+    29,727 / 37,851 / 193 for the first question and 89,181 / 7,941 / 1,089 for *open the first
+    link*; the two follow-ups without a fetch read 29,727 from the prompt cache with 704 and 864
+    uncached input tokens. **The replayed history, source lists included, cost about 0.7 to 0.9k
+    uncached input tokens per such follow-up.**
 
 ### Not yet verified
 
-- On an appliance, all of it. In particular: a long tool loop on Morpheus 9.1 still gets its question
-  back with the scoped memory (this needs the system prompt to stay the same during the loop; the
-  log line above says when it does not); `POST /api/integrations/<id>/refresh` of an integration with
-  a stored credential answers `ok`; a model removed from the catalog disappears from the agent form,
-  and one an agent uses stays disabled; a retry after a real connection failure or 529; the streaming
-  path, which Morpheus has not called in any test so far; the pool shutdown, which only matters when
+- On an appliance: the release jar loads in place of 1.6.5 and its integrations stay `ok` (the
+  release candidate above was a separate build).
+- On an appliance: a long tool loop on Morpheus 9.1 still gets its question back with the scoped
+  memory (this needs the system prompt to stay the same during the loop; the log line above says
+  when it does not); a model removed from the catalog disappears from the agent form, and one an
+  agent uses stays disabled; a retry after a real connection failure or 529; the streaming path,
+  which Morpheus has not called in any test so far; the pool shutdown, which only matters when
   Morpheus passes a client scope key.
 - Two users chatting with the same agent at the same time, each with a tool loop: each gets only
   their own question back, and with Anthropic's own tool call ids neither *Not restoring a dropped
@@ -223,19 +243,16 @@ No new setting.
   as well.
 - The *Cost* footer through OpenRouter for a question with a tool loop: it still sums every request
   of the question now that its total is kept per integration and system prompt.
-- The usage probe on an appliance: a refresh of an integration on `api.anthropic.com` still fills
-  the usage fields, now with a blocking save, and where Morpheus shows them; a refresh that also
-  removed or disabled a model leaves the model list and every agent's model as the model sync left
-  them (the integration that is saved afterwards is the one Morpheus handed to the refresh, with the
-  model list from before that sync), and the log shows no *Could not save the Anthropic usage
-  values*; a refresh through OpenRouter sends no `max_tokens: 1` request (none in OpenRouter's
-  activity list) and leaves the usage fields empty, with the DEBUG or INFO line in the log; an
-  integration switched from `api.anthropic.com` to OpenRouter loses its old values at the next
-  refresh, read back in the UI or over the API and not only from the log line (the plugin empties
-  the values Morpheus hands it with the integration; if those arrive empty, the stored ones stay).
-- The **Sources** list under answers is unchanged in this release. In a chat with web search and
-  three follow-up questions: whether the model starts writing its own **Sources** heading, and the
-  input tokens of each request (the replayed answers carry their source lists).
+- The usage probe on an appliance: **where Morpheus shows the usage fields** (they are not in
+  `GET /api/integrations`), and so whether a refresh of an integration on `api.anthropic.com`
+  fills them with the blocking save; a refresh that also removed or disabled a model leaves the
+  model list and every agent's model as the model sync left them (the integration that is saved
+  afterwards is the one Morpheus handed to the refresh, with the model list from before that
+  sync); a refresh through OpenRouter sends no `max_tokens: 1` request (none in OpenRouter's
+  activity list) and leaves the usage fields empty; an integration switched from
+  `api.anthropic.com` to OpenRouter loses its old values at the next refresh, read back in the UI
+  or over the API and not only from the log line (the plugin empties the values Morpheus hands
+  it with the integration; if those arrive empty, the stored ones stay).
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/anthropic-v1.6.5...anthropic-v1.6.6
 
