@@ -189,10 +189,16 @@ Since lab build 0.1.33 the plugin goes through the guest instead of pulling the 
   `timeout=120`): through the QEMU guest agent when the VM has it enabled, by ACPI otherwise. A
   guest that is not down after 120 seconds is forced off by Proxmox. The plugin waits for that
   task, so Stop can take about two minutes for a guest that ignores the shutdown.
-- **Restart** is a real reboot (`status/reboot` with `timeout=120`), waited for. When the reboot
-  task fails or the guest does not go down in time, the plugin resets the VM instead (a hard
-  restart) and logs it. A reboot that Proxmox refuses outright, for example for a locked VM, is
-  not followed by a reset: Restart fails with Proxmox's message. A stopped VM is started.
+- **Restart** in Morpheus is graceful too, but it is not a Proxmox reboot. On HPE Morpheus
+  Enterprise 9.1.0-1, Restart of an instance or a server calls the plugin's Stop and then its
+  Start: the guest is shut down as above and started again, and Proxmox runs `qmshutdown` and
+  `qmstart`, no reboot task (measured with lab build 0.1.33).
+- **The plugin's restart** (`restartWorkload`), for callers that use the provider's restart, is a
+  real reboot (`status/reboot` with `timeout=120`), waited for. When the reboot task fails or the
+  guest does not go down in time, the plugin resets the VM instead (a hard restart) and logs it.
+  A reboot that Proxmox refuses outright, for example for a locked VM, is not followed by a
+  reset: the restart fails with Proxmox's message. A stopped VM is started. Morpheus 9.1.0-1 does
+  not call it from its Restart action.
 - **Delete** shuts a running VM down the same way, falls back to a hard stop when that fails,
   waits for it, and then destroys the VM.
 
