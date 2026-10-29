@@ -32,13 +32,24 @@ unchanged.
   released in a `finally` block without a `catch`, so a failing release replaced the page data or
   the error message with an exception. A failed release is now logged as a warning and the page
   result stands.
+- **README: why Tenant Chargeback can show other amounts.** A new section,
+  [Comparing with Tenant Chargeback](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/finops/msp-tenant-overview#comparing-with-tenant-chargeback),
+  lists every known reason the two pages differ: **cents** (this page rounds once per tenant,
+  currency and month, Tenant Chargeback each of its tenant, group and currency rows), **which
+  tenants count** (this page lists active sub-tenants only; Tenant Chargeback also lists inactive
+  tenants with invoices and, when ticked, the master tenant), revenue against list price and
+  invoice amount, a live page against a stored report result, the current month as a projection
+  that moves with every costing run, tenants without any amount, and counts that measure different
+  things. **Rounding is unchanged** (owner decision): aligning it would change one of the two pages
+  by cents. Documentation only; no amount changes.
 
 ### Behaviour changes from 1.2.2
 
-- A tenant without invoices falls back to the master account's currency (USD when the master
-  account has none). Whenever no other tenant has an amount in that currency, its zero total
-  (*Total USD 0.00*, for example) and its cards are gone; the tenant's own zero row stays. That
-  also happens with a master currency set, for example USD or CHF over tenants invoiced in EUR.
+- A tenant without any amount (no invoices, or only zero amounts) falls back to the master
+  account's currency (USD when the master account has none). Whenever no other tenant has an
+  amount in that currency, its zero total (*Total USD 0.00*, for example) and its cards are gone;
+  the tenant's own zero row stays. That also happens with a master currency set, for example USD
+  or CHF over tenants invoiced in EUR.
 
 ### Verified
 
@@ -50,10 +61,14 @@ unchanged.
 ### Not yet verified
 
 - Not run on an appliance. Open checks: the page shows the same tenants, amounts and totals as
-  1.2.2, except that a tenant without invoices no longer adds a zero total and cards in a
-  currency no other tenant uses (see above); English and German texts still resolve after the
-  upload; a failed release
+  1.2.2, except that a tenant without any amount (no invoices, or only zero amounts) no longer
+  adds a zero total and cards in a currency no other tenant uses (see above); English and German
+  texts still resolve after the upload; a failed release
   appears as one warning in the appliance log (not provoked yet).
+- The README comparison was checked against the code of both plugins, not against the lab. Open
+  check: this page next to a new Tenant Chargeback report for the same month (markup 0, master
+  tenant not included): the same amounts per active sub-tenant, apart from the reasons the README
+  lists.
 
 **Full Changelog**: https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/compare/msp-tenant-overview-v1.2.2...msp-tenant-overview-v1.2.3
 

@@ -44,9 +44,12 @@ One row per active sub-tenant (`account.master_account = 0`, `active = 1`), orde
 - **Currencies are never added up.** A tenant with invoices in two currencies gets one line per
   currency; the totals in the table footer and the tiles above it are per currency, too.
 - **Currency of an invoice:** its own currency; if it has none, the master account's currency; if
-  that is empty too, `USD`. A tenant without invoices is listed with zeros in that fallback currency.
+  that is empty too, `USD`. A tenant without any amount (no invoices, or only zero amounts) is
+  listed with zeros in that fallback currency.
 - **Rounding:** each tenant's amount per currency and month is summed, then rounded to cents
-  (half up). Margins and totals are computed from these rounded amounts.
+  (half up). Margins and totals are computed from these rounded amounts. Tenant Chargeback rounds
+  per group instead, so its amounts can differ by cents (see
+  [Comparing with Tenant Chargeback](#comparing-with-tenant-chargeback)).
 - **Numbers and language** follow the viewer's own language setting in Morpheus (user settings,
   stored as `user.locale`, e.g. `en-US`), the same setting the Morpheus UI uses: `1,234.56` in
   English, `1.234,56` in German. If that setting is empty or unreadable, the page falls back to the
@@ -74,6 +77,45 @@ and invoices in Morpheus.
    `msp-tenant-overview-v<version>`) and check it against `SHA256SUMS`.
 2. *Administration > Integrations > Plugins > Add*, upload the jar.
 3. Open *Operations > Analytics* in the master tenant and pick **MSP Tenant Overview**.
+
+## Comparing with Tenant Chargeback
+
+[Tenant Chargeback](https://github.com/tgessendorfer/hpe-morpheus-ent-plugins/tree/main/finops/tenant-chargeback)
+reads the same invoices (monthly invoices of instances and of servers that belong to no
+instance), the same columns (`total_price`, `total_cost`) and resolves currencies by the same
+rule. Its report can still show other amounts than this page, for these reasons:
+
+- **Cents.** This page adds up all of a tenant's invoices per currency and month and rounds once.
+  Tenant Chargeback rounds each row of its group table (tenant, group and currency) to cents and
+  adds up the rounded rows, so its rows add up to its totals. A tenant's amount can therefore
+  differ by up to half a cent per group row, and a currency total by the sum of those: three
+  groups of 0.004 EUR each are 0.01 EUR here (0.012 rounds to 0.01) and 0.00 EUR there (each row
+  rounds to 0.00). Margins and margin % come from the rounded amounts and move with them. Both
+  rules stay as they are; aligning them would change the amounts of one of the two pages by
+  cents.
+- **Which tenants count.** This page lists the active sub-tenants only
+  (`account.master_account = 0` and `active = 1`), with or without invoices. Tenant Chargeback
+  lists every tenant that has invoices in the month, inactive tenants included, and the master
+  tenant when its option *Include Master Tenant Resources* is ticked. Their amounts are in its
+  totals but not in this page's, and the two *Tenants* cards count different tenants.
+- **Revenue is the list price.** Compare *Revenue* with Tenant Chargeback's *List Price*. Its
+  *Invoice Amount* adds an optional additional markup and equals the list price only at 0 %.
+- **Live page, stored result.** This page reads the invoices at every page view; a Tenant
+  Chargeback report result keeps the amounts of the moment it ran. Every Morpheus costing run
+  updates the invoices, so compare a freshly loaded page with a new report run.
+- **Current month.** Both show the current month as Morpheus' projection to the end of the month
+  (`total_price`), not the month to date, and the projection moves with every costing run. This
+  page shows the month of the page view and the month before it; a Tenant Chargeback report with
+  an empty month covers the month it ran in (both in the appliance JVM time zone). Other months
+  are in Tenant Chargeback only.
+- **Tenants without any amount, zero rows.** This page lists a tenant without any amount (no
+  invoices, or only zero amounts) with one zero row in the master account's currency, else USD,
+  and leaves out a tenant's currency whose amounts in both months are zero. Tenant Chargeback
+  lists a tenant only with its invoices, in their own currency, and hides a currency only when its
+  totals are zero. Only zero rows differ.
+- **Counts measure different things.** *Instances* and *Servers* here count the tenant's instances
+  and servers, priced or not, and *Groups* every group of the tenant; Tenant Chargeback's
+  *Resources* counts invoices.
 
 ## Known limits
 
