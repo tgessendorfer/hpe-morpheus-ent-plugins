@@ -33,9 +33,9 @@ import java.sql.Connection
  *
  * Reads the monthly invoices of the instance (internal table account_invoice, ref_type
  * Instance) over the plugin API's read-only database connection: the current month
- * (to date and forecast to month end), the three months before it, and the split into
- * compute, storage and licenses. Sums are kept per currency; different currencies are
- * never added up.
+ * (to date and forecast to month end), the three months before it, and the split of the
+ * month to date into compute, storage, licenses and other (the rest). Sums are kept per
+ * currency; different currencies are never added up.
  *
  * The tab only reads the invoices of the instance it is shown on. show() returns true,
  * so visibility relies on Morpheus' own access check for the instance detail page.

@@ -161,6 +161,85 @@ class ShowbackCalculatorSpec extends Specification {
 		ShowbackCalculator.buildModel([[period: '202610', price: 1G]], ['202610'], null, Locale.ENGLISH, cal(2026, 10, 1)).currencies == 'USD'
 	}
 
+	@Unroll
+	def "other = month to date #running minus compute #compute, storage #storage, licenses #license = #other (#why)"() {
+		when:
+		BigDecimal o = ShowbackCalculator.otherPart(running, compute, storage, license)
+
+		then:
+		o == other
+		o.scale() == 2
+		ShowbackCalculator.money(o, Locale.ENGLISH) == other.toString()
+
+		where:
+		running   | compute   | storage  | license  || other   | why
+		617.2G    | 500G      | 100G     | 17.2G    || 0.00G   | 'the parts add up'
+		1258.59G  | 900G      | 74.84G   | 0G       || 283.75G | 'part of month to date is split'
+		38.43G    | 0G        | 0G       | 0G       || 38.43G  | 'a flat price is not split at all'
+		50G       | 40G       | 20G      | 0G       || 0.00G   | 'the parts exceed month to date: never below 0'
+		10.004G   | 5.001G    | 5.001G   | 0G       || 0.00G   | 'a sub-cent rest'
+		10.005G   | 10.001G   | 0G       | 0G       || 0.00G   | 'an exact rest of 0.004 is none, although 10.01 - 10.00 = 0.01'
+		30.014G   | 10.0047G  | 10.0047G | 10.0046G || 0.00G   | 'the parts add up exactly, the figures rounded to cents do not'
+		10.005G   | 10G       | 0G       | 0G       || 0.01G   | 'an exact rest of half a cent'
+		20.004G   | 9.995G    | 4.995G   | 0G       || 5.00G   | 'a real rest is taken as shown: 20.00 = 10.00 + 5.00 + 5.00'
+		10.004G   | 3.335G    | 3.335G   | 3.325G   || 0.00G   | 'a real rest that the figures rounded to cents turn negative'
+		null      | null      | null     | null     || 0.00G   | 'no amounts'
+		-5G       | 0G        | 0G       | 0G       || 0.00G   | 'a negative month to date'
+		'12.5'    | null      | 'n/a'    | 2G       || 10.50G  | 'missing and non-numeric parts count as 0'
+	}
+
+	def "a flat price that is not split shows month to date as other, the three parts as 0.00"() {
+		given:
+		List<Map> rows = [[period: '202610', currency: 'EUR', price: 92.10G, running: 38.43G, compute: 0G, storage: 0G, license: 0G, plan: 'Small']]
+
+		when:
+		Map m = ShowbackCalculator.buildModel(rows, ['202610'], null, Locale.ENGLISH, cal(2026, 10, 13))
+
+		then:
+		m.current.size() == 1
+		m.current[0].runningText == '38.43'
+		m.current[0].computeText == '0.00'
+		m.current[0].storageText == '0.00'
+		m.current[0].licenseText == '0.00'
+		m.current[0].otherText == '38.43'
+	}
+
+	def "when the parts exceed month to date, other is 0.00 and the parts are shown as they are"() {
+		given:
+		List<Map> rows = [[period: '202610', currency: 'EUR', price: 100G, running: 50G, compute: 40G, storage: 20G, license: 0.5G]]
+
+		when:
+		Map m = ShowbackCalculator.buildModel(rows, ['202610'], null, Locale.GERMAN, cal(2026, 10, 15))
+
+		then:
+		m.current[0].runningText == '50,00'
+		m.current[0].computeText == '40,00'
+		m.current[0].storageText == '20,00'
+		m.current[0].licenseText == '0,50'
+		m.current[0].otherText == '0,00'
+	}
+
+	def "other is taken from the sums of one month and currency, never across currencies"() {
+		given:
+		// Two EUR rows (one without currency, resolved to the master currency EUR): on its own the
+		// first would clamp to 0 and the second give 5, but the tab shows their sums, 20 - 17 = 3.
+		List<Map> rows = [
+			[period: '202610', currency: 'EUR', price: 30G, running: 10G, compute: 12G, storage: 0G, license: 0G],
+			[period: '202610', currency: null, price: 30G, running: 10G, compute: 5G, storage: 0G, license: 0G],
+			[period: '202610', currency: 'USD', price: 9G, running: 7G, compute: 2G, storage: 0G, license: 0G]
+		]
+
+		when:
+		Map m = ShowbackCalculator.buildModel(rows, ['202610'], 'EUR', Locale.ENGLISH, cal(2026, 10, 15))
+
+		then:
+		m.current*.currency == ['EUR', 'USD']
+		m.current[0].runningText == '20.00'
+		m.current[0].computeText == '17.00'
+		m.current[0].otherText == '3.00'
+		m.current[1].otherText == '5.00'
+	}
+
 	/** Runs the closure with a non-UTC JVM default time zone and restores the old one. */
 	static <T> T inTimeZone(String zone, Closure<T> body) {
 		TimeZone saved = TimeZone.getDefault()

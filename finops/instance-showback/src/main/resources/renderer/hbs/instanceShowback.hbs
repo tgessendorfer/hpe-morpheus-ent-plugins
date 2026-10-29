@@ -12,9 +12,9 @@
   {{/each}}
   <h3>{{t.splitHeading}}</h3>
   <table class="table table-condensed">
-    <thead><tr><th>{{t.currency}}</th><th>{{t.compute}}</th><th>{{t.storage}}</th><th>{{t.licenses}}</th></tr></thead>
+    <thead><tr><th>{{t.currency}}</th><th>{{t.compute}}</th><th>{{t.storage}}</th><th>{{t.licenses}}</th><th>{{t.other}}</th></tr></thead>
     <tbody>
-    {{#each current}}<tr><td>{{currency}}</td><td>{{computeText}}</td><td>{{storageText}}</td><td>{{licenseText}}</td></tr>{{/each}}
+    {{#each current}}<tr><td>{{currency}}</td><td>{{computeText}}</td><td>{{storageText}}</td><td>{{licenseText}}</td><td>{{otherText}}</td></tr>{{/each}}
     </tbody>
   </table>
   {{else}}

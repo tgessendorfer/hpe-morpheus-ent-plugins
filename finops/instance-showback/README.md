@@ -2,8 +2,8 @@
 
 An instance tab plugin for HPE Morpheus Enterprise 9.0 that adds a **Costs** tab to every
 instance detail page. Whoever can open the instance sees what it has cost this month so far,
-the forecast to month end, the split into compute, storage and licenses, and the three months
-before, all taken from the invoices Morpheus already calculates.
+the forecast to month end, the split into compute, storage, licenses and other, and the three
+months before, all taken from the invoices Morpheus already calculates.
 
 > **Independent community project.** Not an official HPE product, and neither endorsed by nor
 > affiliated with Hewlett Packard Enterprise. See [NOTICE](NOTICE).
@@ -13,14 +13,47 @@ before, all taken from the invoices Morpheus already calculates.
 - **Month to date** (`running_price`) per currency, with the day of the month (for example *day 15/31*).
 - **Forecast for month end** (`total_price`), the projection Morpheus stores on the invoice.
 - **Plan** of the instance from the current invoice.
-- **Split, month to date:** compute (CPU + memory), storage and licenses. Actual prices are used
-  where Morpheus has them, otherwise the plan prices.
+- **Split, month to date:** compute (CPU + memory), storage, licenses and *Other*, the rest of
+  month to date (since 1.2.1). See [Split of the month to date](#split-of-the-month-to-date).
 - **History:** the current month and the three months before, one row per month and currency,
   with a bar scaled to the highest month **of the same currency**.
 - **Footer:** time of the last cost run, converted to UTC whatever the JVM time zone, and a note
   when the instance has costs in more than one currency.
 
 Prices are the invoice prices, so they include any tenant markup from the price set.
+
+### Split of the month to date
+
+Per currency, the split divides the month-to-date figure shown above it into four parts:
+
+| Part | Taken from the invoice |
+|---|---|
+| Compute (CPU + RAM) | `actual_compute_price` + `actual_memory_price`, else `compute_price` + `memory_price` |
+| Storage | `actual_storage_price`, else `storage_price` |
+| Licenses | `actual_license_price`, else `license_price` |
+| Other (since 1.2.1) | month to date (`running_price`) minus the three parts above |
+
+The first three use the actual prices where Morpheus has them, otherwise the plan prices.
+
+**Other** is month to date minus compute, storage and licenses, so the split accounts for all of
+month to date unless the three parts already exceed it. It holds what the invoice does not put
+into those three parts, for example a price of type *Everything* (one price for all resources).
+On the Morpheus 9.1.0 invoices checked, such a price was not split: the actual compute, memory,
+storage and license prices were 0, so an instance priced that way showed compute, storage and
+licenses at 0.00 and its whole month to date under Other.
+
+- **Parts that add up give 0.00.** When the exact rest is under half a cent, Other is 0.00, even
+  if the four figures rounded to cents would leave a cent.
+- **A real rest adds up as shown.** Otherwise Other is taken from the four figures rounded to
+  cents, as the tab shows them, so the four parts add up to the month-to-date figure shown.
+- **Never below 0.** When the three parts add up to month to date or more, for example when a plan
+  price stands in for a missing actual price, Other is 0.00 and the three parts are shown as they
+  are, not scaled down. The row then adds up to more than month to date.
+- **A remainder only.** Other reads no price column of its own, so it says how much of month to
+  date is not compute, storage or licenses, not what it consists of.
+
+Up to 1.2.0 the split had three parts only, which did not add up to month to date when part of it
+was not split.
 
 ### Currencies
 
@@ -130,11 +163,12 @@ SHA-256 checksum). Run it in `finops/instance-showback`.
 ```
 
 The unit tests cover the currency rule, grouping per month and currency, rounding, locale-aware
-number formatting, bar scaling, the month list across year boundaries, the UTC footer time under a
-non-UTC JVM time zone, the choice of the content language (Morpheus setting before browser
-language before English, with the parameterised lookup and its quiet fallback), the rendered
-template in that language, the plugin identity
-(code, repository URL, provider) and the completeness of the message bundles.
+number formatting, the *Other* part of the split (rest of month to date, 0.00 for an exact rest
+under half a cent, a real rest as shown, never below 0, from the sums of one month and currency),
+bar scaling, the month list across year boundaries, the UTC footer time under a non-UTC JVM time
+zone, the choice of the content language (Morpheus setting before browser language before English,
+with the parameterised lookup and its quiet fallback), the rendered template in that language, the
+plugin identity (code, repository URL, provider) and the completeness of the message bundles.
 
 ## License
 

@@ -161,6 +161,26 @@ class ShowbackCalculator {
 		merged.values().sort { Map a, Map b -> (b.period <=> a.period) ?: (a.currency <=> b.currency) }
 	}
 
+	/**
+	 * The fourth part of the month-to-date split: month to date minus compute (CPU + memory),
+	 * storage and licenses. It holds what the invoice does not put into the three parts, for
+	 * example a price of type Everything (one price for all resources).
+	 *
+	 * The exact rest decides whether there is one: under half a cent the parts already add up,
+	 * and other is 0.00 even when the four figures rounded to cents would leave a stray cent.
+	 * A real rest is taken from the four figures rounded to cents, as the tab shows them, so the
+	 * shown parts add up to the shown month to date.
+	 *
+	 * Never below 0: when the three parts add up to month to date or more, other is 0.00 and the
+	 * parts stay as they are; nothing is scaled.
+	 */
+	static BigDecimal otherPart(def running, def compute, def storage, def license) {
+		BigDecimal exact = num(running) - num(compute) - num(storage) - num(license)
+		if (exact < 0.005G) return 0.00G
+		BigDecimal shown = round2(running) - round2(compute) - round2(storage) - round2(license)
+		shown > 0G ? shown : 0.00G
+	}
+
 	/** The highest monthly price per currency, the scale of the history bars. */
 	static Map<String, BigDecimal> maxByCurrency(List<Map> grouped) {
 		Map<String, BigDecimal> max = [:]
@@ -202,7 +222,8 @@ class ShowbackCalculator {
 			 forecastText: money(r.price, locale),
 			 computeText : money(r.compute, locale),
 			 storageText : money(r.storage, locale),
-			 licenseText : money(r.license, locale)]
+			 licenseText : money(r.license, locale),
+			 otherText   : money(otherPart(r.running, r.compute, r.storage, r.license), locale)]
 		}
 		Map<String, BigDecimal> maxBy = maxByCurrency(grouped)
 		List<Map> history = periods.collect { String p ->

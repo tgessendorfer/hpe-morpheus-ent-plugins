@@ -8,13 +8,31 @@ shaded `-all.jar` is attached.
 
 ## 1.2.1
 
-**Fix release: a failed release of the database connection no longer breaks the Costs tab, the
-texts come only from the plugin's own bundles, and the viewer's language is handed over only to
-the render of the same instance.** Patch release; plugin code, provider code, plugin API 1.4.2,
-minimum appliance 9.0.2, the query and the figures are unchanged.
+**The month-to-date split gets a fourth part, *Other*, the rest of month to date, so the split
+accounts for all of the figure above it unless the three parts already exceed it. Also fixed: a
+failed release of the database connection no longer breaks the Costs tab, the texts come only from
+the plugin's own bundles, and the viewer's language is handed over only to the render of the same
+instance.** Plugin code, provider code, plugin API 1.4.2, minimum appliance 9.0.2 and the query
+are unchanged; no new database column is read.
 
 ### What changed
 
+- **New part *Other* in *Split, month to date* (behaviour change).** The split showed compute
+  (CPU + memory), storage and licenses only, so whatever month to date held beyond those three was
+  shown nowhere and the split did not add up. On the Morpheus 9.1.0 invoices checked, a price of
+  type *Everything* (one price for all resources) was not split: an instance priced that way had a
+  month to date of 38.43 with compute, storage and licenses all 0.00, and another instance had
+  974.84 of its 1258.59 split. *Other* is month to date minus the three parts (38.43 and 283.75 in
+  those two cases). When the exact rest is under half a cent, the parts already add up and *Other*
+  is 0.00, even if the four figures rounded to cents would leave a cent; a real rest is taken from
+  the four figures as the tab shows them, rounded to cents, so the four parts add up to the month
+  to date shown. **It is never below 0:** when the three parts add up to month to date or more,
+  for example when a plan price stands in for a missing actual price, *Other* is 0.00 and the three
+  parts are shown unchanged, not scaled down, so the row adds up to more than month to date. It is
+  computed per month and currency from the sums the tab already reads; no further price column is
+  read, so *Other* says how much of month to date is not split, not what it consists of. Label
+  *Other* in English, *Sonstiges* in German. The README describes the split in a new section,
+  *Split of the month to date*.
 - **A failed connection release no longer replaces the tab.** Handing the read-only report
   connection back ran unguarded after the query, so an error there replaced the rendered tab, or
   its own *Cost data could not be loaded* message, with an exception on the instance page. It is
@@ -40,28 +58,47 @@ minimum appliance 9.0.2, the query and the figures are unchanged.
 
 ### Behaviour changes from 1.2.0
 
-- None in the normal flow (`show()` and then `renderTemplate()` of the same instance in one
-  request). A render without `show()` in the same request uses the user of the last `show()` for
-  the same instance left on that thread, if there is one, otherwise the browser language; 1.2.0
-  took the user of the last `show()` on that thread whatever its instance.
+- **The split has a fourth column, *Other* (*Sonstiges* in German), after *Licenses*.** On an
+  instance whose price Morpheus does not split, the split now shows its month to date there instead
+  of three zeros only. Compute, storage, licenses and every other figure of the tab are unchanged.
+- The viewer's language: no change in the normal flow (`show()` and then `renderTemplate()` of the
+  same instance in one request). A render without `show()` in the same request uses the user of
+  the last `show()` for the same instance left on that thread, if there is one, otherwise the
+  browser language; 1.2.0 took the user of the last `show()` on that thread whatever its instance.
 - The *Costs* tab no longer turns into an error page when the connection release fails; that
   failure is logged at warning level.
 
 ### Verified
 
-- Unit tests only (Spock): 84 tests, 0 failures (79 in 1.2.0). New: a failing connection release
-  after a successful query (the tab renders) and after a failed query (the load error message
-  stays); bundle selection with two class path entries of which only the second carries the
-  provider prefix, and no bundle at all; an empty read that is not cached and a later read that
-  is; the user hand-over only for the same instance, with no user query for the render of another
-  instance. Each of these tests fails against the 1.2.0 code paths.
+- Unit tests only (Spock): 102 tests, 0 failures (79 in 1.2.0). New: the *Other* part, with parts
+  that add up (0.00), parts that add up exactly while the figures rounded to cents leave a cent
+  (0.00), a partly split month to date, a real rest taken as shown, a flat price with nothing split
+  (all of month to date under *Other*), parts that exceed month to date (0.00, never negative, the
+  parts unscaled), a real rest that the figures rounded to cents turn negative (0.00), sub-cent
+  rests, missing and non-numeric amounts, two rows of one month and currency (*Other* from their
+  sums) next to another currency, and the rendered fourth column in English and German; a failing
+  connection release after a successful query (the tab renders) and after a failed query (the load
+  error message stays); bundle selection with two class path entries of which only the second
+  carries the provider prefix, and no bundle at all; an empty read that is not cached and a later
+  read that is; the user hand-over only for the same instance, with no user query for the render of
+  another instance. Each of these tests fails against the 1.2.0 code paths.
 - Local build with JDK 17 and Gradle 9.8.0, one jar
   `morpheus-instance-showback-plugin-1.2.1-all.jar`.
 
 ### Not yet verified
 
 - On an appliance: the release jar loads in place of 1.2.0, and the *Costs* tab shows the same
-  figures as 1.2.0.
+  figures as 1.2.0 plus the new *Other* column.
+- On an appliance: *Other* on an instance with a single *Everything* price (expected: the whole
+  month to date under *Other*, the three parts 0.00), on an instance with a split price (expected:
+  month to date minus the three parts), and the label *Sonstiges* for a user with a German language
+  setting.
+- Whether network, extra or software prices, when a price set has them, are part of month to date
+  and so of *Other*: no invoice at hand had any.
+- Whether the actual prices of a flat-price invoice are 0 or NULL in general. On the 9.1.0
+  invoices checked (one appliance, one month) the actual prices of instance invoices were never
+  NULL. Where they are NULL, the split falls back to the plan prices, so compute, storage and
+  licenses can show amounts the flat price does not split, and *Other* shrinks or is 0.00.
 - On Morpheus 9.1.0: that `show()` and `renderTemplate()` still run on one thread for the same
   instance, so a user whose Morpheus setting is `en-US` sees the tab in English with a German
   browser. The call order was read from the 9.0.2 bytecode only; if it differs, the tab uses the

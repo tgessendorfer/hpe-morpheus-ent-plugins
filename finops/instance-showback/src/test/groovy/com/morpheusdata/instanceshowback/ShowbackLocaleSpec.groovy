@@ -95,7 +95,7 @@ class ShowbackLocaleSpec extends Specification {
 		Map<String, String> de = ShowbackLocale.messages(Locale.GERMAN)
 
 		expect:
-		en.size() == 22
+		en.size() == 23
 		en.keySet() == de.keySet()
 		en.keySet().every { !it.contains('.') }
 		ShowbackLocale.text('noSuchKey', 'default text', Locale.GERMAN) == 'default text'
@@ -278,6 +278,30 @@ class ShowbackLocaleSpec extends Specification {
 		'de'    | BROWSER_EN || 'Bisher in diesem Monat (Tag 15/31)' | '1.234,57' | 'Month to date'
 		null    | BROWSER_DE || 'Bisher in diesem Monat (Tag 15/31)' | '1.234,57' | 'Month to date'
 		null    | null       || 'Month to date (day 15/31)'       | '1,234.57' | 'Bisher'
+	}
+
+	@Unroll
+	def "the split has a fourth column for the rest of month to date: #setting"() {
+		given:
+		Locale l = ShowbackLocale.resolve(setting, null)
+		// A flat price: month to date 38.43, nothing of it in compute, storage or licenses.
+		List<Map> rows = [[period: '202610', currency: 'EUR', price: 92.1G, running: 38.43G, compute: 0G, storage: 0G, license: 0G, plan: 'Small']]
+		Map model = ShowbackCalculator.buildModel(rows, ['202610'], null, l, cal(2026, 10, 13))
+		model.instanceName = 'web-01'
+		ViewModel<Map> view = new ViewModel<>()
+		view.object = model
+
+		when:
+		String html = new HandlebarsRenderer('renderer', ShowbackLocaleSpec.classLoader).renderTemplate('hbs/instanceShowback', view).html
+
+		then:
+		html.contains(header)
+		html.contains(row)
+
+		where:
+		setting || header                                                                                     | row
+		'en-US' || '<th>Compute (CPU + RAM)</th><th>Storage</th><th>Licenses</th><th>Other</th>'             | '<td>EUR</td><td>0.00</td><td>0.00</td><td>0.00</td><td>38.43</td>'
+		'de'    || '<th>Compute (CPU + RAM)</th><th>Speicher</th><th>Lizenzen</th><th>Sonstiges</th>'         | '<td>EUR</td><td>0,00</td><td>0,00</td><td>0,00</td><td>38,43</td>'
 	}
 
 	/**
