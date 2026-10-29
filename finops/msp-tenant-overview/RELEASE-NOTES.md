@@ -91,22 +91,28 @@ name, and a failed connection release no longer breaks the page.** Built against
   without deactivated tenants, one row per currency with the label on the first, rendered after the
   totals); the singular in English and German; no line for tenants without an amount; a failing
   query (page unchanged, no line); the line with no active sub-tenant left.
+- **On HPE Morpheus Enterprise 9.1.0-1**, as a master tenant user, with a release candidate built
+  from this source (`1.3.0-rc.1`), uploaded in place of 1.2.2 (status `loaded`): the page rendered
+  its sub-tenants with the same revenue total as the FinOps Insights KPI strip, English texts
+  resolved, and **no *Not shown* line appeared, as no sub-tenant was deactivated**; no warning in
+  the appliance log.
 
 ### Not yet verified
 
-- Not run on an appliance. Open checks: the page shows the same tenants, amounts and totals as
-  1.2.2, except that a tenant without any amount (no invoices, or only zero amounts) no longer
-  adds a zero total and cards in a currency no other tenant uses (see above); English and German
-  texts still resolve after the upload; a failed release
-  appears as one warning in the appliance log (not provoked yet).
+- On an appliance: the release jar loads in place of 1.2.2 (the release candidate above was a
+  separate build).
+- On an appliance: the page next to 1.2.2, the same tenants, amounts and totals, except that a
+  tenant without any amount (no invoices, or only zero amounts) no longer adds a zero total and
+  cards in a currency no other tenant uses (see above); German texts after the upload; a failed
+  release appears as one warning in the appliance log (not provoked yet).
 - The README comparison was checked against the code of both plugins, not against the lab. Open
   check: this page next to a new Tenant Chargeback report for the same month (markup 0, master
   tenant not included): the same amounts per active sub-tenant, apart from the reasons the README
   lists.
-- The line for deactivated sub-tenants was not seen on an appliance: it needs a deactivated
-  sub-tenant with invoices. Open checks: both queries on 9.0.2 and 9.1.0, the amounts against that
-  tenant's invoices, the line in light and dark mode, and no line (and an unchanged page) without
-  deactivated sub-tenants.
+- **The line for deactivated sub-tenants was not seen on an appliance**: it needs a deactivated
+  sub-tenant with invoices. Open checks: the invoice query for such tenants on 9.0.2 and 9.1.0
+  and the check query on 9.0.2, the amounts against that tenant's invoices, and the line in light
+  and dark mode.
 - The *Docker hosts and Kubernetes nodes* note was checked against the code only, not on an
   appliance with container hosts.
 
